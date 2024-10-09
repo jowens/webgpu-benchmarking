@@ -1,8 +1,5 @@
 import * as Plot from "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm";
 
-
-
-
 const adapter = await navigator.gpu?.requestAdapter();
 const canTimestamp = adapter.features.has("timestamp-query");
 const device = await adapter?.requestDevice({
@@ -17,10 +14,11 @@ const range = (min, max) =>
   [...Array(max - min + 1).keys()].map((i) => i + min);
 
 // change to JSON parsing eventually
-const test = {
+const membwTest = {
   name: "membw",
   workgroupSizes: range(0, 7).map((i) => 2 ** i),
   memsrcSizes: range(10, 25).map((i) => 2 ** i),
+  trials: 10,
   kernel: (workgroupSize) => /* wgsl */ `
     /* output */
     @group(0) @binding(0) var<storage, read_write> memDest: array<u32>;
@@ -36,6 +34,8 @@ const test = {
     }
 `,
 };
+
+const test = membwTest;
 
 const data = [];
 
@@ -115,7 +115,9 @@ for (const workgroupSize of test.workgroupSizes) {
     memcpyPass.setPipeline(memcpyPipeline);
     memcpyPass.setBindGroup(0, memcpyBindGroup);
     // TODO handle not evenly divisible by wgSize
-    memcpyPass.dispatchWorkgroups(...dispatchGeometry);
+    for (var i = 0; i < test.trials; i++) {
+      memcpyPass.dispatchWorkgroups(...dispatchGeometry);
+    }
     memcpyPass.end();
 
     // Encode a command to copy the results to a mappable buffer.
@@ -157,6 +159,7 @@ for (const workgroupSize of test.workgroupSizes) {
 
     timingHelper.getResult().then((ns) => {
       let bytesTransferred = 2 * memdest.byteLength;
+      ns = ns / test.trials;
       console.log(
         `Timing result: ${ns}; transferred ${bytesTransferred} bytes; bandwidth = ${
           bytesTransferred / ns
@@ -180,7 +183,6 @@ function fail(msg) {
 }
 
 const plot = Plot.plot({
-  color: { type: "ordinal", legend: true },
   marks: [
     Plot.lineY(data, {
       x: "memsrcSize",
@@ -202,6 +204,7 @@ const plot = Plot.plot({
   ],
   x: { type: "log", label: "Copied array size (B)" },
   y: { type: "log", label: "Achieved bandwidth (GB/s)" },
+  color: { type: "ordinal", legend: true},
 });
 const div = document.querySelector("#plot");
 div.append(plot);
