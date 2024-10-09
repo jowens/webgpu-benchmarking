@@ -31,11 +31,42 @@ const membwTest = {
       @builtin(workgroup_id) wgid: vec3u) {
         let i = id.y * nwg.x * ${workgroupSize} + id.x;
         memDest[i] = memSrc[i] + 1;
-    }
-`,
+    }`,
+    validate: (i) => { return i+1; },
 };
 
-const test = membwTest;
+const maddTest = {
+  name: "madd",
+  workgroupSizes: range(0, 7).map((i) => 2 ** i),
+  memsrcSizes: range(10, 25).map((i) => 2 ** i),
+  trials: 10,
+  kernel: (workgroupSize) => /* wsgl */ `
+    /* output */
+    @group(0) @binding(0) var<storage, read_write> memDest: array<u32>;
+    /* input */
+    @group(0) @binding(1) var<storage, read> memSrc: array<u32>;
+
+    @compute @workgroup_size(${workgroupSize}) fn maddKernel(
+      @builtin(global_invocation_id) id: vec3u,
+      @builtin(num_workgroups) nwg: vec3u,
+      @builtin(workgroup_id) wgid: vec3u) {
+        let i = id.y * nwg.x * ${workgroupSize} + id.x;
+        var d = memSrc[i];
+        d = d * d + d;
+        d = d * d + d;
+        d = d * d + d;
+        d = d * d + d;
+        d = d * d + d;
+        d = d * d + d;
+        d = d * d + d;
+        d = d * d + d;
+        memDest[i] = d;
+    }
+  `,
+  validate: (i) => {for (var j = 0; j < 8; j++) {i = i*i+i;} return i;},
+};
+
+const test = maddTest;
 
 const data = [];
 
@@ -142,7 +173,7 @@ for (const workgroupSize of test.workgroupSizes) {
     mappableMemdstBuffer.unmap();
     let errors = 0;
     for (let i = 0; i < memdest.length; i++) {
-      if (memsrc[i] + 1 != memdest[i]) {
+      if (test.validate(memsrc[i]) != memdest[i]) {
         if (errors < 5) {
           console.log(
             `Error ${errors}: i=${i}, src=${memsrc[i]}, dest=${memdest[i]}`
