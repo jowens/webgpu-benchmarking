@@ -1,9 +1,15 @@
 import * as Plot from "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm";
 
+function fail(msg) {
+  // eslint-disable-next-line no-alert
+  alert(msg);
+}
+
 const adapter = await navigator.gpu?.requestAdapter();
+const hasSubgroups = adapter.features.has("subgroups");
 const canTimestamp = adapter.features.has("timestamp-query");
 const device = await adapter?.requestDevice({
-  requiredFeatures: [...(canTimestamp ? ["timestamp-query"] : [])],
+  requiredFeatures: [...(canTimestamp ? ["timestamp-query"] : []), ...(hasSubgroups ? ["subgroups"] : [])],
 });
 
 if (!device) {
@@ -16,35 +22,39 @@ const range = (min, max) =>
 // change to JSON parsing eventually
 const membwTest = {
   name: "membw",
+  type:"memory",
   workgroupSizes: range(0, 7).map((i) => 2 ** i),
   memsrcSizes: range(10, 25).map((i) => 2 ** i),
   trials: 10,
   kernel: (workgroupSize) => /* wgsl */ `
     /* output */
-    @group(0) @binding(0) var<storage, read_write> memDest: array<u32>;
+    @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
     /* input */
-    @group(0) @binding(1) var<storage, read> memSrc: array<u32>;
+    @group(0) @binding(1) var<storage, read> memSrc: array<f32>;
 
     @compute @workgroup_size(${workgroupSize}) fn memcpyKernel(
       @builtin(global_invocation_id) id: vec3u,
       @builtin(num_workgroups) nwg: vec3u,
       @builtin(workgroup_id) wgid: vec3u) {
         let i = id.y * nwg.x * ${workgroupSize} + id.x;
-        memDest[i] = memSrc[i] + 1;
+        memDest[i] = memSrc[i] + 1.0;
     }`,
-    validate: (i) => { return i+1; },
+    plot: {x: {label: "Copied array size (B)"},
+           y: {label: "Achieved bandwidth (GB/s)"}},
+    validate: (f) => { return f+1.0; },
 };
 
 const maddTest = {
   name: "madd",
+  type: "compute",
   workgroupSizes: range(0, 7).map((i) => 2 ** i),
   memsrcSizes: range(10, 25).map((i) => 2 ** i),
   trials: 10,
   kernel: (workgroupSize) => /* wsgl */ `
     /* output */
-    @group(0) @binding(0) var<storage, read_write> memDest: array<u32>;
+    @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
     /* input */
-    @group(0) @binding(1) var<storage, read> memSrc: array<u32>;
+    @group(0) @binding(1) var<storage, read> memSrc: array<f32>;
 
     @compute @workgroup_size(${workgroupSize}) fn maddKernel(
       @builtin(global_invocation_id) id: vec3u,
@@ -63,37 +73,66 @@ const maddTest = {
         memDest[i] = d;
     }
   `,
-  validate: (i) => {for (var j = 0; j < 8; j++) {i = i*i+i;} return i;},
+  flops: () => {},
+  plot: {x: {label: "Copied array size (B)"},
+         y: {label: "FLOPS"}},
+  validate: (f) => {for (var j = 0; j < 8; j++) {f = f*f+f;} return f;},
 };
 
-const test = maddTest;
+const reducePerWGTest = {
+  name: "reduce per wg",
+  workgroupSizes: range(2, 7).map((i) => 2 ** i),
+  memsrcSizes: range(16, 17).map((i) => 2 ** i),
+  trials: 10,
+  kernel: (workgroupSize) => /* wsgl */ `
+    enable subgroups;
+    // var<workgroup> sum: f32; // zero initialized?
+    /* output */
+    @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
+    /* input */
+    @group(0) @binding(1) var<storage, read> memSrc: array<f32>;
 
-const data = [];
+    @compute @workgroup_size(${workgroupSize}) fn reducePerWGKernel(
+      @builtin(global_invocation_id) id: vec3u,
+      @builtin(num_workgroups) nwg: vec3u,
+      @builtin(workgroup_id) wgid: vec3u) {
+        let i = id.y * nwg.x * ${workgroupSize} + id.x;
+        let sa = subgroupAdd(memSrc[i]);
+        memDest[i] = sa;
+    }
+  `,
+  validate: (f) => { return f; },
+};
 
-for (const workgroupSize of test.workgroupSizes) {
+const tests = [membwTest, maddTest];
+
+
+for (const test of tests) {
+  const data = [];
+  for (const workgroupSize of test.workgroupSizes) {
   for (const memsrcSize of test.memsrcSizes) {
     const timingHelper = new TimingHelper(device);
 
-    const itemsPerWorkgroup = memsrcSize / workgroupSize;
-    const dispatchGeometry = [itemsPerWorkgroup, 1];
+    const workgroupCount = memsrcSize / workgroupSize;
+    const dispatchGeometry = [workgroupCount, 1];
     while (
       dispatchGeometry[0] > adapter.limits.maxComputeWorkgroupsPerDimension
     ) {
       dispatchGeometry[0] /= 2;
       dispatchGeometry[1] *= 2;
     }
-    console.log(`itemsPerWorkgroup: ${itemsPerWorkgroup}
+    console.log(`workgroup count: ${workgroupCount}
       workgroup size: ${workgroupSize}
       maxComputeWGPerDim: ${adapter.limits.maxComputeWorkgroupsPerDimension}
       dispatchGeometry: ${dispatchGeometry}`);
 
-    const memsrc = new Uint32Array(memsrcSize);
+    const memsrc = new Float32Array(memsrcSize);
     for (let i = 0; i < memsrc.length; i++) {
       memsrc[i] = i;
     }
 
     const memcpyModule = device.createShaderModule({
-      label: "copy large chunk of memory from memSrc to memDest",
+      label: `module: ${test.name}`,
       code: test.kernel(workgroupSize),
     });
 
@@ -167,7 +206,7 @@ for (const workgroupSize of test.workgroupSizes) {
 
     // Read the results
     await mappableMemdstBuffer.mapAsync(GPUMapMode.READ);
-    const memdest = new Uint32Array(
+    const memdest = new Float32Array(
       mappableMemdstBuffer.getMappedRange().slice()
     );
     mappableMemdstBuffer.unmap();
@@ -176,7 +215,7 @@ for (const workgroupSize of test.workgroupSizes) {
       if (test.validate(memsrc[i]) != memdest[i]) {
         if (errors < 5) {
           console.log(
-            `Error ${errors}: i=${i}, src=${memsrc[i]}, dest=${memdest[i]}`
+            `Error ${errors}: i=${i}, input=${memsrc[i]}, output=${memdest[i]}, expected=${test.validate(memsrc[i])}`
           );
         }
         errors++;
@@ -208,11 +247,6 @@ for (const workgroupSize of test.workgroupSizes) {
 }
 console.log(data);
 
-function fail(msg) {
-  // eslint-disable-next-line no-alert
-  alert(msg);
-}
-
 const plot = Plot.plot({
   marks: [
     Plot.lineY(data, {
@@ -233,9 +267,10 @@ const plot = Plot.plot({
       })
     ),
   ],
-  x: { type: "log", label: "Copied array size (B)" },
-  y: { type: "log", label: "Achieved bandwidth (GB/s)" },
+  x: { type: "log", label: test?.plot?.x?.label ?? "XLABEL"},
+  y: { type: "log", label: test?.plot?.y?.label ?? "YLABEL"},
   color: { type: "ordinal", legend: true},
 });
 const div = document.querySelector("#plot");
 div.append(plot);
+}
