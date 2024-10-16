@@ -323,16 +323,17 @@ for (const test of tests) {
   console.log(data);
 
   for (const testPlot of test.plots) {
+    const filteredData = testPlot?.filter ? testPlot?.filter(data) : data;
     const plot = Plot.plot({
       marks: [
-        Plot.lineY(data, {
+        Plot.lineY(filteredData, {
           x: testPlot.x.x,
           y: testPlot.y.y,
           stroke: testPlot.stroke.stroke,
           tip: true,
         }),
         Plot.text(
-          data,
+          filteredData,
           Plot.selectLast({
             x: testPlot.x.x,
             y: testPlot.y.y,
