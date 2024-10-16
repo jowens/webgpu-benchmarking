@@ -63,9 +63,9 @@ const maddTest = {
   description:
     "Computes N multiply-adds per input element. One thread is responsible for one 32b input element.",
   workgroupSizes: range(0, 7).map((i) => 2 ** i),
-  memsrcSizes: range(10, 25).map((i) => 2 ** i),
+  memsrcSizes: range(10, 26).map((i) => 2 ** i),
   trials: 10,
-  kernel: (workgroupSize) => /* wsgl */ `
+  kernel: (workgroupSize, ops) => { /* wsgl */ var k = `
     /* output */
     @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
     /* input */
@@ -80,34 +80,13 @@ const maddTest = {
         var f = memSrc[i];
         /* 2^-22 = 2.38418579e-7 */
         var b = f * 2.38418579e-7 + 1.0;
-        /* b is a float btwn 1 and 2 */
-        f = f * b + b;
-        f = f * b + b;
-        f = f * b + b;
-        f = f * b + b;
-        f = f * b + b;
-        f = f * b + b;
-        f = f * b + b;
-        memDest[i] = f;
-      }
+        /* b is a float btwn 1 and 2 */`;
+    while (ops > 0) {
+      k = k + "f = f * b + b;\n"
+      ops -= 2;
     }
-  `,
-  bytesTransferred: (memInput, memOutput) => {
-    return memInput.byteLength + memOutput.byteLength;
-  },
-  threadCount: (memInput) => {
-    return memInput.byteLength / 4;
-  },
-  flopsPerThread: () => {
-    return 16;
-  },
-  gflops: (threads, flopsPerThread, time) => {
-    return (threads * flopsPerThread) / time;
-  },
-  plot: {
-    x: { x: "threadCount", label: "Active threads" },
-    y: { y: "gflops", label: "GFLOPS" },
-    stroke: {stroke: "workgroupSize"},
+    k = k + "memDest[i] = f;}}";
+    return k;
   },
   validate: (input, output) => {
     var f = input;
@@ -123,6 +102,24 @@ const maddTest = {
     // allow for a bit of FP error
     return (Math.abs(f - output) / f) < 0.00001;
   },
+  bytesTransferred: (memInput, memOutput) => {
+    return memInput.byteLength + memOutput.byteLength;
+  },
+  threadCount: (memInput) => {
+    return memInput.byteLength / 4;
+  },
+  flopsPerThread: () => {
+    return 256;
+  },
+  gflops: (threads, flopsPerThread, time) => {
+    return (threads * flopsPerThread) / time;
+  },
+  plot: {
+    x: { x: "threadCount", label: "Active threads" },
+    y: { y: "gflops", label: "GFLOPS" },
+    stroke: {stroke: "workgroupSize"},
+  },
+
 };
 
 const reducePerWGTest = {
@@ -184,7 +181,7 @@ for (const test of tests) {
 
       const memcpyModule = device.createShaderModule({
         label: `module: ${test.name}`,
-        code: test.kernel(workgroupSize),
+        code: test.kernel(workgroupSize, 256),
       });
 
       const kernelPipeline = device.createComputePipeline({
