@@ -48,11 +48,13 @@ const membwTest = {
   bytesTransferred: (memInput, memOutput) => {
     return memInput.byteLength + memOutput.byteLength;
   },
-  plot: {
-    x: { x: "memsrcSize", label: "Copied array size (B)" },
-    y: { y: "bandwidth", label: "Achieved bandwidth (GB/s)" },
-    stroke: { stroke: "workgroupSize" },
-  },
+  plots: [
+    {
+      x: { x: "memsrcSize", label: "Copied array size (B)" },
+      y: { y: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+      stroke: { stroke: "workgroupSize" },
+    },
+  ],
 };
 
 const maddTest = {
@@ -115,11 +117,13 @@ const maddTest = {
   gflops: (threads, flopsPerThread, time) => {
     return (threads * flopsPerThread) / time;
   },
-  plot: {
-    x: { x: "threadCount", label: "Active threads" },
-    y: { y: "gflops", label: "GFLOPS" },
-    stroke: { stroke: "workgroupSize" },
-  },
+  plots: [
+    {
+      x: { x: "threadCount", label: "Active threads" },
+      y: { y: "gflops", label: "GFLOPS" },
+      stroke: { stroke: "workgroupSize" },
+    },
+  ],
 };
 
 const reducePerWGTest = {
@@ -318,30 +322,32 @@ for (const test of tests) {
   }
   console.log(data);
 
-  const plot = Plot.plot({
-    marks: [
-      Plot.lineY(data, {
-        x: test.plot.x.x,
-        y: test.plot.y.y,
-        stroke: test.plot.stroke.stroke,
-        tip: true,
-      }),
-      Plot.text(
-        data,
-        Plot.selectLast({
-          x: test.plot.x.x,
-          y: test.plot.y.y,
-          z: test.plot.stroke.stroke,
-          text: test.plot.stroke.stroke,
-          textAnchor: "start",
-          dx: 3,
-        })
-      ),
-    ],
-    x: { type: "log", label: test?.plot?.x?.label ?? "XLABEL" },
-    y: { type: "log", label: test?.plot?.y?.label ?? "YLABEL" },
-    color: { type: "ordinal", legend: true },
-  });
-  const div = document.querySelector("#plot");
-  div.append(plot);
+  for (const testPlot of test.plots) {
+    const plot = Plot.plot({
+      marks: [
+        Plot.lineY(data, {
+          x: testPlot.x.x,
+          y: testPlot.y.y,
+          stroke: testPlot.stroke.stroke,
+          tip: true,
+        }),
+        Plot.text(
+          data,
+          Plot.selectLast({
+            x: testPlot.x.x,
+            y: testPlot.y.y,
+            z: testPlot.stroke.stroke,
+            text: testPlot.stroke.stroke,
+            textAnchor: "start",
+            dx: 3,
+          })
+        ),
+      ],
+      x: { type: "log", label: testPlot?.x?.label ?? "XLABEL" },
+      y: { type: "log", label: testPlot?.y?.label ?? "YLABEL" },
+      color: { type: "ordinal", legend: true },
+    });
+    const div = document.querySelector("#plot");
+    div.append(plot);
+  }
 }
