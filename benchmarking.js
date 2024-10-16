@@ -101,12 +101,12 @@ const maddTest = {
   flopsPerThread: () => {
     return 16;
   },
-  flops: (threads, flopsPerThread, time) => {
+  gflops: (threads, flopsPerThread, time) => {
     return (threads * flopsPerThread) / time;
   },
   plot: {
     x: { x: "threadCount", label: "Active threads" },
-    y: { y: "flops", label: "FLOPS" },
+    y: { y: "gflops", label: "GFLOPS" },
     stroke: {stroke: "workgroupSize"},
   },
   validate: (input, output) => {
@@ -120,6 +120,7 @@ const maddTest = {
     f = f * b + b;
     f = f * b + b;
     f = f * b + b;
+    // allow for a bit of FP error
     return (Math.abs(f - output) / f) < 0.00001;
   },
 };
@@ -306,8 +307,8 @@ for (const test of tests) {
         if (test.flopsPerThread) {
           result.flopsPerThread = test.flopsPerThread();
         }
-        if (test.flops && result.threadCount && result.flopsPerThread) {
-          result.flops = test.flops(
+        if (test.gflops && result.threadCount && result.flopsPerThread) {
+          result.gflops = test.gflops(
             result.threadCount,
             result.flopsPerThread,
             result.time
