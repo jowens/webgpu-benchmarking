@@ -44,8 +44,8 @@ const membwTest = {
         let i = id.y * nwg.x * ${workgroupSize} + id.x;
         memDest[i] = memSrc[i] + 1.0;
     }`,
-  validate: (f) => {
-    return f + 1.0;
+  validate: (input, output) => {
+    return input + 1.0 == output;
   },
   bytesTransferred: (memInput, memOutput) => {
     return memInput.byteLength + memOutput.byteLength;
@@ -77,17 +77,19 @@ const maddTest = {
       @builtin(workgroup_id) wgid: vec3u) {
         let i = id.y * nwg.x * ${workgroupSize} + id.x;
         if (i < arrayLength(&memSrc)) {
-        var d = memSrc[i];
-        d = d * d + d;
-        d = d * d + d;
-        d = d * d + d;
-        d = d * d + d;
-        d = d * d + d;
-        d = d * d + d;
-        d = d * d + d;
-        d = d * d + d;
-        memDest[i] = d;
-}
+        var f = memSrc[i];
+        /* 2^-22 = 2.38418579e-7 */
+        var b = f * 2.38418579e-7 + 1.0;
+        /* b is a float btwn 1 and 2 */
+        f = f * b + b;
+        f = f * b + b;
+        f = f * b + b;
+        f = f * b + b;
+        f = f * b + b;
+        f = f * b + b;
+        f = f * b + b;
+        memDest[i] = f;
+      }
     }
   `,
   bytesTransferred: (memInput, memOutput) => {
@@ -107,11 +109,18 @@ const maddTest = {
     y: { y: "flops", label: "FLOPS" },
     stroke: {stroke: "workgroupSize"},
   },
-  validate: (f) => {
-    for (var j = 0; j < 8; j++) {
-      f = f * f + f;
-    }
-    return f;
+  validate: (input, output) => {
+    var f = input;
+    const b = f * 2.38418579e-7 + 1.0;
+    /* b is a float btwn 1 and 2 */
+    f = f * b + b;
+    f = f * b + b;
+    f = f * b + b;
+    f = f * b + b;
+    f = f * b + b;
+    f = f * b + b;
+    f = f * b + b;
+    return (Math.abs(f - output) / f) < 0.00001;
   },
 };
 
@@ -169,7 +178,7 @@ for (const test of tests) {
 
       const memsrc = new Float32Array(memsrcSize);
       for (let i = 0; i < memsrc.length; i++) {
-        memsrc[i] = i;
+        memsrc[i] = i & (2**22 - 1) // roughly, range of 32b significand
       }
 
       const memcpyModule = device.createShaderModule({
@@ -263,7 +272,7 @@ for (const test of tests) {
       mappableMemdstBuffer.unmap();
       let errors = 0;
       for (let i = 0; i < memdest.length; i++) {
-        if (test.validate(memsrc[i]) != memdest[i]) {
+        if (!test.validate(memsrc[i], memdest[i])) {
           if (errors < 5) {
             console.log(
               `Error ${errors}: i=${i}, input=${memsrc[i]}, output=${
@@ -310,15 +319,6 @@ for (const test of tests) {
     }
   }
   console.log(data);
-  var marks;
-  switch (test.type) {
-    case "memory":
-      marks = {};
-      break;
-    case "compute":
-      marks = {};
-      break;
-  }
 
   const plot = Plot.plot({
     marks: [
