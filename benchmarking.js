@@ -119,22 +119,29 @@ const maddTest = {
     {
       x: { field: "threadCount", label: "Active threads" },
       y: { field: "gflops", label: "GFLOPS" },
+      stroke: { field: (d) => d.param.opsPerThread, label: "Ops per Thread" },
+      caption_tl: "Workgroup size = 64 (lines are ops per thread)",
+      filter: (data, param) => data.filter((d) => d.param.workgroupSize == 64),
+    },
+    {
+      x: { field: "threadCount", label: "Active threads" },
+      y: { field: "gflops", label: "GFLOPS" },
       stroke: { field: (d) => d.param.workgroupSize },
-      caption_se: "Each thread does 16 MADDs (lines are workgroup size)",
+      caption_tl: "Each thread does 16 MADDs (lines are workgroup size)",
       filter: (data, param) => data.filter((d) => d.param.opsPerThread == 16),
     },
     {
       x: { field: "threadCount", label: "Active threads" },
       y: { field: "gflops", label: "GFLOPS" },
       stroke: { field: (d) => d.param.workgroupSize },
-      caption_se: "Each thread does 64 MADDs (lines are workgroup size)",
+      caption_tl: "Each thread does 64 MADDs (lines are workgroup size)",
       filter: (data, param) => data.filter((d) => d.param.opsPerThread == 64),
     },
     {
       x: { field: "threadCount", label: "Active threads" },
       y: { field: "gflops", label: "GFLOPS" },
       stroke: { field: (d) => d.param.workgroupSize },
-      caption_se: "Each thread does 256 MADDs (lines are workgroup size)",
+      caption_tl: "Each thread does 256 MADDs (lines are workgroup size)",
       filter: (data, param) => data.filter((d) => d.param.opsPerThread == 256),
     },
   ],
@@ -294,9 +301,7 @@ dispatchGeometry: ${dispatchGeometry}`);
       if (!test.validate(memsrc[i], memdest[i], param)) {
         if (errors < 5) {
           console.log(
-            `Error ${errors}: i=${i}, input=${memsrc[i]}, output=${
-              memdest[i]
-            }`
+            `Error ${errors}: i=${i}, input=${memsrc[i]}, output=${memdest[i]}`
           );
         }
         errors++;
@@ -358,8 +363,14 @@ dispatchGeometry: ${dispatchGeometry}`);
             dx: 3,
           })
         ),
-        Plot.text([testPlot?.caption_se ?? ""], {lineWidth: 30, frameAnchor: "bottom-right"})
-
+        Plot.text([testPlot?.caption_tl ?? ""], {
+          lineWidth: 30,
+          frameAnchor: "top-left",
+        }),
+        Plot.text([testPlot?.caption_br ?? ""], {
+          lineWidth: 30,
+          frameAnchor: "bottom-right",
+        }),
       ],
       x: { type: "log", label: testPlot?.x?.label ?? "XLABEL" },
       y: { type: "log", label: testPlot?.y?.label ?? "YLABEL" },
