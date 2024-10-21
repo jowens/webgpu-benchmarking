@@ -15,12 +15,11 @@ if (!device) {
   fail("Fatal error: Device does not support WebGPU.");
 }
 
-const range = (min, max) =>
+const range = (min, max /* [min, max] */) =>
   [...Array(max - min + 1).keys()].map((i) => i + min);
 
 const membwTest = {
   name: "membw",
-  type: "memory",
   description:
     "Copies input array to output array. One thread is assigned per 32b input element.",
   parameters: {
@@ -50,24 +49,25 @@ const membwTest = {
   },
   plots: [
     {
-      x: { x: "memsrcSize", label: "Copied array size (B)" },
-      y: { y: "bandwidth", label: "Achieved bandwidth (GB/s)" },
-      stroke: { stroke: "workgroupSize" },
+      x: { datum: "param.memsrcSize", label: "Copied array size (B)" },
+      y: { datum: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+      stroke: { datum: "param.workgroupSize" },
+      title_: "Memory bandwidth test (lines are workgroup size)",
     },
   ],
 };
 
 const maddTest = {
   name: "madd",
-  type: "compute",
   description:
     "Computes N multiply-adds per input element. One thread is responsible for one 32b input element.",
   parameters: {
     workgroupSize: range(0, 7).map((i) => 2 ** i),
     memsrcSize: range(10, 26).map((i) => 2 ** i),
+    opsPerThread: range(2, 8).map((i) => 2 ** i),
   },
   trials: 10,
-  kernel: (workgroupSize, opsPerKernel) => {
+  kernel: (workgroupSize, opsPerThread) => {
     /* wsgl */ var k = `
     /* output */
     @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
@@ -84,24 +84,22 @@ const maddTest = {
         /* 2^-22 = 2.38418579e-7 */
         var b = f * 2.38418579e-7 + 1.0;
         /* b is a float btwn 1 and 2 */`;
-    while (opsPerKernel > 0) {
+    while (opsPerThread > 2) {
       k = k + "    f = f * b + b;\n";
-      opsPerKernel -= 2;
+      opsPerThread -= 2;
     }
     k = k + "    memDest[i] = f;\n}\n}";
     return k;
   },
-  validate: (input, output) => {
+  validate: (input, output, param) => {
     var f = input;
     const b = f * 2.38418579e-7 + 1.0;
     /* b is a float btwn 1 and 2 */
-    f = f * b + b;
-    f = f * b + b;
-    f = f * b + b;
-    f = f * b + b;
-    f = f * b + b;
-    f = f * b + b;
-    f = f * b + b;
+    var opsPerKernel = param.opsPerKernel;
+    while (opsPerKernel > 2) {
+      f = f * b + b;
+      opsPerKernel -= 2;
+    }
     // allow for a bit of FP error
     return Math.abs(f - output) / f < 0.00001;
   },
@@ -111,17 +109,19 @@ const maddTest = {
   threadCount: (memInput) => {
     return memInput.byteLength / 4;
   },
-  flopsPerThread: () => {
-    return 256;
+  flopsPerThread: (param) => {
+    return param.opsPerKernel;
   },
   gflops: (threads, flopsPerThread, time) => {
     return (threads * flopsPerThread) / time;
   },
   plots: [
     {
-      x: { x: "threadCount", label: "Active threads" },
-      y: { y: "gflops", label: "GFLOPS" },
-      stroke: { stroke: "workgroupSize" },
+      x: { datum: "threadCount", label: "Active threads" },
+      y: { datum: "gflops", label: "GFLOPS" },
+      stroke: { datum: "workgroupSize" },
+      title: "Each thread does 16 MADDs (lines are workgroup size)",
+      filter: (data, param) => data.filter((d) => d.param.opsPerKernel == 16),
     },
   ],
 };
@@ -157,16 +157,18 @@ const reducePerWGTest = {
 // strided reads
 // random reads
 
-const tests = [membwTest, maddTest];
+// const tests = [membwTest, maddTest];
+const tests = [membwTest];
 
 for (const test of tests) {
-  const data = [];
+  const data = new Array();
   for (const param of combinations(test.parameters)) {
     const memsrcSize = param.memsrcSize;
     const workgroupSize = param.workgroupSize;
     const timingHelper = new TimingHelper(device);
 
     const workgroupCount = memsrcSize / workgroupSize;
+    /* given number of workgroups, compute dispatch geometry that respects limits */
     const dispatchGeometry = [workgroupCount, 1];
     while (
       dispatchGeometry[0] > adapter.limits.maxComputeWorkgroupsPerDimension
@@ -175,9 +177,9 @@ for (const test of tests) {
       dispatchGeometry[1] *= 2;
     }
     console.log(`workgroup count: ${workgroupCount}
-      workgroup size: ${workgroupSize}
-      maxComputeWGPerDim: ${adapter.limits.maxComputeWorkgroupsPerDimension}
-      dispatchGeometry: ${dispatchGeometry}`);
+workgroup size: ${workgroupSize}
+maxComputeWGPerDim: ${adapter.limits.maxComputeWorkgroupsPerDimension}
+dispatchGeometry: ${dispatchGeometry}`);
 
     const memsrc = new Float32Array(memsrcSize);
     for (let i = 0; i < memsrc.length; i++) {
@@ -275,7 +277,7 @@ for (const test of tests) {
     mappableMemdstBuffer.unmap();
     let errors = 0;
     for (let i = 0; i < memdest.length; i++) {
-      if (!test.validate(memsrc[i], memdest[i])) {
+      if (!test.validate(memsrc[i], memdest[i], param)) {
         if (errors < 5) {
           console.log(
             `Error ${errors}: i=${i}, input=${memsrc[i]}, output=${
@@ -296,8 +298,7 @@ for (const test of tests) {
       const result = {
         name: test.name,
         time: ns / test.trials,
-        workgroupSize: workgroupSize,
-        memsrcSize: memsrcSize,
+        param: param,
       };
       if (test.bytesTransferred) {
         result.bytesTransferred = test.bytesTransferred(memsrc, memdest);
@@ -307,7 +308,7 @@ for (const test of tests) {
         result.threadCount = test.threadCount(memsrc);
       }
       if (test.flopsPerThread) {
-        result.flopsPerThread = test.flopsPerThread();
+        result.flopsPerThread = test.flopsPerThread(param);
       }
       if (test.gflops && result.threadCount && result.flopsPerThread) {
         result.gflops = test.gflops(
@@ -324,21 +325,26 @@ for (const test of tests) {
 
   for (const testPlot of test.plots) {
     const filteredData = testPlot?.filter ? testPlot?.filter(data) : data;
+    console.log("filteredData", filteredData);
+    console.log("testPlot.x.datum", testPlot.x.datum);
+    console.log("testPlot.y.datum", testPlot.y.datum);
+    console.log("testPlot.stroke.datum", testPlot.stroke.datum);
+    console.log("dot-plot", Plot.dot(filteredData, {x: testPlot.x.datum, y: testPlot.y.datum, fill: testPlot.stroke.datum}).initialize());
     const plot = Plot.plot({
       marks: [
         Plot.lineY(filteredData, {
-          x: testPlot.x.x,
-          y: testPlot.y.y,
-          stroke: testPlot.stroke.stroke,
+          x: testPlot.x.datum,
+          y: testPlot.y.datum,
+          stroke: testPlot.stroke.datum,
           tip: true,
         }),
         Plot.text(
           filteredData,
           Plot.selectLast({
-            x: testPlot.x.x,
-            y: testPlot.y.y,
-            z: testPlot.stroke.stroke,
-            text: testPlot.stroke.stroke,
+            x: testPlot.x.datum,
+            y: testPlot.y.datum,
+            z: testPlot.stroke.datum,
+            text: testPlot.stroke.datum,
             textAnchor: "start",
             dx: 3,
           })
@@ -347,7 +353,9 @@ for (const test of tests) {
       x: { type: "log", label: testPlot?.x?.label ?? "XLABEL" },
       y: { type: "log", label: testPlot?.y?.label ?? "YLABEL" },
       color: { type: "ordinal", legend: true },
+      title: testPlot?.title,
     });
+    console.log(plot);
     const div = document.querySelector("#plot");
     div.append(plot);
   }
