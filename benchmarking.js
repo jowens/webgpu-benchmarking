@@ -49,9 +49,9 @@ const membwTest = {
   },
   plots: [
     {
-      x: { datum: "param.memsrcSize", label: "Copied array size (B)" },
+      x: { datum: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
       y: { datum: "bandwidth", label: "Achieved bandwidth (GB/s)" },
-      stroke: { datum: "param.workgroupSize" },
+      stroke: { datum: (d) => d.param.workgroupSize },
       title_: "Memory bandwidth test (lines are workgroup size)",
     },
   ],
