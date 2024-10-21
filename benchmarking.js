@@ -49,9 +49,9 @@ const membwTest = {
   },
   plots: [
     {
-      x: { datum: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
-      y: { datum: "bandwidth", label: "Achieved bandwidth (GB/s)" },
-      stroke: { datum: (d) => d.param.workgroupSize },
+      x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
+      y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+      stroke: { field: (d) => d.param.workgroupSize },
       title_: "Memory bandwidth test (lines are workgroup size)",
     },
   ],
@@ -95,10 +95,10 @@ const maddTest = {
     var f = input;
     const b = f * 2.38418579e-7 + 1.0;
     /* b is a float btwn 1 and 2 */
-    var opsPerKernel = param.opsPerKernel;
-    while (opsPerKernel > 2) {
+    var opsPerThread = param.opsPerThread;
+    while (opsPerThread > 2) {
       f = f * b + b;
-      opsPerKernel -= 2;
+      opsPerThread -= 2;
     }
     // allow for a bit of FP error
     return Math.abs(f - output) / f < 0.00001;
@@ -110,18 +110,32 @@ const maddTest = {
     return memInput.byteLength / 4;
   },
   flopsPerThread: (param) => {
-    return param.opsPerKernel;
+    return param.opsPerThread;
   },
   gflops: (threads, flopsPerThread, time) => {
     return (threads * flopsPerThread) / time;
   },
   plots: [
     {
-      x: { datum: "threadCount", label: "Active threads" },
-      y: { datum: "gflops", label: "GFLOPS" },
-      stroke: { datum: "workgroupSize" },
-      title: "Each thread does 16 MADDs (lines are workgroup size)",
-      filter: (data, param) => data.filter((d) => d.param.opsPerKernel == 16),
+      x: { field: "threadCount", label: "Active threads" },
+      y: { field: "gflops", label: "GFLOPS" },
+      stroke: { field: (d) => d.param.workgroupSize },
+      caption_se: "Each thread does 16 MADDs (lines are workgroup size)",
+      filter: (data, param) => data.filter((d) => d.param.opsPerThread == 16),
+    },
+    {
+      x: { field: "threadCount", label: "Active threads" },
+      y: { field: "gflops", label: "GFLOPS" },
+      stroke: { field: (d) => d.param.workgroupSize },
+      caption_se: "Each thread does 64 MADDs (lines are workgroup size)",
+      filter: (data, param) => data.filter((d) => d.param.opsPerThread == 64),
+    },
+    {
+      x: { field: "threadCount", label: "Active threads" },
+      y: { field: "gflops", label: "GFLOPS" },
+      stroke: { field: (d) => d.param.workgroupSize },
+      caption_se: "Each thread does 256 MADDs (lines are workgroup size)",
+      filter: (data, param) => data.filter((d) => d.param.opsPerThread == 256),
     },
   ],
 };
@@ -157,8 +171,8 @@ const reducePerWGTest = {
 // strided reads
 // random reads
 
-// const tests = [membwTest, maddTest];
-const tests = [membwTest];
+const tests = [membwTest, maddTest];
+// const tests = [membwTest];
 
 for (const test of tests) {
   const data = new Array();
@@ -186,16 +200,16 @@ dispatchGeometry: ${dispatchGeometry}`);
       memsrc[i] = i & (2 ** 22 - 1); // roughly, range of 32b significand
     }
 
-    const memcpyModule = device.createShaderModule({
+    const computeModule = device.createShaderModule({
       label: `module: ${test.name}`,
       code: test.kernel(workgroupSize, 256),
     });
 
     const kernelPipeline = device.createComputePipeline({
-      label: "memcpy compute pipeline",
+      label: `${test.name} compute pipeline`,
       layout: "auto",
       compute: {
-        module: memcpyModule,
+        module: computeModule,
       },
     });
 
@@ -282,7 +296,7 @@ dispatchGeometry: ${dispatchGeometry}`);
           console.log(
             `Error ${errors}: i=${i}, input=${memsrc[i]}, output=${
               memdest[i]
-            }, expected=${test.validate(memsrc[i])}`
+            }`
           );
         }
         errors++;
@@ -325,37 +339,35 @@ dispatchGeometry: ${dispatchGeometry}`);
 
   for (const testPlot of test.plots) {
     const filteredData = testPlot?.filter ? testPlot?.filter(data) : data;
-    console.log("filteredData", filteredData);
-    console.log("testPlot.x.datum", testPlot.x.datum);
-    console.log("testPlot.y.datum", testPlot.y.datum);
-    console.log("testPlot.stroke.datum", testPlot.stroke.datum);
-    console.log("dot-plot", Plot.dot(filteredData, {x: testPlot.x.datum, y: testPlot.y.datum, fill: testPlot.stroke.datum}).initialize());
     const plot = Plot.plot({
       marks: [
         Plot.lineY(filteredData, {
-          x: testPlot.x.datum,
-          y: testPlot.y.datum,
-          stroke: testPlot.stroke.datum,
+          x: testPlot.x.field,
+          y: testPlot.y.field,
+          stroke: testPlot.stroke.field,
           tip: true,
         }),
         Plot.text(
           filteredData,
           Plot.selectLast({
-            x: testPlot.x.datum,
-            y: testPlot.y.datum,
-            z: testPlot.stroke.datum,
-            text: testPlot.stroke.datum,
+            x: testPlot.x.field,
+            y: testPlot.y.field,
+            z: testPlot.stroke.field,
+            text: testPlot.stroke.field,
             textAnchor: "start",
             dx: 3,
           })
         ),
+        Plot.text([testPlot?.caption_se ?? ""], {lineWidth: 30, frameAnchor: "bottom-right"})
+
       ],
       x: { type: "log", label: testPlot?.x?.label ?? "XLABEL" },
       y: { type: "log", label: testPlot?.y?.label ?? "YLABEL" },
       color: { type: "ordinal", legend: true },
       title: testPlot?.title,
+      subtitle: testPlot?.subtitle,
+      caption: testPlot?.caption,
     });
-    console.log(plot);
     const div = document.querySelector("#plot");
     div.append(plot);
   }
