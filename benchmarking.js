@@ -27,18 +27,18 @@ const membwTest = {
     memsrcSize: range(10, 25).map((i) => 2 ** i),
   },
   trials: 10,
-  kernel: (workgroupSize) => /* wgsl */ `
+  kernel: (param) => /* wgsl */ `
     /* output */
     @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
     /* input */
     @group(0) @binding(1) var<storage, read> memSrc: array<f32>;
 
-    @compute @workgroup_size(${workgroupSize}) fn memcpyKernel(
+    @compute @workgroup_size(${param.workgroupSize}) fn memcpyKernel(
       @builtin(global_invocation_id) id: vec3u,
       @builtin(num_workgroups) nwg: vec3u,
       @builtin(workgroup_id) wgid: vec3u) {
         /* needs to be a grid-stride loop */
-        let i = id.y * nwg.x * ${workgroupSize} + id.x;
+        let i = id.y * nwg.x * ${param.workgroupSize} + id.x;
         memDest[i] = memSrc[i] + 1.0;
     }`,
   validate: (input, output) => {
@@ -64,29 +64,30 @@ const maddTest = {
   parameters: {
     workgroupSize: range(0, 7).map((i) => 2 ** i),
     memsrcSize: range(10, 26).map((i) => 2 ** i),
-    opsPerThread: range(2, 8).map((i) => 2 ** i),
+    opsPerThread: range(2, 10).map((i) => 2 ** i),
   },
   trials: 10,
-  kernel: (workgroupSize, opsPerThread) => {
+  kernel: (param) => {
     /* wsgl */ var k = `
     /* output */
     @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
     /* input */
     @group(0) @binding(1) var<storage, read> memSrc: array<f32>;
 
-    @compute @workgroup_size(${workgroupSize}) fn maddKernel(
+    @compute @workgroup_size(${param.workgroupSize}) fn maddKernel(
       @builtin(global_invocation_id) id: vec3u,
       @builtin(num_workgroups) nwg: vec3u,
       @builtin(workgroup_id) wgid: vec3u) {
-        let i = id.y * nwg.x * ${workgroupSize} + id.x;
+        let i = id.y * nwg.x * ${param.workgroupSize} + id.x;
         if (i < arrayLength(&memSrc)) {
         var f = memSrc[i];
         /* 2^-22 = 2.38418579e-7 */
         var b = f * 2.38418579e-7 + 1.0;
         /* b is a float btwn 1 and 2 */`;
-    while (opsPerThread > 2) {
+    var opt = param.opsPerThread;
+    while (opt > 2) {
       k = k + "    f = f * b + b;\n";
-      opsPerThread -= 2;
+      opt -= 2;
     }
     k = k + "    memDest[i] = f;\n}\n}";
     return k;
@@ -192,14 +193,14 @@ for (const test of tests) {
     /* given number of workgroups, compute dispatch geometry that respects limits */
     const dispatchGeometry = [workgroupCount, 1];
     while (
-      dispatchGeometry[0] > adapter.limits.maxComputeWorkgroupsPerDimension
+      dispatchGeometry[0] > device.limits.maxComputeWorkgroupsPerDimension
     ) {
       dispatchGeometry[0] /= 2;
       dispatchGeometry[1] *= 2;
     }
     console.log(`workgroup count: ${workgroupCount}
 workgroup size: ${workgroupSize}
-maxComputeWGPerDim: ${adapter.limits.maxComputeWorkgroupsPerDimension}
+maxComputeWGPerDim: ${device.limits.maxComputeWorkgroupsPerDimension}
 dispatchGeometry: ${dispatchGeometry}`);
 
     const memsrc = new Float32Array(memsrcSize);
@@ -209,7 +210,7 @@ dispatchGeometry: ${dispatchGeometry}`);
 
     const computeModule = device.createShaderModule({
       label: `module: ${test.name}`,
-      code: test.kernel(workgroupSize, 256),
+      code: test.kernel(param),
     });
 
     const kernelPipeline = device.createComputePipeline({
@@ -235,110 +236,122 @@ dispatchGeometry: ${dispatchGeometry}`);
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
     });
 
-    const mappableMemdstBuffer = device.createBuffer({
+    const mappableMemdestBuffer = device.createBuffer({
       label: "mappable memory destination buffer",
       size: memsrc.byteLength,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     });
 
-    /** Set up bindGroups per compute kernel to tell the shader which buffers to use */
-    const kernelBindGroup = device.createBindGroup({
-      label: "bindGroup for memcpy kernel",
-      layout: kernelPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: memdestBuffer } },
-        { binding: 1, resource: { buffer: memsrcBuffer } },
-      ],
-    });
+    const maxBindingSize = device.limits.maxStorageBufferBindingSize;
+    if (
+      memsrcBuffer.size <= maxBindingSize &&
+      memdestBuffer.size <= maxBindingSize &&
+      mappableMemdestBuffer.size <= maxBindingSize
+    ) {
+      /** Set up bindGroups per compute kernel to tell the shader which buffers to use */
+      const kernelBindGroup = device.createBindGroup({
+        label: "bindGroup for memcpy kernel",
+        layout: kernelPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: memdestBuffer } },
+          { binding: 1, resource: { buffer: memsrcBuffer } },
+        ],
+      });
 
-    const encoder = device.createCommandEncoder({
-      label: "kernel encoder",
-    });
-    /* run a bunch of kernels before we start timing, don't time overhead */
-    const kernelPrepass = encoder.beginComputePass(encoder, {
-      label: "untimed kernel compute pass",
-    });
-    kernelPrepass.setPipeline(kernelPipeline);
-    kernelPrepass.setBindGroup(0, kernelBindGroup);
-    for (var i = 0; i < test.trials; i++) {
-      kernelPrepass.dispatchWorkgroups(...dispatchGeometry);
-    }
-    kernelPrepass.end();
+      const encoder = device.createCommandEncoder({
+        label: "kernel encoder",
+      });
+      /* run a bunch of kernels before we start timing, don't time overhead */
+      const kernelPrepass = encoder.beginComputePass(encoder, {
+        label: "untimed kernel compute pass",
+      });
+      kernelPrepass.setPipeline(kernelPipeline);
+      kernelPrepass.setBindGroup(0, kernelBindGroup);
+      for (var i = 0; i < 1; i++) {
+        /* just prime with one iteration */
+        kernelPrepass.dispatchWorkgroups(...dispatchGeometry);
+      }
+      kernelPrepass.end();
 
-    const kernelPass = timingHelper.beginComputePass(encoder, {
-      label: "timed kernel compute pass",
-    });
-    kernelPass.setPipeline(kernelPipeline);
-    kernelPass.setBindGroup(0, kernelBindGroup);
-    // TODO handle not evenly divisible by wgSize
-    for (var i = 0; i < test.trials; i++) {
-      kernelPass.dispatchWorkgroups(...dispatchGeometry);
-    }
-    kernelPass.end();
+      const kernelPass = timingHelper.beginComputePass(encoder, {
+        label: "timed kernel compute pass",
+      });
+      kernelPass.setPipeline(kernelPipeline);
+      kernelPass.setBindGroup(0, kernelBindGroup);
+      // TODO handle not evenly divisible by wgSize
+      for (var i = 0; i < test.trials; i++) {
+        kernelPass.dispatchWorkgroups(...dispatchGeometry);
+      }
+      kernelPass.end();
 
-    // Encode a command to copy the results to a mappable buffer.
-    // this is (from, to)
-    encoder.copyBufferToBuffer(
-      memdestBuffer,
-      0,
-      mappableMemdstBuffer,
-      0,
-      mappableMemdstBuffer.size
-    );
+      // Encode a command to copy the results to a mappable buffer.
+      // this is (from, to)
+      encoder.copyBufferToBuffer(
+        memdestBuffer,
+        0,
+        mappableMemdestBuffer,
+        0,
+        mappableMemdestBuffer.size
+      );
 
-    // Finish encoding and submit the commands
-    const command_buffer = encoder.finish();
-    device.queue.submit([command_buffer]);
+      // Finish encoding and submit the commands
+      const command_buffer = encoder.finish();
+      device.queue.submit([command_buffer]);
 
-    // Read the results
-    await mappableMemdstBuffer.mapAsync(GPUMapMode.READ);
-    const memdest = new Float32Array(
-      mappableMemdstBuffer.getMappedRange().slice()
-    );
-    mappableMemdstBuffer.unmap();
-    let errors = 0;
-    for (let i = 0; i < memdest.length; i++) {
-      if (!test.validate(memsrc[i], memdest[i], param)) {
-        if (errors < 5) {
-          console.log(
-            `Error ${errors}: i=${i}, input=${memsrc[i]}, output=${memdest[i]}`
+      // Read the results
+      await mappableMemdestBuffer.mapAsync(GPUMapMode.READ);
+      const memdest = new Float32Array(
+        mappableMemdestBuffer.getMappedRange().slice()
+      );
+      mappableMemdestBuffer.unmap();
+      let errors = 0;
+      for (let i = 0; i < memdest.length; i++) {
+        if (!test.validate(memsrc[i], memdest[i], param)) {
+          if (errors < 5) {
+            console.log(
+              `Error ${errors}: i=${i}, input=${memsrc[i]}, output=${memdest[i]}`
+            );
+          }
+          errors++;
+        }
+      }
+      if (errors > 0) {
+        console.log(`Memdest size: ${memdest.length} | Errors: ${errors}`);
+      } else {
+        console.log(`Memdest size: ${memdest.length} | No errors!`);
+      }
+
+      timingHelper.getResult().then((ns) => {
+        const result = {
+          name: test.name,
+          time: ns / test.trials,
+          param: param,
+        };
+        if (test.bytesTransferred) {
+          result.bytesTransferred = test.bytesTransferred(memsrc, memdest);
+          result.bandwidth = result.bytesTransferred / result.time;
+        }
+        if (test.threadCount) {
+          result.threadCount = test.threadCount(memsrc);
+        }
+        if (test.flopsPerThread) {
+          result.flopsPerThread = test.flopsPerThread(param);
+        }
+        if (test.gflops && result.threadCount && result.flopsPerThread) {
+          result.gflops = test.gflops(
+            result.threadCount,
+            result.flopsPerThread,
+            result.time
           );
         }
-        errors++;
-      }
+        data.push(result);
+        console.log(result);
+      });
     }
-    if (errors > 0) {
-      console.log(`Memdest size: ${memdest.length} | Errors: ${errors}`);
-    } else {
-      console.log(`Memdest size: ${memdest.length} | No errors!`);
-    }
-
-    timingHelper.getResult().then((ns) => {
-      const result = {
-        name: test.name,
-        time: ns / test.trials,
-        param: param,
-      };
-      if (test.bytesTransferred) {
-        result.bytesTransferred = test.bytesTransferred(memsrc, memdest);
-        result.bandwidth = result.bytesTransferred / result.time;
-      }
-      if (test.threadCount) {
-        result.threadCount = test.threadCount(memsrc);
-      }
-      if (test.flopsPerThread) {
-        result.flopsPerThread = test.flopsPerThread(param);
-      }
-      if (test.gflops && result.threadCount && result.flopsPerThread) {
-        result.gflops = test.gflops(
-          result.threadCount,
-          result.flopsPerThread,
-          result.time
-        );
-      }
-      data.push(result);
-      console.log(result);
-    });
+    /* tear down */
+    memsrcBuffer.destroy();
+    memdestBuffer.destroy();
+    mappableMemdestBuffer.destroy();
   }
   console.log(data);
 
