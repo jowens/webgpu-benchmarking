@@ -136,6 +136,8 @@ class TimingHelper {
     }
     resultBuffer.unmap();
     this.#resultBuffers.push(resultBuffer);
+    this.#querySet.destroy();
+    this.#resolveBuffer.destroy();
     return durations;
   }
 }
