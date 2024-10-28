@@ -1,6 +1,12 @@
 import * as Plot from "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm";
 // util functions in util.js, imported by HTML wrapper
 
+if (typeof process !== "undefined" && process.release.name === "node") {
+  // runs in node.js
+} else {
+  // running in browser
+}
+
 const adapter = await navigator.gpu?.requestAdapter();
 const hasSubgroups = adapter.features.has("subgroups");
 const canTimestamp = adapter.features.has("timestamp-query");
@@ -51,6 +57,27 @@ const membwTest = {
     {
       x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
       y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+      stroke: { field: (d) => d.param.workgroupSize },
+      title_: "Memory bandwidth test (lines are workgroup size)",
+    },
+    {
+      x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
+      y: {
+        field: "bandwidthCPU",
+        label: "Achieved bandwidth (GB/s) [CPU measurement]",
+      },
+      stroke: { field: (d) => d.param.workgroupSize },
+      title_: "Memory bandwidth test (lines are workgroup size)",
+    },
+    {
+      x: { field: "time", label: "GPU time (ns)" },
+      y: { field: "cpuns", label: "CPU time (ns)" },
+      stroke: { field: (d) => d.param.workgroupSize },
+      title_: "Memory bandwidth test (lines are workgroup size)",
+    },
+    {
+      x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
+      y: { field: "cpugpuDelta", label: "CPU - GPU time (ns)" },
       stroke: { field: (d) => d.param.workgroupSize },
       title_: "Memory bandwidth test (lines are workgroup size)",
     },
@@ -179,8 +206,8 @@ const reducePerWGTest = {
 // strided reads
 // random reads
 
-const tests = [membwTest, maddTest];
-// const tests = [membwTest];
+// const tests = [membwTest, maddTest];
+const tests = [membwTest];
 
 for (const test of tests) {
   const data = new Array();
@@ -258,12 +285,12 @@ dispatchGeometry: ${dispatchGeometry}`);
         ],
       });
 
-      const encoder = device.createCommandEncoder({
-        label: "kernel encoder",
+      const prepassEncoder = device.createCommandEncoder({
+        label: "prepass kernel encoder",
       });
-      /* run a bunch of kernels before we start timing, don't time overhead */
-      const kernelPrepass = encoder.beginComputePass(encoder, {
-        label: "untimed kernel compute pass",
+      /* run the kernel before we start timing, don't time overhead */
+      const kernelPrepass = prepassEncoder.beginComputePass({
+        label: "untimed kernel compute prepass",
       });
       kernelPrepass.setPipeline(kernelPipeline);
       kernelPrepass.setBindGroup(0, kernelBindGroup);
@@ -272,7 +299,21 @@ dispatchGeometry: ${dispatchGeometry}`);
         kernelPrepass.dispatchWorkgroups(...dispatchGeometry);
       }
       kernelPrepass.end();
+      // Encode a command to copy the results to a mappable buffer.
+      // this is (from, to)
+      prepassEncoder.copyBufferToBuffer(
+        memdestBuffer,
+        0,
+        mappableMemdestBuffer,
+        0,
+        mappableMemdestBuffer.size
+      );
+      const prepassCommandBuffer = prepassEncoder.finish();
+      device.queue.submit([prepassCommandBuffer]);
 
+      const encoder = device.createCommandEncoder({
+        label: "timed kernel run encoder",
+      });
       const kernelPass = timingHelper.beginComputePass(encoder, {
         label: "timed kernel compute pass",
       });
@@ -284,19 +325,13 @@ dispatchGeometry: ${dispatchGeometry}`);
       }
       kernelPass.end();
 
-      // Encode a command to copy the results to a mappable buffer.
-      // this is (from, to)
-      encoder.copyBufferToBuffer(
-        memdestBuffer,
-        0,
-        mappableMemdestBuffer,
-        0,
-        mappableMemdestBuffer.size
-      );
-
       // Finish encoding and submit the commands
       const command_buffer = encoder.finish();
+      await device.queue.onSubmittedWorkDone();
+      const passStartTime = performance.now();
       device.queue.submit([command_buffer]);
+      await device.queue.onSubmittedWorkDone();
+      const passEndTime = performance.now();
 
       // Read the results
       await mappableMemdestBuffer.mapAsync(GPUMapMode.READ);
@@ -327,9 +362,13 @@ dispatchGeometry: ${dispatchGeometry}`);
           time: ns / test.trials,
           param: param,
         };
+        result.cpuns =
+          ((passEndTime - passStartTime) * 1000000.0) / test.trials;
+        result.cpugpuDelta = result.cpuns - result.time;
         if (test.bytesTransferred) {
           result.bytesTransferred = test.bytesTransferred(memsrc, memdest);
           result.bandwidth = result.bytesTransferred / result.time;
+          result.bandwidthCPU = result.bytesTransferred / result.cpuns;
         }
         if (test.threadCount) {
           result.threadCount = test.threadCount(memsrc);
