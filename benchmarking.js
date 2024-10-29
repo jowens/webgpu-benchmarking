@@ -364,6 +364,9 @@ dispatchGeometry: ${dispatchGeometry}`);
         };
         result.cpuns =
           ((passEndTime - passStartTime) * 1000000.0) / test.trials;
+        if (result.time == 0) {
+          result.time = result.cpns;
+        }
         result.cpugpuDelta = result.cpuns - result.time;
         if (test.bytesTransferred) {
           result.bytesTransferred = test.bytesTransferred(memsrc, memdest);
