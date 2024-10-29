@@ -84,6 +84,50 @@ const membwTest = {
   ],
 };
 
+const membwGSLTest = Object.assign({}, membwTest); // copy from membwTest
+membwGSLTest.name = "membwGSL";
+membwGSLTest.kernel = (param) => /* wgsl */ `
+/* output */
+@group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
+/* input */
+@group(0) @binding(1) var<storage, read> memSrc: array<f32>;
+
+@compute @workgroup_size(${param.workgroupSize}) fn memcpyKernel(
+  @builtin(global_invocation_id) id: vec3u,
+  @builtin(num_workgroups) nwg: vec3u, // == dispatch
+  @builtin(workgroup_id) wgid: vec3u) {
+    /* grid-stride loop: assume nwg.y == 1 */
+    for (var i = id.x;
+         i < arrayLength(&memSrc);
+         i += nwg.x * ${param.workgroupSize}) {
+      memDest[i] = memSrc[i] + 1.0;
+    }
+}`;
+membwGSLTest.dispatchGeometry = (param) => {
+  return [param.workgroupCount];
+};
+membwGSLTest.parameters = {
+  workgroupSize: range(0, 7).map((i) => 2 ** i),
+  memsrcSize: range(10, 25).map((i) => 2 ** i),
+  workgroupCount: range(5, 10).map((i) => 2 ** i),
+};
+membwGSLTest.plots = [
+  {
+    x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
+    y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+    fy: { field: (d) => d.param.workgroupCount, label: "Workgroup Count" },
+    stroke: { field: (d) => d.param.workgroupSize },
+    title_: "Memory bandwidth test (lines are workgroup size)",
+  },
+  {
+    x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
+    y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+    fy: { field: (d) => d.param.workgroupSize, label: "Workgroup Size" },
+    stroke: { field: (d) => d.param.workgroupCount },
+    title_: "Memory bandwidth test (lines are workgroup size)",
+  },
+];
+
 const maddTest = {
   name: "madd",
   description:
@@ -111,7 +155,7 @@ const maddTest = {
         /* 2^-22 = 2.38418579e-7 */
         var b = f * 2.38418579e-7 + 1.0;
         /* b is a float btwn 1 and 2 */`;
-    var opt = param.opsPerThread;
+    let opt = param.opsPerThread;
     while (opt > 2) {
       k = k + "    f = f * b + b;\n";
       opt -= 2;
@@ -120,10 +164,10 @@ const maddTest = {
     return k;
   },
   validate: (input, output, param) => {
-    var f = input;
+    let f = input;
     const b = f * 2.38418579e-7 + 1.0;
     /* b is a float btwn 1 and 2 */
-    var opsPerThread = param.opsPerThread;
+    let opsPerThread = param.opsPerThread;
     while (opsPerThread > 2) {
       f = f * b + b;
       opsPerThread -= 2;
@@ -207,7 +251,7 @@ const reducePerWGTest = {
 // random reads
 
 // const tests = [membwTest, maddTest];
-const tests = [membwTest];
+const tests = [membwGSLTest];
 
 for (const test of tests) {
   const data = new Array();
@@ -218,15 +262,21 @@ for (const test of tests) {
 
     const workgroupCount = memsrcSize / workgroupSize;
     /* given number of workgroups, compute dispatch geometry that respects limits */
-    const dispatchGeometry = [workgroupCount, 1];
-    while (
-      dispatchGeometry[0] > device.limits.maxComputeWorkgroupsPerDimension
-    ) {
-      dispatchGeometry[0] /= 2;
-      dispatchGeometry[1] *= 2;
+    let dispatchGeometry;
+    if (Object.hasOwn(test, "dispatchGeometry")) {
+      dispatchGeometry = test.dispatchGeometry(param);
+    } else {
+      dispatchGeometry = [workgroupCount, 1];
+      while (
+        dispatchGeometry[0] > device.limits.maxComputeWorkgroupsPerDimension
+      ) {
+        dispatchGeometry[0] /= 2;
+        dispatchGeometry[1] *= 2;
+      }
     }
     console.log(`workgroup count: ${workgroupCount}
 workgroup size: ${workgroupSize}
+GSL increment: nwg.x ${dispatchGeometry} * wkgp size ${workgroupSize}
 maxComputeWGPerDim: ${device.limits.maxComputeWorkgroupsPerDimension}
 dispatchGeometry: ${dispatchGeometry}`);
 
@@ -294,7 +344,7 @@ dispatchGeometry: ${dispatchGeometry}`);
       });
       kernelPrepass.setPipeline(kernelPipeline);
       kernelPrepass.setBindGroup(0, kernelBindGroup);
-      for (var i = 0; i < 1; i++) {
+      for (let i = 0; i < 1; i++) {
         /* just prime with one iteration */
         kernelPrepass.dispatchWorkgroups(...dispatchGeometry);
       }
@@ -320,7 +370,7 @@ dispatchGeometry: ${dispatchGeometry}`);
       kernelPass.setPipeline(kernelPipeline);
       kernelPass.setBindGroup(0, kernelBindGroup);
       // TODO handle not evenly divisible by wgSize
-      for (var i = 0; i < test.trials; i++) {
+      for (let i = 0; i < test.trials; i++) {
         kernelPass.dispatchWorkgroups(...dispatchGeometry);
       }
       kernelPass.end();
@@ -396,11 +446,12 @@ dispatchGeometry: ${dispatchGeometry}`);
 
   for (const testPlot of test.plots) {
     const filteredData = testPlot?.filter ? testPlot?.filter(data) : data;
-    const plot = Plot.plot({
+    const schema = {
       marks: [
         Plot.lineY(filteredData, {
           x: testPlot.x.field,
           y: testPlot.y.field,
+          ...(Object.hasOwn(testPlot, "fy") && { fy: testPlot.fy.field }),
           stroke: testPlot.stroke.field,
           tip: true,
         }),
@@ -410,6 +461,7 @@ dispatchGeometry: ${dispatchGeometry}`);
             x: testPlot.x.field,
             y: testPlot.y.field,
             z: testPlot.stroke.field,
+            ...(Object.hasOwn(testPlot, "fy") && { fy: testPlot.fy.field }),
             text: testPlot.stroke.field,
             textAnchor: "start",
             dx: 3,
@@ -426,11 +478,17 @@ dispatchGeometry: ${dispatchGeometry}`);
       ],
       x: { type: "log", label: testPlot?.x?.label ?? "XLABEL" },
       y: { type: "log", label: testPlot?.y?.label ?? "YLABEL" },
+      ...(Object.hasOwn(testPlot, "fy") && {
+        fy: { label: testPlot.fy.label },
+      }),
+      ...(Object.hasOwn(testPlot, "fy") && { grid: true }),
       color: { type: "ordinal", legend: true },
       title: testPlot?.title,
       subtitle: testPlot?.subtitle,
       caption: testPlot?.caption,
-    });
+    };
+    console.log(schema);
+    const plot = Plot.plot(schema);
     const div = document.querySelector("#plot");
     div.append(plot);
   }
