@@ -1,37 +1,18 @@
 import { combinations, range, fail } from "./util.mjs";
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
 
-let Plot;
+let Plot, JSDOM;
 if (typeof process !== "undefined" && process.release.name === "node") {
   // running in Node
   Plot = await import("@observablehq/plot");
+  JSDOM = await import("jsdom");
 } else {
   Plot = await import(
     "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm"
   );
 }
 
-// util functions in util.js, imported by HTML wrapper
-// end HTML
-
-// if this is Node:
-// "use strict";
-// const { create, globals } = require("../../src/dawn-build/dawn.node");
-// Object.assign(globalThis, globals); // Provides constants like GPUBufferUsage.MAP_READ
-// let navigator = { gpu: create([]) };
-// let navigator = {
-//   gpu: create(["enable-dawn-features=use_user_defined_labels_in_backend"]),
-// };
-// import * as Plot from "@observablehq/plot";
-// import { JSDOM } from "jsdom";
-// end this is Node
-
-if (typeof process !== "undefined" && process.release.name === "node") {
-  // running in Node
-} else {
-  // running in browser
-}
-
+// tests
 import { membwTest, membwGSLTest } from "./membwtest.mjs";
 import { maddTest } from "./maddtest.mjs";
 import { reducePerWGTest } from "./reduce.mjs";
