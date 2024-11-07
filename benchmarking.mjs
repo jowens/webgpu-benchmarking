@@ -4,6 +4,7 @@ import { TimingHelper } from "./webgpufundamentals-timing.mjs";
 let Plot;
 if (typeof process !== "undefined" && process.release.name === "node") {
   // running in Node
+  Plot = await import("@observablehq/plot");
 } else {
   Plot = await import(
     "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm"
