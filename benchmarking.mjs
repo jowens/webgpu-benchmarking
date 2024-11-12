@@ -37,10 +37,11 @@ async function main(navigator) {
   }
 
   // const tests = [membwTest, maddTest];
-  const tests = [membwGSLTest];
+  // const tests = [membwTest, membwGSLTest];
+  const tests = [membwTest];
 
   for (const test of tests) {
-    const data = new Array();
+    const expts = new Array();
     for (const param of combinations(test.parameters)) {
       const memsrcSize = param.memsrcSize;
       const workgroupSize = param.workgroupSize;
@@ -62,9 +63,8 @@ async function main(navigator) {
       }
       console.log(`workgroup count: ${workgroupCount}
 workgroup size: ${workgroupSize}
-GSL increment: nwg.x ${dispatchGeometry} * wkgp size ${workgroupSize}
-maxComputeWGPerDim: ${device.limits.maxComputeWorkgroupsPerDimension}
-dispatchGeometry: ${dispatchGeometry}`);
+dispatchGeometry: ${dispatchGeometry}
+maxComputeWGPerDim: ${device.limits.maxComputeWorkgroupsPerDimension}`);
 
       const memsrc = new Float32Array(memsrcSize);
       for (let i = 0; i < memsrc.length; i++) {
@@ -222,7 +222,7 @@ dispatchGeometry: ${dispatchGeometry}`);
               result.time
             );
           }
-          data.push(result);
+          expts.push(result);
           console.log(result);
         });
       }
@@ -231,13 +231,16 @@ dispatchGeometry: ${dispatchGeometry}`);
       memdestBuffer.destroy();
       mappableMemdestBuffer.destroy();
     }
-    console.log(data);
+    console.log(expts);
 
     for (const testPlot of test.plots) {
-      const filteredData = testPlot?.filter ? testPlot?.filter(data) : data;
+      /* default: if filter not specified, only take expts from this test */
+      const filteredExpts = testPlot?.filter
+        ? testPlot?.filter(expts)
+        : expts.filter((row) => row.name == test.name);
       const schema = {
         marks: [
-          Plot.lineY(filteredData, {
+          Plot.lineY(filteredExpts, {
             x: testPlot.x.field,
             y: testPlot.y.field,
             ...(Object.hasOwn(testPlot, "fy") && { fy: testPlot.fy.field }),
@@ -245,7 +248,7 @@ dispatchGeometry: ${dispatchGeometry}`);
             tip: true,
           }),
           Plot.text(
-            filteredData,
+            filteredExpts,
             Plot.selectLast({
               x: testPlot.x.field,
               y: testPlot.y.field,
@@ -256,12 +259,14 @@ dispatchGeometry: ${dispatchGeometry}`);
               dx: 3,
             })
           ),
-          Plot.text([testPlot?.caption_tl ?? ""], {
+          Plot.text([testPlot?.text_tl ?? ""], {
             lineWidth: 30,
+            dx: 5,
             frameAnchor: "top-left",
           }),
-          Plot.text([testPlot?.caption_br ?? ""], {
+          Plot.text([testPlot?.text_br ?? ""], {
             lineWidth: 30,
+            dy: -10,
             frameAnchor: "bottom-right",
           }),
         ],

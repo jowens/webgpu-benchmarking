@@ -9,19 +9,18 @@ export const membwTest = {
   },
   trials: 10,
   kernel: (param) => /* wgsl */ `
-      /* output */
-      @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
-      /* input */
-      @group(0) @binding(1) var<storage, read> memSrc: array<f32>;
+    /* output */
+    @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
+    /* input */
+    @group(0) @binding(1) var<storage, read> memSrc: array<f32>;
 
-      @compute @workgroup_size(${param.workgroupSize}) fn memcpyKernel(
-        @builtin(global_invocation_id) id: vec3u,
-        @builtin(num_workgroups) nwg: vec3u,
-        @builtin(workgroup_id) wgid: vec3u) {
-          /* needs to be a grid-stride loop */
-          let i = id.y * nwg.x * ${param.workgroupSize} + id.x;
-          memDest[i] = memSrc[i] + 1.0;
-      }`,
+    @compute @workgroup_size(${param.workgroupSize}) fn memcpyKernel(
+      @builtin(global_invocation_id) id: vec3u,
+      @builtin(num_workgroups) nwg: vec3u,
+      @builtin(workgroup_id) wgid: vec3u) {
+        let i = id.y * nwg.x * ${param.workgroupSize} + id.x;
+        memDest[i] = memSrc[i] + 1.0;
+    }`,
   validate: (input, output) => {
     return input + 1.0 == output;
   },
@@ -33,7 +32,8 @@ export const membwTest = {
       x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
       y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
       stroke: { field: (d) => d.param.workgroupSize },
-      title_: "Memory bandwidth test (lines are workgroup size)",
+      caption:
+        "Memory bandwidth test, 1 fp32 per thread (lines are workgroup size)",
     },
     {
       x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
@@ -42,23 +42,30 @@ export const membwTest = {
         label: "Achieved bandwidth (GB/s) [CPU measurement]",
       },
       stroke: { field: (d) => d.param.workgroupSize },
-      title_: "Memory bandwidth test (lines are workgroup size)",
+      caption:
+        "Memory bandwidth test, 1 fp32 per thread (lines are workgroup size)",
     },
     {
       x: { field: "time", label: "GPU time (ns)" },
       y: { field: "cpuns", label: "CPU time (ns)" },
       stroke: { field: (d) => d.param.workgroupSize },
-      title_: "Memory bandwidth test (lines are workgroup size)",
+      caption:
+        "Memory bandwidth test, 1 fp32 per thread (lines are workgroup size)",
     },
     {
       x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
       y: { field: "cpugpuDelta", label: "CPU - GPU time (ns)" },
       stroke: { field: (d) => d.param.workgroupSize },
-      title_: "Memory bandwidth test (lines are workgroup size)",
+      caption:
+        "Memory bandwidth test, 1 fp32 per thread (lines are workgroup size)",
     },
   ],
 };
 
+/**
+ * grid stride loop, now we don't assign a fixed number of elements per thread
+ * background: https://developer.nvidia.com/blog/cuda-pro-tip-write-flexible-kernels-grid-stride-loops/
+ */
 export const membwGSLTest = Object.assign({}, membwTest); // copy from membwTest
 membwGSLTest.name = "membwGSL";
 membwGSLTest.kernel = (param) => /* wgsl */ `
