@@ -22,7 +22,7 @@ export const stridedReadTest = {
         let i = id.y * nwg.x * ${param.workgroupSize} + id.x;
         memDest[i] = memSrc[i*${param.stride}] + 1.0;
     }`,
-  memsrcSize: (param) => 2 ** 27 / 4, // device.limits.maxBufferSize / 4,
+  memsrcSize: (param) => 2 ** 27 / 4, // min(device.limits.maxBufferSize, maxStorageBufferBindingSize) / 4,
   memdestSize: function (param) {
     return this.memsrcSize(param) / param.stride;
   },
@@ -42,6 +42,16 @@ export const stridedReadTest = {
         label: "Workgroup size",
       },
       y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+      stroke: { field: (d) => d.param.stride, label: "Stride distance" },
+      caption:
+        "Strided memory bandwidth test, 1 fp32 per thread (lines are stride distance)",
+    },
+    {
+      x: {
+        field: (d) => d.param.workgroupSize,
+        label: "Workgroup size",
+      },
+      y: { field: "time", label: "Runtime (ns)" },
       stroke: { field: (d) => d.param.stride, label: "Stride distance" },
       caption:
         "Strided memory bandwidth test, 1 fp32 per thread (lines are stride distance)",
