@@ -100,13 +100,30 @@ membwGSLTest.plots = [
     y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
     fy: { field: (d) => d.param.workgroupCount, label: "Workgroup Count" },
     stroke: { field: (d) => d.param.workgroupSize },
-    title_: "Memory bandwidth test (lines are workgroup size)",
+    caption: "Memory bandwidth test GSL (lines are workgroup size)",
   },
   {
     x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
     y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
     fy: { field: (d) => d.param.workgroupSize, label: "Workgroup Size" },
     stroke: { field: (d) => d.param.workgroupCount },
-    title_: "Memory bandwidth test (lines are workgroup size)",
+    caption: "Memory bandwidth test GSL (lines are workgroup size)",
   },
 ];
+
+export const membwAdditionalPlots = {
+  category: "membw",
+  testname: "additional-plots",
+  plots: [
+    {
+      filter: function (row) {
+        return row.category == "membw" /* this.category */;
+      },
+      x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
+      y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+      fy: { field: (d) => d.param.workgroupSize, label: "Workgroup Size" },
+      stroke: { field: "testname" },
+      caption: "Memory bandwidth test (lines are test name)",
+    },
+  ],
+};
