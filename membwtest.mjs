@@ -117,13 +117,18 @@ export const membwAdditionalPlots = {
   plots: [
     {
       filter: function (row) {
-        return row.category == "membw" /* this.category */;
+        return (
+          row.category == "membw" /* this.category */ &&
+          (row.testname != "GSL fp32-per-thread" ||
+            row.param.workgroupCount == 128)
+        );
       },
       x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
       y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
       fy: { field: (d) => d.param.workgroupSize, label: "Workgroup Size" },
       stroke: { field: "testname" },
-      caption: "Memory bandwidth test (lines are test name)",
+      caption:
+        "Memory bandwidth test (lines are test name, workgroupCount GSL == 128)",
     },
   ],
 };
