@@ -1,6 +1,7 @@
 import { range } from "./util.mjs";
 export const membwTest = {
-  name: "membw",
+  category: "membw",
+  testname: "fp32-per-thread",
   description:
     "Copies input array to output array. One thread is assigned per 32b input element.",
   parameters: {
@@ -67,7 +68,7 @@ export const membwTest = {
  * background: https://developer.nvidia.com/blog/cuda-pro-tip-write-flexible-kernels-grid-stride-loops/
  */
 export const membwGSLTest = Object.assign({}, membwTest); // copy from membwTest
-membwGSLTest.name = "membwGSL";
+membwGSLTest.testname = "GSL fp32-per-thread";
 membwGSLTest.kernel = (param) => /* wgsl */ `
   /* output */
   @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;

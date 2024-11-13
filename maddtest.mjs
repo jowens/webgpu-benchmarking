@@ -1,6 +1,6 @@
 import { range } from "./util.mjs";
 export const maddTest = {
-  name: "madd",
+  category: "madd",
   description:
     "Computes N multiply-adds per input element. One thread is responsible for one 32b input element.",
   parameters: {

@@ -1,6 +1,7 @@
 import { range } from "./util.mjs";
 export const reducePerWGTest = {
-  name: "reduce per wg",
+  category: "reduce",
+  testname: "reduce per wg",
   workgroupSizes: range(2, 7).map((i) => 2 ** i),
   memsrcSizes: range(16, 17).map((i) => 2 ** i),
   trials: 10,

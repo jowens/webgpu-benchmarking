@@ -72,12 +72,12 @@ maxComputeWGPerDim: ${device.limits.maxComputeWorkgroupsPerDimension}`);
       }
 
       const computeModule = device.createShaderModule({
-        label: `module: ${test.name}`,
+        label: `module: ${test.category} ${test.testname}`,
         code: test.kernel(param),
       });
 
       const kernelPipeline = device.createComputePipeline({
-        label: `${test.name} compute pipeline`,
+        label: `${test.category} ${test.testname} compute pipeline`,
         layout: "auto",
         compute: {
           module: computeModule,
@@ -194,7 +194,8 @@ maxComputeWGPerDim: ${device.limits.maxComputeWorkgroupsPerDimension}`);
 
         timingHelper.getResult().then((ns) => {
           const result = {
-            name: test.name,
+            category: test.category,
+            testname: test.testname,
             time: ns / test.trials,
             param: param,
           };
@@ -237,7 +238,10 @@ maxComputeWGPerDim: ${device.limits.maxComputeWorkgroupsPerDimension}`);
       /* default: if filter not specified, only take expts from this test */
       const filteredExpts = testPlot?.filter
         ? testPlot?.filter(expts)
-        : expts.filter((row) => row.name == test.name);
+        : expts.filter(
+            (row) =>
+              row.testname == test.testname && row.category == test.category
+          );
       const schema = {
         marks: [
           Plot.lineY(filteredExpts, {
@@ -285,6 +289,7 @@ maxComputeWGPerDim: ${device.limits.maxComputeWorkgroupsPerDimension}`);
       const plot = Plot.plot(schema);
       const div = document.querySelector("#plot");
       div.append(plot);
+      div.append(document.createElement("hr"));
     }
   }
 }
