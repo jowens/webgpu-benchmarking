@@ -14,6 +14,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 
 // tests
 import { membwTest, membwGSLTest, membwAdditionalPlots } from "./membwtest.mjs";
+import { stridedReadTest } from "./stridedreadtest.mjs";
 import { maddTest } from "./maddtest.mjs";
 import { reducePerWGTest } from "./reduce.mjs";
 
@@ -39,17 +40,27 @@ async function main(navigator) {
   // const tests = [membwTest, maddTest];
   const tests = [membwTest, membwGSLTest, membwAdditionalPlots];
   // const tests = [membwTest];
+  // const tests = [stridedReadTest];
 
-  const expts = new Array();
+  const expts = new Array(); // push new rows onto this
   for (const test of tests) {
     if (test.hasOwnProperty("kernel")) {
       /* skip computation if no kernel */
       for (const param of combinations(test.parameters)) {
-        const memsrcSize = param.memsrcSize;
-        const workgroupSize = param.workgroupSize;
-        const timingHelper = new TimingHelper(device);
+        /** general hierarchy of setting these key parameters:
+         * - First, use the value from test.parameters
+         * - Second, use the function in the test
+         * - Third, use a reasonable default
+         */
+        const memsrcSize = param.memsrcSize ?? test.memsrcSize(param);
+        const memdestSize =
+          param.memdestSize ?? test.memdestSize?.(param) ?? memsrcSize;
+        const workgroupSize = param.workgroupSize ?? test.workgroupSize(param);
+        const workgroupCount =
+          param.workgroupCount ??
+          test.workgroupCount?.(param) ??
+          memsrcSize / workgroupSize;
 
-        const workgroupCount = memsrcSize / workgroupSize;
         /* given number of workgroups, compute dispatch geometry that respects limits */
         let dispatchGeometry;
         if (Object.hasOwn(test, "dispatchGeometry")) {
@@ -63,15 +74,20 @@ async function main(navigator) {
             dispatchGeometry[1] *= 2;
           }
         }
-        console.log(`workgroup count: ${workgroupCount}
+        console.log(`workgroupCount: ${workgroupCount}
 workgroup size: ${workgroupSize}
-dispatchGeometry: ${dispatchGeometry}
-maxComputeWGPerDim: ${device.limits.maxComputeWorkgroupsPerDimension}`);
+dispatchGeometry: ${dispatchGeometry}`);
 
         const memsrc = new Float32Array(memsrcSize);
         for (let i = 0; i < memsrc.length; i++) {
           memsrc[i] = i & (2 ** 22 - 1); // roughly, range of 32b significand
         }
+        if (memsrc.byteLength != memsrcSize * 4) {
+          fail(
+            `Test ${test.category} / ${test.testname}: memsrc.byteLength (${memsrc.byteLength}) incompatible with memsrcSize (${memsrcSize}))`
+          );
+        }
+        const memdestBytes = memdestSize * 4;
 
         const computeModule = device.createShaderModule({
           label: `module: ${test.category} ${test.testname}`,
@@ -86,8 +102,7 @@ maxComputeWGPerDim: ${device.limits.maxComputeWorkgroupsPerDimension}`);
           },
         });
 
-        // create buffers on the GPU to hold data
-        // read-only inputs:
+        // allocate/create buffers on the GPU to hold in/out data
         const memsrcBuffer = device.createBuffer({
           label: "memory source buffer",
           size: memsrc.byteLength,
@@ -97,13 +112,13 @@ maxComputeWGPerDim: ${device.limits.maxComputeWorkgroupsPerDimension}`);
 
         const memdestBuffer = device.createBuffer({
           label: "memory destination buffer",
-          size: memsrc.byteLength,
+          size: memdestBytes,
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
         });
 
         const mappableMemdestBuffer = device.createBuffer({
           label: "mappable memory destination buffer",
-          size: memsrc.byteLength,
+          size: memdestBytes,
           usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
         });
 
@@ -149,6 +164,7 @@ maxComputeWGPerDim: ${device.limits.maxComputeWorkgroupsPerDimension}`);
           const prepassCommandBuffer = prepassEncoder.finish();
           device.queue.submit([prepassCommandBuffer]);
 
+          const timingHelper = new TimingHelper(device);
           const encoder = device.createCommandEncoder({
             label: "timed kernel run encoder",
           });
