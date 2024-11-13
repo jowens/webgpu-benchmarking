@@ -107,7 +107,8 @@ membwGSLTest.plots = [
     y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
     fy: { field: (d) => d.param.workgroupSize, label: "Workgroup Size" },
     stroke: { field: (d) => d.param.workgroupCount },
-    caption: "Memory bandwidth test GSL (lines are workgroup size)",
+    caption:
+      "Memory bandwidth test GSL (lines are workgroup size). Looks like max throughput doesn't occur until ~512 threads/workgroup.",
   },
 ];
 
@@ -128,7 +129,7 @@ export const membwAdditionalPlots = {
       fy: { field: (d) => d.param.workgroupSize, label: "Workgroup Size" },
       stroke: { field: "testname" },
       caption:
-        "Memory bandwidth test (lines are test name, workgroupCount GSL == 128)",
+        "Memory bandwidth test (lines are test name, workgroupCount GSL == 128). Results should indicate a GSL is at least as good as one thread per item.",
     },
   ],
 };
