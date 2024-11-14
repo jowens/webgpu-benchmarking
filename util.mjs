@@ -32,4 +32,10 @@ function fail(msg) {
   alert(msg);
 }
 
-export { combinations, range, fail };
+// https://stackoverflow.com/questions/8896327/jquery-wait-delay-1-second-without-executing-code
+const delay = (millis) =>
+  new Promise((resolve, reject) => {
+    setTimeout((_) => resolve(), millis);
+  });
+
+export { combinations, range, fail, delay };
