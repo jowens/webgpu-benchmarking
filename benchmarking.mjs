@@ -1,4 +1,4 @@
-import { combinations, range, fail } from "./util.mjs";
+import { combinations, range, fail, delay } from "./util.mjs";
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
 
 let Plot, JSDOM;
@@ -27,6 +27,10 @@ async function main(navigator) {
   const hasSubgroups = adapter.features.has("subgroups");
   const canTimestamp = adapter.features.has("timestamp-query");
   const device = await adapter?.requestDevice({
+    requiredLimits: {
+      //    maxBufferSize: 4294967296,
+      //    maxStorageBufferBindingSize: 4294967292,
+    },
     requiredFeatures: [
       ...(canTimestamp ? ["timestamp-query"] : []),
       ...(hasSubgroups ? ["subgroups"] : []),
@@ -38,9 +42,9 @@ async function main(navigator) {
   }
 
   // const tests = [membwTest, maddTest];
-  const tests = [membwTest, membwGSLTest, membwAdditionalPlots];
+  // const tests = [membwTest, membwGSLTest, membwAdditionalPlots];
   // const tests = [membwTest];
-  // const tests = [stridedReadTest];
+  const tests = [stridedReadTest];
 
   const expts = new Array(); // push new rows onto this
   for (const test of tests) {
@@ -251,6 +255,10 @@ dispatchGeometry: ${dispatchGeometry}`);
         mappableMemdestBuffer.destroy();
       }
     }
+    // delay is just to make sure previous jobs finish before plotting
+    // almost certainly the timer->then clause above should be written in a way
+    //   that lets me wait on it instead
+    await delay(2000);
     console.log(expts);
 
     for (const testPlot of test.plots) {
