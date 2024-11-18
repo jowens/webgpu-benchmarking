@@ -15,6 +15,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 // tests
 import { membwTest, membwGSLTest, membwAdditionalPlots } from "./membwtest.mjs";
 import { stridedReadTest } from "./stridedreadtest.mjs";
+import { randomReadTest } from "./randomreadtest.mjs";
 import { maddTest } from "./maddtest.mjs";
 import { reducePerWGTest } from "./reduce.mjs";
 
@@ -28,8 +29,8 @@ async function main(navigator) {
   const canTimestamp = adapter.features.has("timestamp-query");
   const device = await adapter?.requestDevice({
     requiredLimits: {
-      //    maxBufferSize: 4294967296,
-      //    maxStorageBufferBindingSize: 4294967292,
+      maxBufferSize: 4294967296,
+      maxStorageBufferBindingSize: 4294967292,
     },
     requiredFeatures: [
       ...(canTimestamp ? ["timestamp-query"] : []),
@@ -44,7 +45,9 @@ async function main(navigator) {
   // const tests = [membwTest, maddTest];
   // const tests = [membwTest, membwGSLTest, membwAdditionalPlots];
   // const tests = [membwTest];
-  const tests = [stridedReadTest];
+  // const tests = [stridedReadTest];
+  const tests = [randomReadTest];
+  // const tests = [stridedReadTest, randomReadTest];
 
   const expts = new Array(); // push new rows onto this
   for (const test of tests) {
@@ -82,13 +85,18 @@ async function main(navigator) {
 workgroup size: ${workgroupSize}
 dispatchGeometry: ${dispatchGeometry}`);
 
-        const memsrc = new Float32Array(memsrcSize);
-        for (let i = 0; i < memsrc.length; i++) {
-          memsrc[i] = i & (2 ** 22 - 1); // roughly, range of 32b significand
+        const memsrcf32 = new Float32Array(memsrcSize);
+        const memsrcu32 = new Uint32Array(memsrcSize);
+        for (let i = 0; i < memsrcSize; i++) {
+          memsrcf32[i] = i & (2 ** 22 - 1); // roughly, range of 32b significand
+          memsrcu32[i] = i == 0 ? 0 : memsrcu32[i - 1] + 1; // trying to get u32s
         }
-        if (memsrc.byteLength != memsrcSize * 4) {
+        if (
+          memsrcf32.byteLength != memsrcSize * 4 ||
+          memsrcu32.byteLength != memsrcSize * 4
+        ) {
           fail(
-            `Test ${test.category} / ${test.testname}: memsrc.byteLength (${memsrc.byteLength}) incompatible with memsrcSize (${memsrcSize}))`
+            `Test ${test.category} / ${test.testname}: memsrc{f,i}.byteLength (${memsrcf32.byteLength}, ${memsrcu32.byteLength}) incompatible with memsrcSize (${memsrcSize}))`
           );
         }
         const memdestBytes = memdestSize * 4;
@@ -107,12 +115,18 @@ dispatchGeometry: ${dispatchGeometry}`);
         });
 
         // allocate/create buffers on the GPU to hold in/out data
-        const memsrcBuffer = device.createBuffer({
-          label: "memory source buffer",
-          size: memsrc.byteLength,
+        const memsrcuBuffer = device.createBuffer({
+          label: "memory source buffer (int)",
+          size: memsrcu32.byteLength,
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         });
-        device.queue.writeBuffer(memsrcBuffer, 0, memsrc);
+        device.queue.writeBuffer(memsrcuBuffer, 0, memsrcu32);
+        const memsrcfBuffer = device.createBuffer({
+          label: "memory source buffer (float)",
+          size: memsrcf32.byteLength,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+        device.queue.writeBuffer(memsrcfBuffer, 0, memsrcf32);
 
         const memdestBuffer = device.createBuffer({
           label: "memory destination buffer",
@@ -128,7 +142,8 @@ dispatchGeometry: ${dispatchGeometry}`);
 
         const maxBindingSize = device.limits.maxStorageBufferBindingSize;
         if (
-          memsrcBuffer.size <= maxBindingSize &&
+          (memsrcuBuffer.size <= maxBindingSize ||
+            memsrcfBuffer.size <= maxBindingSize) &&
           memdestBuffer.size <= maxBindingSize &&
           mappableMemdestBuffer.size <= maxBindingSize
         ) {
@@ -138,7 +153,13 @@ dispatchGeometry: ${dispatchGeometry}`);
             layout: kernelPipeline.getBindGroupLayout(0),
             entries: [
               { binding: 0, resource: { buffer: memdestBuffer } },
-              { binding: 1, resource: { buffer: memsrcBuffer } },
+              {
+                binding: 1,
+                resource: {
+                  buffer:
+                    test.datatype == "u32" ? memsrcuBuffer : memsrcfBuffer,
+                },
+              },
             ],
           });
 
@@ -193,21 +214,34 @@ dispatchGeometry: ${dispatchGeometry}`);
 
           // Read the results
           await mappableMemdestBuffer.mapAsync(GPUMapMode.READ);
-          const memdest = new Float32Array(
-            mappableMemdestBuffer.getMappedRange().slice()
-          );
+          const memdest =
+            test.datatype == "u32"
+              ? new Uint32Array(mappableMemdestBuffer.getMappedRange().slice())
+              : new Float32Array(
+                  mappableMemdestBuffer.getMappedRange().slice()
+                );
           mappableMemdestBuffer.unmap();
           let errors = 0;
+          let last = 0;
           for (let i = 0; i < memdest.length; i++) {
-            if (!test.validate(memsrc[i], memdest[i], param)) {
+            if (!test.validate(memsrcu32[i], memdest[i], param)) {
               if (errors < 5) {
                 console.log(
-                  `Error ${errors}: i=${i}, input=${memsrc[i]}, output=${memdest[i]}`
+                  `Error ${errors}: i=${i}, input=0x${memsrcu32[i].toString(
+                    16
+                  )}, output=0x${memdest[i].toString(16)}`
                 );
               }
               errors++;
+              last = i;
             }
           }
+          console.log(
+            `Last error: i=${last}, input=0x${memsrcu32[last].toString(
+              16
+            )}, output=0x${memdest[last].toString(16)}`
+          );
+
           if (errors > 0) {
             console.log(`Memdest size: ${memdest.length} | Errors: ${errors}`);
           } else {
@@ -228,12 +262,15 @@ dispatchGeometry: ${dispatchGeometry}`);
             }
             result.cpugpuDelta = result.cpuns - result.time;
             if (test.bytesTransferred) {
-              result.bytesTransferred = test.bytesTransferred(memsrc, memdest);
+              result.bytesTransferred = test.bytesTransferred(
+                memsrcu32,
+                memdest
+              );
               result.bandwidth = result.bytesTransferred / result.time;
               result.bandwidthCPU = result.bytesTransferred / result.cpuns;
             }
             if (test.threadCount) {
-              result.threadCount = test.threadCount(memsrc);
+              result.threadCount = test.threadCount(memsrcu32);
             }
             if (test.flopsPerThread) {
               result.flopsPerThread = test.flopsPerThread(param);
@@ -250,7 +287,8 @@ dispatchGeometry: ${dispatchGeometry}`);
           });
         }
         /* tear down */
-        memsrcBuffer.destroy();
+        memsrcuBuffer.destroy();
+        memsrcfBuffer.destroy();
         memdestBuffer.destroy();
         mappableMemdestBuffer.destroy();
       }
@@ -282,7 +320,9 @@ dispatchGeometry: ${dispatchGeometry}`);
             x: testPlot.x.field,
             y: testPlot.y.field,
             ...(Object.hasOwn(testPlot, "fy") && { fy: testPlot.fy.field }),
-            stroke: testPlot.stroke.field,
+            ...(Object.hasOwn(testPlot, "stroke") && {
+              stroke: testPlot.stroke.field,
+            }),
             tip: true,
           }),
           Plot.text(
@@ -290,9 +330,13 @@ dispatchGeometry: ${dispatchGeometry}`);
             Plot.selectLast({
               x: testPlot.x.field,
               y: testPlot.y.field,
-              z: testPlot.stroke.field,
+              ...(Object.hasOwn(testPlot, "stroke") && {
+                z: testPlot.stroke.field,
+              }),
               ...(Object.hasOwn(testPlot, "fy") && { fy: testPlot.fy.field }),
-              text: testPlot.stroke.field,
+              ...(Object.hasOwn(testPlot, "stroke") && {
+                text: testPlot.stroke.field,
+              }),
               textAnchor: "start",
               dx: 3,
             })
