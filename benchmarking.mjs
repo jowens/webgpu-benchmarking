@@ -46,8 +46,8 @@ async function main(navigator) {
   // const tests = [membwTest, membwGSLTest, membwAdditionalPlots];
   // const tests = [membwTest];
   // const tests = [stridedReadTest];
-  const tests = [randomReadTest];
-  // const tests = [stridedReadTest, randomReadTest];
+  // const tests = [randomReadTest];
+  const tests = [stridedReadTest, randomReadTest];
 
   const expts = new Array(); // push new rows onto this
   for (const test of tests) {
