@@ -66,9 +66,10 @@ async function main(navigator) {
         const workgroupCount =
           param.workgroupCount ??
           test.workgroupCount?.(param) ??
-          memsrcSize / workgroupSize;
+          Math.ceil(memsrcSize / workgroupSize);
 
         /* given number of workgroups, compute dispatch geometry that respects limits */
+        /* TODO: handle non-powers-of-two workgroup sizes here */
         let dispatchGeometry;
         if (Object.hasOwn(test, "dispatchGeometry")) {
           dispatchGeometry = test.dispatchGeometry(param);
@@ -77,7 +78,7 @@ async function main(navigator) {
           while (
             dispatchGeometry[0] > device.limits.maxComputeWorkgroupsPerDimension
           ) {
-            dispatchGeometry[0] /= 2;
+            dispatchGeometry[0] = Math.ceil(dispatchGeometry[0] / 2);
             dispatchGeometry[1] *= 2;
           }
         }
@@ -103,7 +104,10 @@ dispatchGeometry: ${dispatchGeometry}`);
 
         const computeModule = device.createShaderModule({
           label: `module: ${test.category} ${test.testname}`,
-          code: test.kernel(param),
+          code: test.kernel(
+            param,
+            memsrcSize /* this is "number of threads" */
+          ),
         });
 
         const kernelPipeline = device.createComputePipeline({

@@ -7,7 +7,7 @@ export const stridedReadTest = {
   datatype: "u32",
   parameters: {
     workgroupSize: [32, 64, 96, 128, 160, 192, 224, 256], // range(0, 8).map((i) => 2 ** i),
-    log2stride: range(/* 0 */ 11, 12),
+    log2stride: range(/* 0 */ 0, 12),
   },
   trials: 10,
   /**
@@ -22,7 +22,7 @@ export const stridedReadTest = {
    * Rotate by log2stride:
    * xxxxxxxbbb -> bbbxxxxxxx (for log2stride = 3)
    */
-  kernel: function (param) {
+  kernel: function (param, numThreads) {
     /* function because we need 'this' */
     return /* wgsl */ `
     /* output */
@@ -35,16 +35,18 @@ export const stridedReadTest = {
       @builtin(num_workgroups) nwg: vec3u,
       @builtin(workgroup_id) wgid: vec3u) {
         let i: u32 = id.y * nwg.x * ${param.workgroupSize} + id.x;
-        let address_space_mask: u32 = (1 << ${this.log2memsrcSize}) - 1;
-        /* assert: i == i & address_space_mask */
-        let lshift: u32 = ${param.log2stride};
-        let rshift: u32 = ${this.log2memsrcSize - param.log2stride};
-        let src: u32 = ((i << lshift) | (i >> rshift)) & address_space_mask;
-        memDest[i] = memSrc[src];// + 1;
-        // memDest[i] = src;
+        if (i < ${numThreads}) {
+          let address_space_mask: u32 = (1 << ${this.log2memsrcSize}) - 1;
+          /* assert: i == i & address_space_mask */
+          let lshift: u32 = ${param.log2stride};
+          let rshift: u32 = ${this.log2memsrcSize - param.log2stride};
+          let src: u32 = ((i << lshift) | (i >> rshift)) & address_space_mask;
+          memDest[i] = memSrc[src];// + 1;
+          // memDest[i] = src;
+        }
     }`;
   },
-  log2memsrcSize: 28,
+  log2memsrcSize: 27,
   memsrcSize: function (param) {
     return 2 ** this.log2memsrcSize;
   }, // min(device.limits.maxBufferSize, maxStorageBufferBindingSize) / 4,
@@ -53,9 +55,10 @@ export const stridedReadTest = {
     return this.memsrcSize(param);
   },
   workgroupCount: function (param) {
-    return this.memdestSize(param) / param.workgroupSize;
+    return Math.ceil(this.memdestSize(param) / param.workgroupSize);
   },
   validate: (input, output) => {
+    /* TODO FIX */
     return input /* + 1.0 */ == output;
   },
   bytesTransferred: (memInput, memOutput) => {
