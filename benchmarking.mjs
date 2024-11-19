@@ -209,12 +209,20 @@ dispatchGeometry: ${dispatchGeometry}`);
           kernelPass.end();
 
           // Finish encoding and submit the commands
-          const command_buffer = encoder.finish();
+          const commandBuffer = encoder.finish();
           await device.queue.onSubmittedWorkDone();
           const passStartTime = performance.now();
-          device.queue.submit([command_buffer]);
+          device.queue.submit([commandBuffer]);
           await device.queue.onSubmittedWorkDone();
           const passEndTime = performance.now();
+
+          const resolveEncoder = device.createCommandEncoder({
+            label: "timestamp resolve encoder",
+          });
+          timingHelper.resolveTiming(resolveEncoder);
+          const resolveCommandBuffer = resolveEncoder.finish();
+          await device.queue.onSubmittedWorkDone();
+          device.queue.submit([resolveCommandBuffer]);
 
           // Read the results
           await mappableMemdestBuffer.mapAsync(GPUMapMode.READ);
