@@ -7,7 +7,7 @@ export const stridedReadTest = {
   datatype: "u32",
   parameters: {
     workgroupSize: [32, 64, 96, 128, 160, 192, 224, 256], // range(0, 8).map((i) => 2 ** i),
-    log2stride: range(/* 0 */ 0, 12),
+    log2stride: range(0, 12),
   },
   trials: 10,
   /**
@@ -41,12 +41,19 @@ export const stridedReadTest = {
           let lshift: u32 = ${param.log2stride};
           let rshift: u32 = ${this.log2memsrcSize - param.log2stride};
           let src: u32 = ((i << lshift) | (i >> rshift)) & address_space_mask;
+          /** different algorithm!
+          * The output is wonkier and I think it has more severe cache effects
+          * since low bits are ALWAYS zero
+          * I think this is just "i << lshift".
+          * let src2: u32 =
+          *   (i * (1 << ${param.log2stride})) & address_space_mask;
+          * */
           memDest[i] = memSrc[src];// + 1;
           // memDest[i] = src;
         }
     }`;
   },
-  log2memsrcSize: 27,
+  log2memsrcSize: 26,
   memsrcSize: function (param) {
     return 2 ** this.log2memsrcSize;
   }, // min(device.limits.maxBufferSize, maxStorageBufferBindingSize) / 4,
