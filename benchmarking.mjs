@@ -13,7 +13,11 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 }
 
 // tests
-import { membwTest, membwGSLTest, membwAdditionalPlots } from "./membwtest.mjs";
+import {
+  MembwSimpleTest,
+  MembwGSLTest,
+  MembwAdditionalPlots,
+} from "./membwtest.mjs";
 import { stridedReadTest } from "./stridedreadtest.mjs";
 import { randomReadTest } from "./randomreadtest.mjs";
 import { maddTest } from "./maddtest.mjs";
@@ -44,16 +48,17 @@ async function main(navigator) {
   }
 
   // const tests = [membwTest, maddTest];
-  // const tests = [membwTest, membwGSLTest, membwAdditionalPlots];
+  const tests = [MembwSimpleTest, MembwGSLTest, MembwAdditionalPlots];
   // const tests = [membwTest];
   // const tests = [stridedReadTest];
   // const tests = [randomReadTest];
   // const tests = [stridedReadTest, randomReadTest];
-  const tests = [subgroupSumWGTest];
+  // const tests = [subgroupSumWGTest];
 
-  const expts = new Array(); // push new rows onto this
-  for (const test of tests) {
-    if (test.hasOwnProperty("kernel")) {
+  const expts = new Array(); // push new rows (experiments) onto this
+  for (const testClass of tests) {
+    const test = new testClass();
+    if ("kernel" in test) {
       /* skip computation if no kernel */
       for (const param of combinations(test.parameters)) {
         /** general hierarchy of setting these key parameters:
@@ -73,7 +78,7 @@ async function main(navigator) {
         /* given number of workgroups, compute dispatch geometry that respects limits */
         /* TODO: handle non-powers-of-two workgroup sizes here */
         let dispatchGeometry;
-        if (Object.hasOwn(test, "dispatchGeometry")) {
+        if ("dispatchGeometry" in test) {
           dispatchGeometry = test.dispatchGeometry(param);
         } else {
           dispatchGeometry = [workgroupCount, 1];
@@ -340,8 +345,8 @@ dispatchGeometry: ${dispatchGeometry}`);
           Plot.lineY(filteredExpts, {
             x: testPlot.x.field,
             y: testPlot.y.field,
-            ...(Object.hasOwn(testPlot, "fy") && { fy: testPlot.fy.field }),
-            ...(Object.hasOwn(testPlot, "stroke") && {
+            ...("fy" in testPlot && { fy: testPlot.fy.field }),
+            ...("stroke" in testPlot && {
               stroke: testPlot.stroke.field,
             }),
             tip: true,
@@ -351,11 +356,11 @@ dispatchGeometry: ${dispatchGeometry}`);
             Plot.selectLast({
               x: testPlot.x.field,
               y: testPlot.y.field,
-              ...(Object.hasOwn(testPlot, "stroke") && {
+              ...("stroke" in testPlot && {
                 z: testPlot.stroke.field,
               }),
-              ...(Object.hasOwn(testPlot, "fy") && { fy: testPlot.fy.field }),
-              ...(Object.hasOwn(testPlot, "stroke") && {
+              ...("fy" in testPlot && { fy: testPlot.fy.field }),
+              ...("stroke" in testPlot && {
                 text: testPlot.stroke.field,
               }),
               textAnchor: "start",
@@ -375,10 +380,10 @@ dispatchGeometry: ${dispatchGeometry}`);
         ],
         x: { type: "log", label: testPlot?.x?.label ?? "XLABEL" },
         y: { type: "log", label: testPlot?.y?.label ?? "YLABEL" },
-        ...(Object.hasOwn(testPlot, "fy") && {
+        ...("fy" in testPlot && {
           fy: { label: testPlot.fy.label },
         }),
-        ...(Object.hasOwn(testPlot, "fy") && { grid: true }),
+        ...("fy" in testPlot && { grid: true }),
         color: { type: "ordinal", legend: true },
         title: testPlot?.title,
         subtitle: testPlot?.subtitle,
