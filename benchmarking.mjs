@@ -18,6 +18,7 @@ import { stridedReadTest } from "./stridedreadtest.mjs";
 import { randomReadTest } from "./randomreadtest.mjs";
 import { maddTest } from "./maddtest.mjs";
 import { reducePerWGTest } from "./reduce.mjs";
+import { subgroupSumWGTest } from "./subgroups.mjs";
 
 // TODO
 // strided reads
@@ -47,7 +48,8 @@ async function main(navigator) {
   // const tests = [membwTest];
   // const tests = [stridedReadTest];
   // const tests = [randomReadTest];
-  const tests = [stridedReadTest, randomReadTest];
+  // const tests = [stridedReadTest, randomReadTest];
+  const tests = [subgroupSumWGTest];
 
   const expts = new Array(); // push new rows onto this
   for (const test of tests) {
@@ -82,9 +84,6 @@ async function main(navigator) {
             dispatchGeometry[1] *= 2;
           }
         }
-        console.log(`workgroupCount: ${workgroupCount}
-workgroup size: ${workgroupSize}
-dispatchGeometry: ${dispatchGeometry}`);
 
         const memsrcf32 = new Float32Array(memsrcSize);
         const memsrcu32 = new Uint32Array(memsrcSize);
@@ -235,17 +234,19 @@ dispatchGeometry: ${dispatchGeometry}`);
           mappableMemdestBuffer.unmap();
           let errors = 0;
           let last = 0;
-          for (let i = 0; i < memdest.length; i++) {
-            if (!test.validate(memsrcu32[i], memdest[i], param)) {
-              if (errors < 5) {
-                console.log(
-                  `Error ${errors}: i=${i}, input=0x${memsrcu32[i].toString(
-                    16
-                  )}, output=0x${memdest[i].toString(16)}`
-                );
+          if (test.validate) {
+            for (let i = 0; i < memdest.length; i++) {
+              if (!test.validate(memsrcu32[i], memdest[i], param)) {
+                if (errors < 5) {
+                  console.log(
+                    `Error ${errors}: i=${i}, input=0x${memsrcu32[i].toString(
+                      16
+                    )}, output=0x${memdest[i].toString(16)}`
+                  );
+                }
+                errors++;
+                last = i;
               }
-              errors++;
-              last = i;
             }
           }
           console.log(
@@ -253,6 +254,14 @@ dispatchGeometry: ${dispatchGeometry}`);
               16
             )}, output=0x${memdest[last].toString(16)}`
           );
+
+          console.log(`workgroupCount: ${workgroupCount}
+workgroup size: ${workgroupSize}
+dispatchGeometry: ${dispatchGeometry}`);
+          if (test.dumpF) {
+            console.log(`memdest: ${memdest}`);
+          }
+          // dump | memdest: ${[].map.call(memdest, (x) => "0x" + x.toString(16))}`);
 
           if (errors > 0) {
             console.log(`Memdest size: ${memdest.length} | Errors: ${errors}`);
