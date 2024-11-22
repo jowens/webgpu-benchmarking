@@ -1,28 +1,32 @@
 import { range } from "./util.mjs";
 import { BaseTest } from "./basetest.mjs";
-export class RandomReadTest {
-  category = "random-read";
-  testname = "u32-per-thread";
-  description =
-    "Fetches from 'random' memory location. One thread is assigned per 32b input element.";
-  datatype = "u32";
-  parameters = {
-    workgroupSize: [32, 64, 96, 128, 160, 192, 224, 256], // range(0, 8).map((i) => 2 ** i),
-  };
-  trials = 10;
-  kernel = function (param) {
-    /* function because we need 'this' */
-    return /* wgsl */ `
+
+const RandomReadTestParams = {
+  workgroupSize: [32, 64, 96, 128, 160, 192, 224, 256], // range(0, 8).map((i) => 2 ** i),
+};
+
+class RandomReadTestClass extends BaseTest {
+  constructor(params) {
+    super(params); // writes parameters into this class
+    this.category = "random-read";
+    this.testname = "u32-per-thread";
+    this.description =
+      "Fetches from 'random' memory location. One thread is assigned per 32b input element.";
+    this.datatype = "u32";
+    this.trials = 10;
+    this.kernel = function () {
+      /* function because we need 'this' */
+      return /* wgsl */ `
     /* output */
     @group(0) @binding(0) var<storage, read_write> memDest: array<u32>;
     /* input */
     @group(0) @binding(1) var<storage, read> memSrc: array<u32>;
 
-    @compute @workgroup_size(${param.workgroupSize}) fn randomReadKernel(
+    @compute @workgroup_size(${this.workgroupSize}) fn randomReadKernel(
       @builtin(global_invocation_id) id: vec3u,
       @builtin(num_workgroups) nwg: vec3u,
       @builtin(workgroup_id) wgid: vec3u) {
-        let i: u32 = id.y * nwg.x * ${param.workgroupSize} + id.x;
+        let i: u32 = id.y * nwg.x * ${this.workgroupSize} + id.x;
         let address_space_mask: u32 = (1 << ${this.log2memsrcSize}) - 1;
         /* assert: i == i & address_space_mask */
         var x: u32 = i;
@@ -47,29 +51,24 @@ export class RandomReadTest {
         memDest[i] = memSrc[x];// + 1;
         // memDest[i] = src;
     }`;
-  };
-  log2memsrcSize = 28;
-  memsrcSize = function (param) {
-    return 2 ** this.log2memsrcSize;
-  }; // min(device.limits.maxBufferSize, maxStorageBufferBindingSize) / 4,
-  memdestSize = function (param) {
-    /* need 'function', arrow notation has no 'this' */
-    return this.memsrcSize(param);
-  };
-  workgroupCount = function (param) {
-    return this.memdestSize(param) / param.workgroupSize;
-  };
-  validate = (input, output) => {
-    return input /* + 1.0 */ == output;
-  };
-  bytesTransferred = (memInput, memOutput) => {
-    /* assumes that strided access time >> coalesced writeback */
-    return memOutput.byteLength;
-  };
-  plots = [
+    };
+    this.log2memsrcSize = 28;
+    this.memsrcSize = 2 ** this.log2memsrcSize;
+    // min(device.limits.maxBufferSize, maxStorageBufferBindingSize) / 4,
+    this.memdestSize = this.memsrcSize;
+    this.workgroupCount = this.memdestSize / this.workgroupSize;
+    this.validate = (input, output) => {
+      return input /* + 1.0 */ == output;
+    };
+    this.bytesTransferred = (memInput, memOutput) => {
+      /* assumes that strided access time >> coalesced writeback */
+      return memOutput.byteLength;
+    };
+  }
+  static plots = [
     {
       x: {
-        field: (d) => d.param.workgroupSize,
+        field: "workgroupSize",
         label: "Workgroup size",
       },
       y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
@@ -77,9 +76,7 @@ export class RandomReadTest {
     },
     {
       x: {
-        field: function (d) {
-          return randomReadTest.workgroupCount(d.param);
-        } /* 'this' doesn't work */,
+        field: "workgroupCount",
         label: "Workgroup Count",
       },
       y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
@@ -87,7 +84,7 @@ export class RandomReadTest {
     },
     {
       x: {
-        field: (d) => d.param.workgroupSize,
+        field: "workgroupSize",
         label: "Workgroup size",
       },
       y: { field: "time", label: "Runtime (ns)" },
@@ -95,3 +92,8 @@ export class RandomReadTest {
     },
   ];
 }
+
+export const RandomReadTestSuite = {
+  class: RandomReadTestClass,
+  params: RandomReadTestParams,
+};

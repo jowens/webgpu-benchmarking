@@ -19,7 +19,7 @@ import {
   MembwAdditionalPlotsSuite,
 } from "./membwtest.mjs";
 import { StridedReadTestSuite } from "./stridedreadtest.mjs";
-import { RandomReadTest } from "./randomreadtest.mjs";
+import { RandomReadTestSuite } from "./randomreadtest.mjs";
 import { MaddTest } from "./maddtest.mjs";
 import { ReducePerWGTest } from "./reduce.mjs";
 import { SubgroupSumWGTest } from "./subgroups.mjs";
@@ -50,14 +50,12 @@ async function main(navigator) {
   // const tests = [MaddTest];
   // const tests = [MembwSimpleTest, MembwGSLTest, MembwAdditionalPlots];
   // const testSuites = [MembwSimpleTestSuite];
-  const testSuites = [
-    MembwSimpleTestSuite,
-    MembwGSLTestSuite,
-    MembwAdditionalPlotsSuite,
-  ];
-  // const testSuites = [StridedReadTestSuite];
-  // const tests = [RandomReadTest];
-  // const tests = [StridedReadTest, RandomReadTest];
+  //const testSuites = [
+  //  MembwSimpleTestSuite,
+  //  MembwGSLTestSuite,
+  //  MembwAdditionalPlotsSuite,
+  //];
+  const testSuites = [StridedReadTestSuite, RandomReadTestSuite];
   // const tests = [SubgroupSumWGTest];
 
   let lastTestSeen = { testname: "", category: "" };
