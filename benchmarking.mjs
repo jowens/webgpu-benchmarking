@@ -20,7 +20,7 @@ import {
 } from "./membwtest.mjs";
 import { StridedReadTestSuite } from "./stridedreadtest.mjs";
 import { RandomReadTestSuite } from "./randomreadtest.mjs";
-import { MaddTest } from "./maddtest.mjs";
+import { MaddTestSuite } from "./maddtest.mjs";
 import { ReducePerWGTest } from "./reduce.mjs";
 import { SubgroupSumWGTest } from "./subgroups.mjs";
 
@@ -47,10 +47,8 @@ async function main(navigator) {
     fail("Fatal error: Device does not support WebGPU.");
   }
 
-  // const tests = [MaddTest];
-  // const tests = [MembwSimpleTest, MembwGSLTest, MembwAdditionalPlots];
-  // const testSuites = [MembwSimpleTestSuite];
-  //const testSuites = [
+  // const testSuites = [MaddTestSuite];
+  // const testSuites = [
   //  MembwSimpleTestSuite,
   //  MembwGSLTestSuite,
   //  MembwAdditionalPlotsSuite,
@@ -278,26 +276,10 @@ dispatchGeometry: ${dispatchGeometry}`);
               result.time = result.cpuns;
             }
             result.cpugpuDelta = result.cpuns - result.time;
-            if (test.bytesTransferred) {
-              result.bytesTransferred = test.bytesTransferred(
-                memsrcu32,
-                memdest
-              );
-              result.bandwidth = result.bytesTransferred / result.time;
-              result.bandwidthCPU = result.bytesTransferred / result.cpuns;
-            }
-            if (test.threadCount) {
-              result.threadCount = test.threadCount(memsrcu32);
-            }
-            if (test.flopsPerThread) {
-              result.flopsPerThread = test.flopsPerThread(param);
-            }
-            if (test.gflops && result.threadCount && result.flopsPerThread) {
-              result.gflops = test.gflops(
-                result.threadCount,
-                result.flopsPerThread,
-                result.time
-              );
+            result.bandwidth = result.bytesTransferred / result.time;
+            result.bandwidthCPU = result.bytesTransferred / result.cpuns;
+            if (test.gflops) {
+              result.gflops = test.gflops(result.time);
             }
             expts.push(result);
           });
