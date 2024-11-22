@@ -8,9 +8,6 @@ class BaseMembwTest extends BaseTest {
     this.validate = (input, output) => {
       return input + 1.0 == output;
     };
-    this.bytesTransferred = (memInput, memOutput) => {
-      return memInput.byteLength + memOutput.byteLength;
-    };
   }
 }
 
@@ -39,6 +36,7 @@ export class MembwSimpleTestClass extends BaseMembwTest {
           memDest[i] = memSrc[i] + 1.0;
       }`;
     this.memdestSize = this.memsrcSize;
+    this.bytesTransferred = (this.memsrcSize + this.memdestSize) * 4;
     this.workgroupCount = this.memsrcSize / this.workgroupSize;
   }
   static plots = [
@@ -108,6 +106,7 @@ export class MembwGSLTestClass extends BaseMembwTest {
           }
       }`;
     this.memdestSize = this.memsrcSize;
+    this.bytesTransferred = (this.memsrcSize + this.memdestSize) * 4;
     this.dispatchGeometry = [this.workgroupCount];
   }
   static plots = [
@@ -144,7 +143,7 @@ class MembwAdditionalPlots extends BaseMembwTest {
       fy: { field: "workgroupSize", label: "Workgroup Size" },
       stroke: { field: "testname" },
       caption:
-        "Memory bandwidth test (lines are test name, workgroupCount GSL == 128). Results should indicate a GSL is at least as good as one thread per item.",
+        "Memory bandwidth test (lines are test name, workgroupCount GSL == 128). Results should indicate that for ~large workgruop sizes, a GSL is at least as good as one thread per item.",
     },
   ];
 }
