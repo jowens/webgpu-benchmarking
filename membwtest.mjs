@@ -129,20 +129,19 @@ export class MembwGSLTestClass extends BaseMembwTest {
   ];
 }
 
-export class MembwAdditionalPlots extends BaseMembwTest {
+class MembwAdditionalPlots extends BaseMembwTest {
   testname = "additional-plots";
-  plots = [
+  static plots = [
     {
       filter: function (row) {
         return (
           row.category == "membw" /* this.category */ &&
-          (row.testname != "GSL fp32-per-thread" ||
-            row.param.workgroupCount == 128)
+          (row.testname != "GSL fp32-per-thread" || row.workgroupCount == 128)
         );
       },
-      x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
+      x: { field: "memsrcSize", label: "Copied array size (B)" },
       y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
-      fy: { field: (d) => d.param.workgroupSize, label: "Workgroup Size" },
+      fy: { field: "workgroupSize", label: "Workgroup Size" },
       stroke: { field: "testname" },
       caption:
         "Memory bandwidth test (lines are test name, workgroupCount GSL == 128). Results should indicate a GSL is at least as good as one thread per item.",
@@ -158,4 +157,9 @@ export const MembwSimpleTestSuite = {
 export const MembwGSLTestSuite = {
   class: MembwGSLTestClass,
   params: MembwGSLTestParams,
+};
+
+export const MembwAdditionalPlotsSuite = {
+  class: MembwAdditionalPlots,
+  params: {},
 };

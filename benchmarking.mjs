@@ -14,9 +14,9 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 
 // tests
 import {
-  MembwSimpleTest,
-  MembwGSLTest,
-  MembwAdditionalPlots,
+  MembwSimpleTestSuite,
+  MembwGSLTestSuite,
+  MembwAdditionalPlotsSuite,
 } from "./membwtest.mjs";
 import { StridedReadTestSuite } from "./stridedreadtest.mjs";
 import { RandomReadTest } from "./randomreadtest.mjs";
@@ -49,7 +49,13 @@ async function main(navigator) {
 
   // const tests = [MaddTest];
   // const tests = [MembwSimpleTest, MembwGSLTest, MembwAdditionalPlots];
-  const testSuites = [StridedReadTestSuite];
+  // const testSuites = [MembwSimpleTestSuite];
+  const testSuites = [
+    MembwSimpleTestSuite,
+    MembwGSLTestSuite,
+    MembwAdditionalPlotsSuite,
+  ];
+  // const testSuites = [StridedReadTestSuite];
   // const tests = [RandomReadTest];
   // const tests = [StridedReadTest, RandomReadTest];
   // const tests = [SubgroupSumWGTest];
