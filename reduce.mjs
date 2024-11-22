@@ -1,11 +1,15 @@
 import { range } from "./util.mjs";
-export const reducePerWGTest = {
-  category: "reduce",
-  testname: "reduce per wg",
-  workgroupSizes: range(2, 7).map((i) => 2 ** i),
-  memsrcSizes: range(16, 17).map((i) => 2 ** i),
-  trials: 10,
-  kernel: (workgroupSize) => /* wsgl */ `
+import { BaseTest } from "./basetest.mjs";
+class BaseReduceTest extends BaseTest {
+  category = "reduce";
+  trials = 10;
+}
+
+export class ReducePerWGTest extends BaseReduceTest {
+  testname = "reduce per wg";
+  workgroupSizes = range(2, 7).map((i) => 2 ** i);
+  memsrcSizes = range(16, 17).map((i) => 2 ** i);
+  kernel = (workgroupSize) => /* wsgl */ `
     enable subgroups;
     // var<workgroup> sum: f32; // zero initialized?
     /* output */
@@ -21,8 +25,8 @@ export const reducePerWGTest = {
         let sa = subgroupAdd(memSrc[i]);
         memDest[i] = sa;
     }
-  `,
-  validate: (f) => {
+  `;
+  validate = (f) => {
     return f;
-  },
-};
+  };
+}

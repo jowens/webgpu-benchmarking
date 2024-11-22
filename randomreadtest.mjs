@@ -1,15 +1,16 @@
 import { range } from "./util.mjs";
-export const randomReadTest = {
-  category: "random-read",
-  testname: "u32-per-thread",
-  description:
-    "Fetches from 'random' memory location. One thread is assigned per 32b input element.",
-  datatype: "u32",
-  parameters: {
+import { BaseTest } from "./basetest.mjs";
+export class RandomReadTest {
+  category = "random-read";
+  testname = "u32-per-thread";
+  description =
+    "Fetches from 'random' memory location. One thread is assigned per 32b input element.";
+  datatype = "u32";
+  parameters = {
     workgroupSize: [32, 64, 96, 128, 160, 192, 224, 256], // range(0, 8).map((i) => 2 ** i),
-  },
-  trials: 10,
-  kernel: function (param) {
+  };
+  trials = 10;
+  kernel = function (param) {
     /* function because we need 'this' */
     return /* wgsl */ `
     /* output */
@@ -46,26 +47,26 @@ export const randomReadTest = {
         memDest[i] = memSrc[x];// + 1;
         // memDest[i] = src;
     }`;
-  },
-  log2memsrcSize: 28,
-  memsrcSize: function (param) {
+  };
+  log2memsrcSize = 28;
+  memsrcSize = function (param) {
     return 2 ** this.log2memsrcSize;
-  }, // min(device.limits.maxBufferSize, maxStorageBufferBindingSize) / 4,
-  memdestSize: function (param) {
+  }; // min(device.limits.maxBufferSize, maxStorageBufferBindingSize) / 4,
+  memdestSize = function (param) {
     /* need 'function', arrow notation has no 'this' */
     return this.memsrcSize(param);
-  },
-  workgroupCount: function (param) {
+  };
+  workgroupCount = function (param) {
     return this.memdestSize(param) / param.workgroupSize;
-  },
-  validate: (input, output) => {
+  };
+  validate = (input, output) => {
     return input /* + 1.0 */ == output;
-  },
-  bytesTransferred: (memInput, memOutput) => {
+  };
+  bytesTransferred = (memInput, memOutput) => {
     /* assumes that strided access time >> coalesced writeback */
     return memOutput.byteLength;
-  },
-  plots: [
+  };
+  plots = [
     {
       x: {
         field: (d) => d.param.workgroupSize,
@@ -92,5 +93,5 @@ export const randomReadTest = {
       y: { field: "time", label: "Runtime (ns)" },
       caption: "Random memory bandwidth test, 1 u32 per thread",
     },
-  ],
-};
+  ];
+}

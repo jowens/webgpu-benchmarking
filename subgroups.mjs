@@ -1,17 +1,19 @@
 import { range } from "./util.mjs";
-const subgroupIDBase = {
-  category: "subgroups",
-  trials: 10,
-};
+import { BaseTest } from "./basetest.mjs";
 
-export const subgroupIDTest = Object.assign({}, subgroupIDBase);
-subgroupIDTest.description = "Subgroup ID and size";
-subgroupIDTest.parameters = {
-  workgroupCount: range(0, 7).map((i) => 2 ** i),
-  workgroupSize: range(0, 7).map((i) => 2 ** i),
-};
-subgroupIDTest.datatype = "u32";
-subgroupIDTest.kernel = (param) => /* wsgl */ `
+class SubgroupIDBaseTest extends BaseTest {
+  category = "subgroups";
+  trials = 10;
+}
+
+export class SubgroupIDTest extends SubgroupIDBaseTest {
+  description = "Subgroup ID and size";
+  parameters = {
+    workgroupCount: range(0, 7).map((i) => 2 ** i),
+    workgroupSize: range(0, 7).map((i) => 2 ** i),
+  };
+  datatype = "u32";
+  kernel = (param) => /* wsgl */ `
     enable subgroups;
     /* output */
     @group(0) @binding(0) var<storage, read_write> memDest: array<u32>;
@@ -29,22 +31,23 @@ subgroupIDTest.kernel = (param) => /* wsgl */ `
           memDest[i] = (sgsz << 16) | sgid;
         }
     }`;
-subgroupIDTest.memsrcSize = (param) => {
-  return param.workgroupCount * param.workgroupSize;
-};
-subgroupIDTest.bytesTransferred = (memInput, memOutput) => {
-  return memInput.byteLength + memOutput.byteLength;
-};
-subgroupIDTest.threadCount = (memInput) => {
-  return memInput.byteLength / 4;
-};
-subgroupIDTest.plots = [];
+  memsrcSize = (param) => {
+    return param.workgroupCount * param.workgroupSize;
+  };
+  bytesTransferred = (memInput, memOutput) => {
+    return memInput.byteLength + memOutput.byteLength;
+  };
+  threadCount = (memInput) => {
+    return memInput.byteLength / 4;
+  };
+  plots = [];
+}
 
 /* subgroup sum */
 
-export const subgroupSumSGTest = Object.assign({}, subgroupIDTest);
-subgroupIDTest.datatype = "f32";
-subgroupIDTest.kernel = (param) => /* wsgl */ `
+export class SubgroupSumSGTest extends SubgroupIDBaseTest {
+  datatype = "f32";
+  kernel = (param) => /* wsgl */ `
     enable subgroups;
     /* output */
     @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
@@ -62,11 +65,12 @@ subgroupIDTest.kernel = (param) => /* wsgl */ `
         let i: u32 = id.y * nwg.x * ${param.workgroupSize} + id.x;
         memDest[i] = subgroupAdd(memSrc[i]);
     }`;
-subgroupSumSGTest.dumpF = true;
+  dumpF = true;
+}
 
-export const subgroupSumWGTest = Object.assign({}, subgroupSumSGTest);
-subgroupSumWGTest.datatype = "f32";
-subgroupSumWGTest.kernel = (param) => /* wsgl */ `
+export class SubgroupSumWGTest extends SubgroupIDBaseTest {
+  datatype = "f32";
+  kernel = (param) => /* wsgl */ `
     enable subgroups;
     /* output */
     @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
@@ -97,3 +101,4 @@ subgroupSumWGTest.kernel = (param) => /* wsgl */ `
         /* now back to global ID for global writeback */
         memDest[i] = temp[0];
     }`;
+}

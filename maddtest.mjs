@@ -1,15 +1,16 @@
 import { range } from "./util.mjs";
-export const maddTest = {
-  category: "madd",
-  description:
-    "Computes N multiply-adds per input element. One thread is responsible for one 32b input element.",
-  parameters: {
+import { BaseTest } from "./basetest.mjs";
+export class MaddTest extends BaseTest {
+  category = "madd";
+  description =
+    "Computes N multiply-adds per input element. One thread is responsible for one 32b input element.";
+  parameters = {
     workgroupSize: range(0, 7).map((i) => 2 ** i),
     memsrcSize: range(10, 26).map((i) => 2 ** i),
     opsPerThread: range(2, 10).map((i) => 2 ** i),
-  },
-  trials: 10,
-  kernel: (param) => {
+  };
+  trials = 10;
+  kernel = (param) => {
     /* wsgl */ var k = `
     /* output */
     @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
@@ -33,8 +34,8 @@ export const maddTest = {
     }
     k = k + "    memDest[i] = f;\n}\n}";
     return k;
-  },
-  validate: (input, output, param) => {
+  };
+  validate = (input, output, param) => {
     let f = input;
     const b = f * 2.38418579e-7 + 1.0;
     /* b is a float btwn 1 and 2 */
@@ -45,20 +46,20 @@ export const maddTest = {
     }
     // allow for a bit of FP error
     return Math.abs(f - output) / f < 0.00001;
-  },
-  bytesTransferred: (memInput, memOutput) => {
+  };
+  bytesTransferred = (memInput, memOutput) => {
     return memInput.byteLength + memOutput.byteLength;
-  },
-  threadCount: (memInput) => {
+  };
+  threadCount = (memInput) => {
     return memInput.byteLength / 4;
-  },
-  flopsPerThread: (param) => {
+  };
+  flopsPerThread = (param) => {
     return param.opsPerThread;
-  },
-  gflops: (threads, flopsPerThread, time) => {
+  };
+  gflops = (threads, flopsPerThread, time) => {
     return (threads * flopsPerThread) / time;
-  },
-  plots: [
+  };
+  plots = [
     {
       x: { field: "threadCount", label: "Active threads" },
       y: { field: "gflops", label: "GFLOPS" },
@@ -87,5 +88,5 @@ export const maddTest = {
       caption_tl: "Each thread does 256 MADDs (lines are workgroup size)",
       filter: (data, param) => data.filter((d) => d.param.opsPerThread == 256),
     },
-  ],
-};
+  ];
+}
