@@ -96,35 +96,33 @@ export class MembwGSLTestClass extends BaseMembwTest {
       /* input */
       @group(0) @binding(1) var<storage, read> memSrc: array<f32>;
 
-      @compute @workgroup_size(${param.workgroupSize}) fn memcpyKernel(
+      @compute @workgroup_size(${this.workgroupSize}) fn memcpyKernel(
         @builtin(global_invocation_id) id: vec3u,
         @builtin(num_workgroups) nwg: vec3u, // == dispatch
         @builtin(workgroup_id) wgid: vec3u) {
           /* grid-stride loop: assume nwg.y == 1 */
           for (var i = id.x;
                i < arrayLength(&memSrc);
-               i += nwg.x * ${param.workgroupSize}) {
+               i += nwg.x * ${this.workgroupSize}) {
             memDest[i] = memSrc[i] + 1.0;
           }
       }`;
-    this.dispatchGeometry = (param) => {
-      return [param.workgroupCount];
-    };
+    this.memdestSize = this.memsrcSize;
+    this.dispatchGeometry = [this.workgroupCount];
   }
-
   static plots = [
     {
-      x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
+      x: { field: "memsrcSize", label: "Copied array size (B)" },
       y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
-      fy: { field: (d) => d.param.workgroupCount, label: "Workgroup Count" },
-      stroke: { field: (d) => d.param.workgroupSize },
+      fy: { field: "workgroupCount", label: "Workgroup Count" },
+      stroke: { field: "workgroupSize", label: "Workgroup Size" },
       caption: "Memory bandwidth test GSL (lines are workgroup size)",
     },
     {
-      x: { field: (d) => d.param.memsrcSize, label: "Copied array size (B)" },
+      x: { field: "memsrcSize", label: "Copied array size (B)" },
       y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
-      fy: { field: (d) => d.param.workgroupSize, label: "Workgroup Size" },
-      stroke: { field: (d) => d.param.workgroupCount },
+      fy: { field: "workgroupSize", label: "Workgroup Size" },
+      stroke: { field: "workgroupCount", label: "Workgroup Count" },
       caption:
         "Memory bandwidth test GSL (lines are workgroup size). Looks like max throughput doesn't occur until ~512 threads/workgroup.",
     },
