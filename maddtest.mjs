@@ -16,22 +16,22 @@ class MaddTestClass extends BaseTest {
 
     this.trials = 10;
     this.kernel = function () {
-      /* wsgl */ var k = `
-    /* output */
-    @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
-    /* input */
-    @group(0) @binding(1) var<storage, read> memSrc: array<f32>;
+      var k = /* wgsl */ `
+        /* output */
+        @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
+        /* input */
+        @group(0) @binding(1) var<storage, read> memSrc: array<f32>;
 
-    @compute @workgroup_size(${this.workgroupSize}) fn maddKernel(
-      @builtin(global_invocation_id) id: vec3u,
-      @builtin(num_workgroups) nwg: vec3u,
-      @builtin(workgroup_id) wgid: vec3u) {
-        let i = id.y * nwg.x * ${this.workgroupSize} + id.x;
-        if (i < arrayLength(&memSrc)) {
-        var f = memSrc[i];
-        /* 2^-22 = 2.38418579e-7 */
-        var b = f * 2.38418579e-7 + 1.0;
-        /* b is a float btwn 1 and 2 */`;
+        @compute @workgroup_size(${this.workgroupSize}) fn maddKernel(
+          @builtin(global_invocation_id) id: vec3u,
+          @builtin(num_workgroups) nwg: vec3u,
+          @builtin(workgroup_id) wgid: vec3u) {
+            let i = id.y * nwg.x * ${this.workgroupSize} + id.x;
+            if (i < arrayLength(&memSrc)) {
+              var f = memSrc[i];
+              /* 2^-22 = 2.38418579e-7 */
+              var b = f * 2.38418579e-7 + 1.0;
+              /* b is a float btwn 1 and 2 */`;
       let opt = this.opsPerThread;
       while (opt > 2) {
         k = k + "    f = f * b + b;\n";
