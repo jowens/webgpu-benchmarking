@@ -48,12 +48,12 @@ async function main(navigator) {
   }
 
   // const testSuites = [MaddTestSuite];
-  // const testSuites = [
-  //  MembwSimpleTestSuite,
-  //  MembwGSLTestSuite,
-  //  MembwAdditionalPlotsSuite,
-  //];
-  const testSuites = [StridedReadTestSuite, RandomReadTestSuite];
+  const testSuites = [
+    MembwSimpleTestSuite,
+    MembwGSLTestSuite,
+    MembwAdditionalPlotsSuite,
+  ];
+  //const testSuites = [StridedReadTestSuite, RandomReadTestSuite];
   // const tests = [SubgroupSumWGTest];
 
   let lastTestSeen = { testname: "", category: "" };
@@ -269,6 +269,8 @@ dispatchGeometry: ${dispatchGeometry}`);
                 result[key] = test[key];
               }
             }
+            result.date = new Date();
+            result.gpuinfo = adapter.info;
             result.time = ns / test.trials;
             result.cpuns =
               ((passEndTime - passStartTime) * 1000000.0) / test.trials;
@@ -336,12 +338,11 @@ dispatchGeometry: ${dispatchGeometry}`);
               y: plot.y.field,
               ...("stroke" in plot && {
                 z: plot.stroke.field,
-              }),
-              ...("fy" in plot && { fy: plot.fy.field }),
-              ...("stroke" in plot && {
                 text: plot.stroke.field,
               }),
+              ...("fy" in plot && { fy: plot.fy.field }),
               textAnchor: "start",
+              clip: false,
               dx: 3,
             })
           ),
