@@ -65,6 +65,7 @@ class StridedReadTestClass extends BaseTest {
 
     // min(device.limits.maxBufferSize, maxStorageBufferBindingSize) / 4,
     this.memdestSize = this.memsrcSize;
+    this.bytesTransferred = this.numThreads * 4;
     this.workgroupCount = Math.ceil(this.memdestSize / this.workgroupSize);
     this.validate = (input, output) => {
       /* TODO FIX */
