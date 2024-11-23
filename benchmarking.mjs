@@ -22,7 +22,11 @@ import { StridedReadTestSuite } from "./stridedreadtest.mjs";
 import { RandomReadTestSuite } from "./randomreadtest.mjs";
 import { MaddTestSuite } from "./maddtest.mjs";
 import { ReducePerWGTest } from "./reduce.mjs";
-import { SubgroupSumWGTest } from "./subgroups.mjs";
+import {
+  SubgroupIDTestSuite,
+  SubgroupSumSGTestSuite,
+  SubgroupSumWGTestSuite,
+} from "./subgroups.mjs";
 
 // TODO
 // strided reads
@@ -48,13 +52,17 @@ async function main(navigator) {
   }
 
   // const testSuites = [MaddTestSuite];
+  // const testSuites = [
+  //   MembwSimpleTestSuite,
+  //   MembwGSLTestSuite,
+  //   MembwAdditionalPlotsSuite,
+  // ];
+  // const testSuites = [StridedReadTestSuite, RandomReadTestSuite];
   const testSuites = [
-    MembwSimpleTestSuite,
-    MembwGSLTestSuite,
-    MembwAdditionalPlotsSuite,
+    SubgroupIDTestSuite,
+    SubgroupSumSGTestSuite,
+    SubgroupSumWGTestSuite,
   ];
-  //const testSuites = [StridedReadTestSuite, RandomReadTestSuite];
-  // const tests = [SubgroupSumWGTest];
 
   let lastTestSeen = { testname: "", category: "" };
 
@@ -224,41 +232,20 @@ async function main(navigator) {
                   mappableMemdestBuffer.getMappedRange().slice()
                 );
           mappableMemdestBuffer.unmap();
-          let errors = 0;
-          let last = 0;
           if (test.validate) {
-            for (let i = 0; i < memdest.length; i++) {
-              if (!test.validate(memsrcu32[i], memdest[i])) {
-                if (errors < 5) {
-                  console.log(
-                    `Error ${errors}: i=${i}, input=0x${memsrcu32[i].toString(
-                      16
-                    )}, output=0x${memdest[i].toString(16)}`
-                  );
-                }
-                errors++;
-                last = i;
-              }
-            }
+            const errorstr = test.validate(memdest);
+            console.log(
+              errorstr == ""
+                ? "Validation passed"
+                : `Validation failed: ${errorstr}`
+            );
           }
-          console.log(
-            `Last error: i=${last}, input=0x${memsrcu32[last].toString(
-              16
-            )}, output=0x${memdest[last].toString(16)}`
-          );
 
           console.log(`workgroupCount: ${test.workgroupCount}
 workgroup size: ${test.workgroupSize}
 dispatchGeometry: ${dispatchGeometry}`);
           if (test.dumpF) {
             console.log(`memdest: ${memdest}`);
-          }
-          // dump | memdest: ${[].map.call(memdest, (x) => "0x" + x.toString(16))}`);
-
-          if (errors > 0) {
-            console.log(`Memdest size: ${memdest.length} | Errors: ${errors}`);
-          } else {
-            console.log(`Memdest size: ${memdest.length} | No errors!`);
           }
 
           timingHelper.getResult().then((ns) => {
