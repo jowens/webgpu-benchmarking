@@ -9,7 +9,7 @@ export class ReducePerWGTest extends BaseReduceTest {
   testname = "reduce per wg";
   workgroupSizes = range(2, 7).map((i) => 2 ** i);
   memsrcSizes = range(16, 17).map((i) => 2 ** i);
-  kernel = (workgroupSize) => /* wsgl */ `
+  kernel = (workgroupSize) => /* wgsl */ `
     enable subgroups;
     // var<workgroup> sum: f32; // zero initialized?
     /* output */

@@ -22,7 +22,7 @@ export class MembwSimpleTestClass extends BaseMembwTest {
     this.testname = "fp32-per-thread";
     this.description =
       "Copies input array to output array. One thread is assigned per 32b input element.";
-    this.kernel = (param) => /* wgsl */ `
+    this.kernel = () => /* wgsl */ `
       /* output */
       @group(0) @binding(0) var<storage, read_write> memDest: array<f32>;
       /* input */
