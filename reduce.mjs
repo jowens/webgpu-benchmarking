@@ -1,36 +1,14 @@
 import { range } from "./util.mjs";
 import { BaseTest } from "./basetest.mjs";
 class BaseReduceTest extends BaseTest {
-  category = "reduce";
-  trials = 10;
-}
-
-const AtomicGlobalU32ReduceTestParams = {
-  workgroupSize: range(2, 7).map((i) => 2 ** i),
-  workgroupCount: range(5, 15).map((i) => 2 ** i),
-};
-
-class AtomicGlobalU32ReduceTestClass extends BaseReduceTest {
   constructor(params) {
     super(params);
-    this.testname = "atomic u32 sum reduction, should be very slow";
+    this.category = "reduce";
     this.datatype = "u32";
     this.memsrcSize = this.workgroupSize * this.workgroupCount;
     this.memdestSize = 1;
     this.bytesTransferred = (this.memsrcSize + this.memdestSize) * 4;
-    this.kernel = () => /* wgsl */ `
-      enable subgroups;
-      /* output */
-      @group(0) @binding(0) var<storage, read_write> memDest: atomic<u32>;
-      /* input */
-      @group(0) @binding(1) var<storage, read> memSrc: array<u32>;
-
-      @compute @workgroup_size(${this.workgroupSize}) fn reducePerWGKernel(
-        @builtin(global_invocation_id) id: vec3u,
-        @builtin(num_workgroups) nwg: vec3u) {
-          let i = id.y * nwg.x * ${this.workgroupSize} + id.x;
-          atomicAdd(&memDest, memSrc[i]);
-      }`;
+    this.trials = 100;
   }
   validate = (memsrc, memdest) => {
     const sum = new Uint32Array([0]);
@@ -59,7 +37,62 @@ class AtomicGlobalU32ReduceTestClass extends BaseReduceTest {
   ];
 }
 
+const AtomicGlobalU32ReduceTestParams = {
+  workgroupSize: range(2, 8).map((i) => 2 ** i),
+  workgroupCount: range(5, 20).map((i) => 2 ** i),
+};
+
+class AtomicGlobalU32ReduceTestClass extends BaseReduceTest {
+  constructor(params) {
+    super(params);
+    this.testname = "Atomic per-element u32 sum reduction";
+
+    this.kernel = () => /* wgsl */ `
+      /* output */
+      @group(0) @binding(0) var<storage, read_write> memDest: atomic<u32>;
+      /* input */
+      @group(0) @binding(1) var<storage, read> memSrc: array<u32>;
+
+      @compute @workgroup_size(${this.workgroupSize}) fn globalU32ReduceKernel(
+        @builtin(global_invocation_id) id: vec3u,
+        @builtin(num_workgroups) nwg: vec3u) {
+          let i = id.y * nwg.x * ${this.workgroupSize} + id.x;
+          atomicAdd(&memDest, memSrc[i]);
+      }`;
+  }
+}
+
 export const AtomicGlobalU32ReduceTestSuite = {
   class: AtomicGlobalU32ReduceTestClass,
+  params: AtomicGlobalU32ReduceTestParams,
+};
+
+class AtomicGlobalU32SGReduceTestClass extends BaseReduceTest {
+  constructor(params) {
+    super(params);
+    this.testname = "Atomic per-subgroup u32 sum reduction";
+
+    this.kernel = () => /* wgsl */ `
+      enable subgroups;
+      /* output */
+      @group(0) @binding(0) var<storage, read_write> memDest: atomic<u32>;
+      /* input */
+      @group(0) @binding(1) var<storage, read> memSrc: array<u32>;
+
+      @compute @workgroup_size(${this.workgroupSize}) fn globalU32SGReduceKernel(
+        @builtin(global_invocation_id) id: vec3u,
+        @builtin(num_workgroups) nwg: vec3u,
+        @builtin(subgroup_invocation_id) sgid: u32) {
+          let i = id.y * nwg.x * ${this.workgroupSize} + id.x;
+          let sgSum = subgroupAdd(memSrc[i]);
+          if (sgid == 0) {
+            atomicAdd(&memDest, sgSum);
+          }
+      }`;
+  }
+}
+
+export const AtomicGlobalU32SGReduceTestSuite = {
+  class: AtomicGlobalU32SGReduceTestClass,
   params: AtomicGlobalU32ReduceTestParams,
 };
