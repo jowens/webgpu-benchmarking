@@ -232,6 +232,10 @@ async function main(navigator) {
                   mappableMemdestBuffer.getMappedRange().slice()
                 );
           mappableMemdestBuffer.unmap();
+
+          console.log(`workgroupCount: ${test.workgroupCount}
+workgroup size: ${test.workgroupSize}
+dispatchGeometry: ${dispatchGeometry}`);
           if (test.validate) {
             const errorstr = test.validate(memdest);
             console.log(
@@ -240,10 +244,6 @@ async function main(navigator) {
                 : `Validation failed: ${errorstr}`
             );
           }
-
-          console.log(`workgroupCount: ${test.workgroupCount}
-workgroup size: ${test.workgroupSize}
-dispatchGeometry: ${dispatchGeometry}`);
           if (test.dumpF) {
             console.log(`memdest: ${memdest}`);
           }
