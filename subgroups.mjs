@@ -42,7 +42,7 @@ class SubgroupIDTestClass extends SubgroupIDBaseTest {
     this.bytesTransferred = this.memsrcSize + this.memdestSize;
     this.numThreads = this.memsrcSize;
   }
-  validate(memdest) {
+  validate(memsrc, memdest) {
     const sgsz = 32; // TODO get from GPU adapter
     for (let i = 0; i < this.memdestSize; i++) {
       const wgid = Math.floor(i / this.workgroupSize);
@@ -94,7 +94,7 @@ class SubgroupSumSGTestClass extends SubgroupIDBaseTest {
     this.numThreads = this.memsrcSize;
     this.dumpF = true;
   }
-  validate(memdest) {
+  validate(memsrc, memdest) {
     const sgsz = 32; // TODO get from GPU adapter
     for (let wg = 0; wg < this.workgroupCount; wg++) {
       for (let sg = 0; sg < Math.ceil(this.workgroupSize / sgsz); sg++) {
@@ -106,7 +106,7 @@ class SubgroupSumSGTestClass extends SubgroupIDBaseTest {
         const iEnd = iStart + (sgEnd - sgStart);
         let sum = 0;
         // add up the range
-        for (let i = iStart; i < iEnd; sum += i, i++);
+        for (let i = iStart; i < iEnd; sum += memsrc[i], i++);
         // and now check it
         for (let i = iStart; i < iEnd; i++) {
           if (memdest[i] != sum) {
@@ -177,13 +177,13 @@ class SubgroupSumWGTestClass extends SubgroupIDBaseTest {
     this.bytesTransferred = this.memsrcSize + this.memdestSize;
     this.numThreads = this.memsrcSize;
   }
-  validate(memdest) {
+  validate(memsrc, memdest) {
     for (let wg = 0; wg < this.workgroupCount; wg++) {
       const iStart = wg * this.workgroupSize;
       const iEnd = iStart + this.workgroupSize;
       let sum = 0;
       // add up the range
-      for (let i = iStart; i < iEnd; sum += i, i++);
+      for (let i = iStart; i < iEnd; sum += memsrc[i], i++);
       // and now check it
       for (let i = iStart; i < iEnd; i++) {
         if (memdest[i] != sum) {
