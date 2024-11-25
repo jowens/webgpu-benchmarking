@@ -21,12 +21,12 @@ import {
 import { StridedReadTestSuite } from "./stridedreadtest.mjs";
 import { RandomReadTestSuite } from "./randomreadtest.mjs";
 import { MaddTestSuite } from "./maddtest.mjs";
-import { ReducePerWGTest } from "./reduce.mjs";
 import {
   SubgroupIDTestSuite,
   SubgroupSumSGTestSuite,
   SubgroupSumWGTestSuite,
 } from "./subgroups.mjs";
+import { AtomicGlobalU32ReduceTestSuite } from "./reduce.mjs";
 
 // TODO
 // strided reads
@@ -58,11 +58,12 @@ async function main(navigator) {
   //   MembwAdditionalPlotsSuite,
   // ];
   // const testSuites = [StridedReadTestSuite, RandomReadTestSuite];
-  const testSuites = [
-    SubgroupIDTestSuite,
-    SubgroupSumSGTestSuite,
-    SubgroupSumWGTestSuite,
-  ];
+  //  const testSuites = [
+  //  SubgroupIDTestSuite,
+  //  SubgroupSumSGTestSuite,
+  //  SubgroupSumWGTestSuite,
+  //];
+  const testSuites = [AtomicGlobalU32ReduceTestSuite];
 
   let lastTestSeen = { testname: "", category: "" };
 
@@ -95,8 +96,9 @@ async function main(navigator) {
           memsrcu32[i] = i == 0 ? 0 : memsrcu32[i - 1] + 1; // trying to get u32s
         }
         if (
-          memsrcf32.byteLength != test.memsrcSize * 4 ||
-          memsrcu32.byteLength != test.memsrcSize * 4
+          memsrcf32.byteLength !=
+            test.memsrcSize * memsrcf32.BYTES_PER_ELEMENT ||
+          memsrcu32.byteLength != test.memsrcSize * memsrcf32.BYTES_PER_ELEMENT
         ) {
           fail(
             `Test ${test.category} / ${test.testname}: memsrc{f,i}.byteLength (${memsrcf32.byteLength}, ${memsrcu32.byteLength}) incompatible with memsrcSize (${memsrcSize}))`
@@ -233,19 +235,22 @@ async function main(navigator) {
                 );
           mappableMemdestBuffer.unmap();
 
-          console.log(`workgroupCount: ${test.workgroupCount}
+          console.info(`workgroupCount: ${test.workgroupCount}
 workgroup size: ${test.workgroupSize}
 dispatchGeometry: ${dispatchGeometry}`);
           if (test.validate) {
-            const errorstr = test.validate(memdest);
-            console.log(
-              errorstr == ""
-                ? "Validation passed"
-                : `Validation failed: ${errorstr}`
+            const errorstr = test.validate(
+              test.datatype == "u32" ? memsrcu32 : memsrcf32,
+              memdest
             );
+            if (errorstr == "") {
+              console.info("Validation passed");
+            } else {
+              console.error(`Validation failed: ${errorstr}`);
+            }
           }
           if (test.dumpF) {
-            console.log(`memdest: ${memdest}`);
+            console.debug(`memdest: ${memdest}`);
           }
 
           timingHelper.getResult().then((ns) => {
@@ -272,7 +277,7 @@ dispatchGeometry: ${dispatchGeometry}`);
             }
             expts.push(result);
           });
-        }
+        } // buffer size fits within device limits
         /* tear down */
         memsrcuBuffer.destroy();
         memsrcfBuffer.destroy();
@@ -285,7 +290,7 @@ dispatchGeometry: ${dispatchGeometry}`);
     // almost certainly the timer->then clause above should be written in a way
     //   that lets me wait on it instead
     await delay(2000);
-    console.log(expts);
+    console.info(expts);
 
     for (let plot of testSuite.class.plots) {
       /* default: if filter not specified, only take expts from the last test we ran */
@@ -295,7 +300,7 @@ dispatchGeometry: ${dispatchGeometry}`);
             row.testname == lastTestSeen.testname &&
             row.category == lastTestSeen.category)
       );
-      console.log(
+      console.info(
         "Filtered experiments for",
         plot.caption,
         "filter:",
