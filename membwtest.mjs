@@ -5,9 +5,6 @@ class BaseMembwTest extends BaseTest {
     super(params); // writes parameters into this class
     this.category = "membw";
     this.trials = 10;
-    this.validate = (input, output) => {
-      return input + 1.0 == output;
-    };
   }
   validate = (memsrc, memdest) => {
     for (let i = 0; i < memsrc.length; i++) {

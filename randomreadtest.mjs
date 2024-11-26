@@ -57,9 +57,6 @@ class RandomReadTestClass extends BaseTest {
     // min(device.limits.maxBufferSize, maxStorageBufferBindingSize) / 4,
     this.memdestSize = this.memsrcSize;
     this.workgroupCount = this.memdestSize / this.workgroupSize;
-    this.validate = (input, output) => {
-      return input /* + 1.0 */ == output;
-    };
     this.numThreads = this.memsrcSize;
     this.bytesTransferred = this.numThreads * 4;
   }
