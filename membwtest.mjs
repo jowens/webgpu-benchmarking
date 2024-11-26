@@ -150,7 +150,7 @@ class MembwAdditionalPlots extends BaseMembwTest {
       fy: { field: "workgroupSize", label: "Workgroup Size" },
       stroke: { field: "testname" },
       caption:
-        "Memory bandwidth test (lines are test name, workgroupCount GSL == 128). Results should indicate that for ~large workgruop sizes, a GSL is at least as good as one thread per item.",
+        "Memory bandwidth test (lines are test name, workgroupCount GSL == 128). Results should indicate that for ~large workgroup sizes, a GSL is at least as good as one thread per item.",
     },
   ];
 }
