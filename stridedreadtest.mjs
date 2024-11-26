@@ -67,15 +67,21 @@ class StridedReadTestClass extends BaseTest {
     this.memdestSize = this.memsrcSize;
     this.bytesTransferred = this.numThreads * 4;
     this.workgroupCount = Math.ceil(this.memdestSize / this.workgroupSize);
-    this.validate = (input, output) => {
-      /* TODO FIX */
-      return input /* + 1.0 */ == output;
-    };
-    this.bytesTransferred = (memInput, memOutput) => {
-      /* assumes that strided access time >> coalesced writeback */
-      return memOutput.byteLength;
-    };
   }
+  validate = (memsrc, memdest) => {
+    function rotateLeft(num, shift, bits) {
+      return ((num << shift) | (num >>> (bits - shift))) & ((1 << bits) - 1);
+    }
+    for (let i = 0; i < memsrc.length; i++) {
+      const expected =
+        memsrc[rotateLeft(i, this.log2stride, this.log2memsrcSize)];
+      if (expected != memdest[i]) {
+        return `Element ${i}: expected ${expected}, instead saw ${memdest[i]}.`;
+      } else {
+        return "";
+      }
+    }
+  };
   static plots = [
     {
       x: {

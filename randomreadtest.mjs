@@ -17,40 +17,40 @@ class RandomReadTestClass extends BaseTest {
     this.kernel = function () {
       /* function because we need 'this' */
       return /* wgsl */ `
-    /* output */
-    @group(0) @binding(0) var<storage, read_write> memDest: array<u32>;
-    /* input */
-    @group(0) @binding(1) var<storage, read> memSrc: array<u32>;
+        /* output */
+        @group(0) @binding(0) var<storage, read_write> memDest: array<u32>;
+        /* input */
+        @group(0) @binding(1) var<storage, read> memSrc: array<u32>;
 
-    @compute @workgroup_size(${this.workgroupSize}) fn randomReadKernel(
-      @builtin(global_invocation_id) id: vec3u,
-      @builtin(num_workgroups) nwg: vec3u,
-      @builtin(workgroup_id) wgid: vec3u) {
-        let i: u32 = id.y * nwg.x * ${this.workgroupSize} + id.x;
-        let address_space_mask: u32 = (1 << ${this.log2memsrcSize}) - 1;
-        /* assert: i == i & address_space_mask */
-        var x: u32 = i;
-        /**
-         * this is perfect shuffle
-        x = ((x & 0x0000FF00) << 8) | ((x >> 8) & 0x0000FF00) | (x & 0xFF0000FF);
-        x = ((x & 0x00F000F0) << 4) | ((x >> 4) & 0x00F000F0) | (x & 0xF00FF00F);
-        x = ((x & 0x0C0C0C0C) << 2) | ((x >> 2) & 0x0C0C0C0C) | (x & 0xC3C3C3C3);
-        x = ((x & 0x22222222) << 1) | ((x >> 1) & 0x22222222) | (x & 0x99999999);
-        x &= address_space_mask;
-        */
-       /** this is bit reverse
-        x = ((x & 0x55555555)  <<   1) | ((x & 0xAAAAAAAA) >>  1);
-        x = ((x & 0x33333333)  <<   2) | ((x & 0xCCCCCCCC) >>  2);
-        x = ((x & 0x0F0F0F0F)  <<   4) | ((x & 0xF0F0F0F0) >>  4);
-        x = ((x & 0x00FF00FF)  <<   8) | ((x & 0xFF00FF00) >>  8);
-        x = ((x & 0x0000FFFF)  <<  16) | ((x & 0xFFFF0000) >> 16);
-        x >>= 32 - ${this.log2memsrcSize};
-        */
-        x = 28428919 * x + 30555407; // two random primes
-        x &= address_space_mask;
-        memDest[i] = memSrc[x];// + 1;
-        // memDest[i] = src;
-    }`;
+        @compute @workgroup_size(${this.workgroupSize}) fn randomReadKernel(
+          @builtin(global_invocation_id) id: vec3u,
+          @builtin(num_workgroups) nwg: vec3u,
+          @builtin(workgroup_id) wgid: vec3u) {
+            let i: u32 = id.y * nwg.x * ${this.workgroupSize} + id.x;
+            let address_space_mask: u32 = (1 << ${this.log2memsrcSize}) - 1;
+            /* assert: i == i & address_space_mask */
+            var x: u32 = i;
+            /**
+             * this is perfect shuffle
+            x = ((x & 0x0000FF00) << 8) | ((x >> 8) & 0x0000FF00) | (x & 0xFF0000FF);
+            x = ((x & 0x00F000F0) << 4) | ((x >> 4) & 0x00F000F0) | (x & 0xF00FF00F);
+            x = ((x & 0x0C0C0C0C) << 2) | ((x >> 2) & 0x0C0C0C0C) | (x & 0xC3C3C3C3);
+            x = ((x & 0x22222222) << 1) | ((x >> 1) & 0x22222222) | (x & 0x99999999);
+            x &= address_space_mask;
+            */
+           /** this is bit reverse
+            x = ((x & 0x55555555)  <<   1) | ((x & 0xAAAAAAAA) >>  1);
+            x = ((x & 0x33333333)  <<   2) | ((x & 0xCCCCCCCC) >>  2);
+            x = ((x & 0x0F0F0F0F)  <<   4) | ((x & 0xF0F0F0F0) >>  4);
+            x = ((x & 0x00FF00FF)  <<   8) | ((x & 0xFF00FF00) >>  8);
+            x = ((x & 0x0000FFFF)  <<  16) | ((x & 0xFFFF0000) >> 16);
+            x >>= 32 - ${this.log2memsrcSize};
+            */
+            x = 28428919 * x + 30555407; // two random primes
+            x &= address_space_mask;
+            memDest[i] = memSrc[x];// + 1;
+            // memDest[i] = src;
+        }`;
     };
     this.log2memsrcSize = 28;
     this.memsrcSize = 2 ** this.log2memsrcSize;
@@ -60,11 +60,22 @@ class RandomReadTestClass extends BaseTest {
     this.validate = (input, output) => {
       return input /* + 1.0 */ == output;
     };
-    this.bytesTransferred = (memInput, memOutput) => {
-      /* assumes that strided access time >> coalesced writeback */
-      return memOutput.byteLength;
-    };
+    this.numThreads = this.memsrcSize;
+    this.bytesTransferred = this.numThreads * 4;
   }
+  validate = (memsrc, memdest) => {
+    function randomize(addr, bits) {
+      return (28428919 * addr + 30555407) & ((1 << bits) - 1);
+    }
+    for (let i = 0; i < memsrc.length; i++) {
+      const expected = memsrc[randomize(i, this.log2memsrcSize)];
+      if (expected != memdest[i]) {
+        return `Element ${i}: expected ${expected}, instead saw ${memdest[i]}.`;
+      } else {
+        return "";
+      }
+    }
+  };
   static plots = [
     {
       x: {
