@@ -1,4 +1,4 @@
-import { combinations, range, fail, delay } from "./util.mjs";
+import { combinations, range, fail, delay, download } from "./util.mjs";
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
 
 let Plot, JSDOM;
@@ -31,11 +31,8 @@ import {
   AtomicGlobalU32SGReduceTestSuite,
   AtomicGlobalU32WGReduceTestSuite,
   AtomicGlobalF32WGReduceTestSuite,
+  AtomicGlobalNonAtomicWGF32ReduceTest,
 } from "./reduce.mjs";
-
-// TODO
-// strided reads
-// random reads
 
 async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -69,10 +66,11 @@ async function main(navigator) {
   //  SubgroupSumWGTestSuite,
   //];
   const testSuites = [
-    //    AtomicGlobalU32ReduceTestSuite,
-    //    AtomicGlobalU32SGReduceTestSuite,
-    AtomicGlobalU32WGReduceTestSuite,
+    // AtomicGlobalU32ReduceTestSuite,
+    // AtomicGlobalU32SGReduceTestSuite,
+    // AtomicGlobalU32WGReduceTestSuite,
     AtomicGlobalF32WGReduceTestSuite,
+    AtomicGlobalNonAtomicWGF32ReduceTest,
   ];
 
   let lastTestSeen = { testname: "", category: "" };
@@ -102,7 +100,10 @@ async function main(navigator) {
         const memsrcf32 = new Float32Array(test.memsrcSize);
         const memsrcu32 = new Uint32Array(test.memsrcSize);
         for (let i = 0; i < test.memsrcSize; i++) {
-          memsrcf32[i] = i & (2 ** 22 - 1); // roughly, range of 32b significand
+          memsrcf32[i] = test?.randomizeInput
+            ? Math.random() * 2.0 - 1.0
+            : i & (2 ** 22 - 1);
+          // Rand: [-1,1]; non-rand: roughly, range of 32b significand
           memsrcu32[i] = i == 0 ? 0 : memsrcu32[i - 1] + 1; // trying to get u32s
         }
         if (
@@ -250,7 +251,8 @@ workgroup size: ${test.workgroupSize}
 dispatchGeometry: ${dispatchGeometry}`);
           if (test.validate) {
             const errorstr = test.validate(
-              test.datatype == "u32" ? memsrcu32 : memsrcf32,
+              // default: u32
+              test.datatype == "f32" ? memsrcf32 : memsrcu32,
               memdest
             );
             if (errorstr == "") {
@@ -376,5 +378,6 @@ dispatchGeometry: ${dispatchGeometry}`);
       div.append(document.createElement("hr"));
     }
   }
+  // download(expts, "application/json", "foo.json");
 }
 export { main };
