@@ -29,6 +29,8 @@ import {
 import {
   AtomicGlobalU32ReduceTestSuite,
   AtomicGlobalU32SGReduceTestSuite,
+  AtomicGlobalU32WGReduceTestSuite,
+  AtomicGlobalF32WGReduceTestSuite,
 } from "./reduce.mjs";
 
 // TODO
@@ -67,8 +69,10 @@ async function main(navigator) {
   //  SubgroupSumWGTestSuite,
   //];
   const testSuites = [
-    AtomicGlobalU32ReduceTestSuite,
-    AtomicGlobalU32SGReduceTestSuite,
+    //    AtomicGlobalU32ReduceTestSuite,
+    //    AtomicGlobalU32SGReduceTestSuite,
+    AtomicGlobalU32WGReduceTestSuite,
+    AtomicGlobalF32WGReduceTestSuite,
   ];
 
   let lastTestSeen = { testname: "", category: "" };
