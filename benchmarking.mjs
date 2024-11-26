@@ -2,6 +2,7 @@ import { combinations, range, fail, delay, download } from "./util.mjs";
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
 
 let Plot, JSDOM;
+let saveJSON = false;
 if (typeof process !== "undefined" && process.release.name === "node") {
   // running in Node
   Plot = await import("@observablehq/plot");
@@ -10,6 +11,11 @@ if (typeof process !== "undefined" && process.release.name === "node") {
   Plot = await import(
     "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm"
   );
+  const urlParams = new URL(window.location.href).searchParams;
+  saveJSON = urlParams.get("saveJSON"); // string or undefined
+  if (saveJSON == "false") {
+    saveJSON = false;
+  }
 }
 
 // tests
@@ -50,6 +56,16 @@ async function main(navigator) {
     ],
   });
 
+  adapter.info.toJSON = function () {
+    return {
+      architecture: this.architecture,
+      backend: this.backend,
+      description: this.description,
+      driver: this.driver,
+      vendor: this.vendor,
+    };
+  };
+
   if (!device) {
     fail("Fatal error: Device does not support WebGPU.");
   }
@@ -67,12 +83,12 @@ async function main(navigator) {
   //  SubgroupSumWGTestSuite,
   //];
   const testSuites = [
-    // AtomicGlobalU32ReduceTestSuite,
+    AtomicGlobalU32ReduceTestSuite,
     // AtomicGlobalU32SGReduceTestSuite,
     // AtomicGlobalU32WGReduceTestSuite,
-    AtomicGlobalF32WGReduceTestSuite,
-    AtomicGlobalNonAtomicWGF32ReduceTest,
-    AtomicGlobalPrimedNonAtomicWGF32ReduceTest,
+    // AtomicGlobalF32WGReduceTestSuite,
+    // AtomicGlobalNonAtomicWGF32ReduceTest,
+    // AtomicGlobalPrimedNonAtomicWGF32ReduceTest,
   ];
 
   let lastTestSeen = { testname: "", category: "" };
@@ -380,6 +396,8 @@ dispatchGeometry: ${dispatchGeometry}`);
       div.append(document.createElement("hr"));
     }
   }
-  // download(expts, "application/json", "foo.json");
+  if (saveJSON) {
+    download(expts, "application/json", "foo.json");
+  }
 }
 export { main };
