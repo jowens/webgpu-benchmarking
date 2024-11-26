@@ -1,6 +1,6 @@
 import { range } from "./util.mjs";
 import { BaseTest } from "./basetest.mjs";
-class BaseReduceTest extends BaseTest {
+class BaseU32ReduceTest extends BaseTest {
   constructor(params) {
     super(params);
     this.category = "reduce";
@@ -8,7 +8,7 @@ class BaseReduceTest extends BaseTest {
     this.memsrcSize = this.workgroupSize * this.workgroupCount;
     this.memdestSize = 1;
     this.bytesTransferred = (this.memsrcSize + this.memdestSize) * 4;
-    this.trials = 2;
+    this.trials = 10;
   }
   validate = (memsrc, memdest) => {
     const sum = new Uint32Array([0]);
@@ -25,24 +25,41 @@ class BaseReduceTest extends BaseTest {
       y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
       stroke: { field: "workgroupSize" },
       caption:
-        "Atomic global reduction, 1 u32 per thread (lines are workgroup size)",
+        "Atomic global reduction, 1 f32 per thread (lines are workgroup size)",
     },
     {
       x: { field: "memsrcSize", label: "Input array size (B)" },
       y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
       stroke: { field: "workgroupCount" },
       caption:
-        "Atomic global reduction, 1 u32 per thread (lines are workgroup count)",
+        "Atomic global reduction, 1 f32 per thread (lines are workgroup count)",
     },
   ];
 }
 
+class BaseF32ReduceTest extends BaseU32ReduceTest {
+  constructor(params) {
+    super(params);
+    this.datatype = "f32";
+    this.randomizeInput = true;
+  }
+  validate = (memsrc, memdest) => {
+    const sum = new Float32Array([0]); // [0.0]; //
+    for (let i = 0; i < memsrc.length; sum[0] += memsrc[i++]);
+    if (Math.abs(sum[0] - memdest[0]) / sum[0] > 0.001) {
+      return `Element ${0}: expected ${sum[0]}, instead saw ${memdest[0]}.`;
+    } else {
+      return "";
+    }
+  };
+}
+
 const AtomicGlobalU32ReduceTestParams = {
   workgroupSize: range(2, 8).map((i) => 2 ** i),
-  workgroupCount: range(5, 20).map((i) => 2 ** i),
+  workgroupCount: range(0, 20).map((i) => 2 ** i),
 };
 
-class AtomicGlobalU32ReduceTestClass extends BaseReduceTest {
+class AtomicGlobalU32ReduceTestClass extends BaseU32ReduceTest {
   constructor(params) {
     super(params);
     this.testname = "Atomic per-element u32 sum reduction";
@@ -67,7 +84,7 @@ export const AtomicGlobalU32ReduceTestSuite = {
   params: AtomicGlobalU32ReduceTestParams,
 };
 
-class AtomicGlobalU32SGReduceTestClass extends BaseReduceTest {
+class AtomicGlobalU32SGReduceTestClass extends BaseU32ReduceTest {
   constructor(params) {
     super(params);
     this.testname = "Atomic per-subgroup u32 sum reduction";
@@ -97,7 +114,7 @@ export const AtomicGlobalU32SGReduceTestSuite = {
   params: AtomicGlobalU32ReduceTestParams,
 };
 
-class AtomicGlobalU32WGReduceTestClass extends BaseReduceTest {
+class AtomicGlobalU32WGReduceTestClass extends BaseU32ReduceTest {
   constructor(params) {
     super(params);
     this.testname = "Atomic per-workgroup u32 sum reduction";
@@ -129,7 +146,7 @@ export const AtomicGlobalU32WGReduceTestSuite = {
   params: AtomicGlobalU32ReduceTestParams,
 };
 
-class AtomicGlobalF32WGReduceTestClass extends BaseReduceTest {
+class AtomicGlobalF32WGReduceTestClass extends BaseF32ReduceTest {
   // https://github.com/gpuweb/gpuweb/issues/4894
   constructor(params) {
     super(params);
@@ -191,5 +208,132 @@ class AtomicGlobalF32WGReduceTestClass extends BaseReduceTest {
 
 export const AtomicGlobalF32WGReduceTestSuite = {
   class: AtomicGlobalF32WGReduceTestClass,
+  params: AtomicGlobalU32ReduceTestParams,
+};
+
+class AtomicGlobalNonAtomicWGF32ReduceTestClass extends BaseF32ReduceTest {
+  // https://github.com/gpuweb/gpuweb/issues/4894
+  constructor(params) {
+    super(params);
+    this.testname = "Non-atomic per-workgroup, atomic-f32 sum reduction";
+    this.datatype = "f32";
+
+    this.kernel = () => /* wgsl */ `
+      enable subgroups;
+      /* output */
+      @group(0) @binding(0) var<storage, read_write> memDest: atomic<u32>;
+      /* input */
+      @group(0) @binding(1) var<storage, read> memSrc: array<f32>;
+
+      var<workgroup> temp: array<f32, 32>; // zero initialized
+                                           // 32 to ensure all warps are covered
+
+      alias u32GlobalCell = ptr<storage, atomic<u32>, read_write>;
+
+      fn atomicAddGlobalF32(sumCell: u32GlobalCell, value: f32) -> f32 {
+        // Initializing to 0 forces second iteration in almost all cases.
+        var old = 0u; //  alternately, atomicLoad(sumCell);
+        loop {
+          let new_value = value + bitcast<f32>(old);
+          let exchange_result = atomicCompareExchangeWeak(sumCell, old, bitcast<u32>(new_value));
+          if exchange_result.exchanged {
+            return new_value;
+          }
+          old = exchange_result.old_value;
+        }
+      }
+
+      @compute @workgroup_size(${this.workgroupSize}) fn globalF32WGReduceKernel(
+        @builtin(global_invocation_id) id: vec3u,
+        @builtin(num_workgroups) nwg: vec3u,
+        @builtin(local_invocation_index) lid: u32,
+        @builtin(subgroup_size) sgsz: u32,
+        @builtin(subgroup_invocation_id) sgid: u32) {
+          let i = id.y * nwg.x * ${this.workgroupSize} + id.x;
+          // first, sum up within a workgroup
+          let sgsum: f32 = subgroupAdd(memSrc[i]);
+          if (subgroupElect()) {
+            temp[lid / sgsz] = sgsum;
+          }
+          workgroupBarrier();
+          var sgsum32: f32 = 0;
+          if (lid < sgsz) {
+            sgsum32 = temp[lid];
+          }
+          let wgSum: f32 = subgroupAdd(sgsum32);
+          workgroupBarrier();
+          if (lid == 0) {
+            atomicAddGlobalF32(&memDest, wgSum);
+          }
+      }`;
+  }
+}
+
+export const AtomicGlobalNonAtomicWGF32ReduceTest = {
+  class: AtomicGlobalNonAtomicWGF32ReduceTestClass,
+  params: AtomicGlobalU32ReduceTestParams,
+};
+
+class AtomicGlobalPrimedNonAtomicWGF32ReduceTestClass extends BaseF32ReduceTest {
+  // https://github.com/gpuweb/gpuweb/issues/4894
+  constructor(params) {
+    super(params);
+    this.testname =
+      "Non-atomic per-workgroup, atomic-f32 sum reduction, with primed atomic";
+    this.datatype = "f32";
+
+    this.kernel = () => /* wgsl */ `
+      enable subgroups;
+      /* output */
+      @group(0) @binding(0) var<storage, read_write> memDest: atomic<u32>;
+      /* input */
+      @group(0) @binding(1) var<storage, read> memSrc: array<f32>;
+
+      var<workgroup> temp: array<f32, 32>; // zero initialized
+                                           // 32 to ensure all warps are covered
+
+      alias u32GlobalCell = ptr<storage, atomic<u32>, read_write>;
+
+      fn atomicAddGlobalF32(sumCell: u32GlobalCell, value: f32) -> f32 {
+        // Initializing to 0 forces second iteration in almost all cases.
+        var old = atomicLoad(sumCell);
+        loop {
+          let new_value = value + bitcast<f32>(old);
+          let exchange_result = atomicCompareExchangeWeak(sumCell, old, bitcast<u32>(new_value));
+          if exchange_result.exchanged {
+            return new_value;
+          }
+          old = exchange_result.old_value;
+        }
+      }
+
+      @compute @workgroup_size(${this.workgroupSize}) fn globalF32WGReduceKernel(
+        @builtin(global_invocation_id) id: vec3u,
+        @builtin(num_workgroups) nwg: vec3u,
+        @builtin(local_invocation_index) lid: u32,
+        @builtin(subgroup_size) sgsz: u32,
+        @builtin(subgroup_invocation_id) sgid: u32) {
+          let i = id.y * nwg.x * ${this.workgroupSize} + id.x;
+          // first, sum up within a workgroup
+          let sgsum: f32 = subgroupAdd(memSrc[i]);
+          if (subgroupElect()) {
+            temp[lid / sgsz] = sgsum;
+          }
+          workgroupBarrier();
+          var sgsum32: f32 = 0;
+          if (lid < sgsz) {
+            sgsum32 = temp[lid];
+          }
+          let wgSum: f32 = subgroupAdd(sgsum32);
+          workgroupBarrier();
+          if (lid == 0) {
+            atomicAddGlobalF32(&memDest, wgSum);
+          }
+      }`;
+  }
+}
+
+export const AtomicGlobalPrimedNonAtomicWGF32ReduceTest = {
+  class: AtomicGlobalPrimedNonAtomicWGF32ReduceTestClass,
   params: AtomicGlobalU32ReduceTestParams,
 };
