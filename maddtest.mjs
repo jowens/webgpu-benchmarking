@@ -40,18 +40,7 @@ class MaddTestClass extends BaseTest {
       k = k + "    memDest[i] = f;\n}\n}";
       return k;
     };
-    this.validate = (input, output, param) => {
-      let f = input;
-      const b = f * 2.38418579e-7 + 1.0;
-      /* b is a float btwn 1 and 2 */
-      let opsPerThread = this.opsPerThread;
-      while (opsPerThread > 2) {
-        f = f * b + b;
-        opsPerThread -= 2;
-      }
-      // allow for a bit of FP error
-      return Math.abs(f - output) / f < 0.00001;
-    };
+
     this.memdestSize = this.memsrcSize;
     this.numThreads = this.memsrcSize;
     this.workgroupCount = this.memsrcSize / this.workgroupSize;
@@ -60,6 +49,25 @@ class MaddTestClass extends BaseTest {
       return (this.numThreads * this.opsPerThread) / time;
     };
   }
+  validate = (memsrc, memdest) => {
+    const sum = new Uint32Array([0]);
+    for (let i = 0; i < memsrc.length; i++) {
+      let f = memsrc[i];
+      const b = f * 2.38418579e-7 + 1.0;
+      /* b is a float btwn 1 and 2 */
+      let opsPerThread = this.opsPerThread;
+      while (opsPerThread > 2) {
+        f = f * b + b;
+        opsPerThread -= 2;
+      }
+      // allow for a bit of FP error
+      if (Math.abs(f - memdest[i]) / f > 0.00001) {
+        return `Element ${i}: expected ${f}, instead saw ${memdest[i]}.`;
+      } else {
+        return "";
+      }
+    }
+  };
   static plots = [
     {
       x: { field: "numThreads", label: "Number of threads" },
