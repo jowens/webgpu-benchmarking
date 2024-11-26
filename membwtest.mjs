@@ -9,6 +9,16 @@ class BaseMembwTest extends BaseTest {
       return input + 1.0 == output;
     };
   }
+  validate = (memsrc, memdest) => {
+    for (let i = 0; i < memsrc.length; i++) {
+      const expected = memsrc[i] + 1.0;
+      if (expected != memdest[i]) {
+        return `Element ${i}: expected ${expected}, instead saw ${memdest[i]}.`;
+      } else {
+        return "";
+      }
+    }
+  };
 }
 
 const MembwSimpleTestParams = {
