@@ -32,6 +32,7 @@ import {
   AtomicGlobalU32WGReduceTestSuite,
   AtomicGlobalF32WGReduceTestSuite,
   AtomicGlobalNonAtomicWGF32ReduceTest,
+  AtomicGlobalPrimedNonAtomicWGF32ReduceTest,
 } from "./reduce.mjs";
 
 async function main(navigator) {
@@ -71,6 +72,7 @@ async function main(navigator) {
     // AtomicGlobalU32WGReduceTestSuite,
     AtomicGlobalF32WGReduceTestSuite,
     AtomicGlobalNonAtomicWGF32ReduceTest,
+    AtomicGlobalPrimedNonAtomicWGF32ReduceTest,
   ];
 
   let lastTestSeen = { testname: "", category: "" };
