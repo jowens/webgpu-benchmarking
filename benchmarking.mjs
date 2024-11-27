@@ -9,6 +9,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
   Plot = await import("@observablehq/plot");
   JSDOM = await import("jsdom");
 } else {
+  // running in Chrome
   Plot = await import(
     "https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/+esm"
   );
@@ -95,7 +96,7 @@ async function main(navigator) {
   //];
   const testSuites = [
     AtomicGlobalU32ReduceTestSuite,
-    // AtomicGlobalU32SGReduceTestSuite,
+    AtomicGlobalU32SGReduceTestSuite,
     // AtomicGlobalU32WGReduceTestSuite,
     // AtomicGlobalF32WGReduceTestSuite,
     // AtomicGlobalNonAtomicWGF32ReduceTest,
@@ -107,7 +108,7 @@ async function main(navigator) {
   const expts = new Array(); // push new rows (experiments) onto this
   for (const testSuite of testSuites) {
     for (const params of combinations(testSuite.params)) {
-      const test = new testSuite.class(params);
+      const test = testSuite.getTest(params);
       lastTestSeen = { testname: test.testname, category: test.category };
       /* skip computation if no kernel */
       if ("kernel" in test) {
@@ -332,8 +333,10 @@ dispatchGeometry: ${dispatchGeometry}`);
     //   that lets me wait on it instead
     await delay(2000);
     console.info(expts);
+    console.log(testSuite);
+    console.log(testSuite.getPlots);
 
-    for (let plot of testSuite.class.plots) {
+    for (let plot of testSuite.getPlots()) {
       /* default: if filter not specified, only take expts from the last test we ran */
       let filteredExpts = expts.filter(
         plot.filter ??
@@ -407,8 +410,7 @@ dispatchGeometry: ${dispatchGeometry}`);
       if (saveSVG) {
         svgExport.downloadSvg(
           div.lastChild,
-          // document.getElementById("mysvg"), // SVG DOM Element object to be exported. Alternatively, a string of the serialized SVG can be passed
-          `${testSuite.class.testname}-${testSuite.class.category}`, // chart title: file name of exported image
+          `${testSuite.testname}-${testSuite.category}`, // chart title: file name of exported image
           {}
         );
       }
