@@ -333,11 +333,8 @@ dispatchGeometry: ${dispatchGeometry}`);
     //   that lets me wait on it instead
     await delay(2000);
     console.info(expts);
-    console.log(testSuite);
-    console.log(testSuite.getPlots);
 
-    for (let plot of testSuite.getPlots(testSuite)) {
-      console.log(plot);
+    for (let plot of testSuite.getPlots()) {
       /* default: if filter not specified, only take expts from the last test we ran */
       let filteredExpts = expts.filter(
         plot.filter ??

@@ -46,21 +46,4 @@ export class BaseTestSuite {
   getPlots() {
     return this.processedPlots;
   }
-  getPlotsX() {
-    function f(plot, env) {
-      if (typeof plot === "function") {
-        return plot.call(env);
-      } else {
-        // presumably a plain object
-        return plot;
-      }
-    }
-    console.log(this.plots[0].call(this));
-    // return [this.plots[0].call(this)];
-    // return [f(this.plots[0])];
-    return this.plots.map(f);
-    //return this.plots.map((Plot) => {
-    //  Plot.call(this);
-    //});
-  }
 }

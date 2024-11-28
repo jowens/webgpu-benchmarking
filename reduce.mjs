@@ -57,21 +57,12 @@ const ReduceWGSizePlot = {
   caption: "Lines are workgroup size",
 };
 
-class ReduceWGCountPlotX extends BasePlot {
-  plot = {
-    x: { field: "memsrcSize", label: "Input array size (B)" },
-    y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
-    stroke: { field: "workgroupCount" },
-    caption: `${this.category} | ${this.testname} | Lines are workgroup count`,
-  };
-}
-
 function ReduceWGCountPlot() {
   return {
     x: { field: "memsrcSize", label: "Input array size (B)" },
     y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
     stroke: { field: "workgroupCount" },
-    caption: `${this.category} | ${this.testname} | Lines are workgroup count`,
+    caption: `${this.category} | ${this.testname} | ${this.datatype} | Lines are workgroup count`,
   };
 }
 
