@@ -1,9 +1,10 @@
 import { range } from "./util.mjs";
-import { BaseTest, BaseTestSuite } from "./basetest.mjs";
+import { BaseTest, BaseTestSuite, BasePlot } from "./basetest.mjs";
 
 class BaseReduceTest extends BaseTest {
-  constructor(params, info) {
-    super(params, info);
+  constructor(params) {
+    super(params);
+    // every reduce test sets the following
     this.memsrcSize = this.workgroupSize * this.workgroupCount;
     this.memdestSize = 1;
     this.bytesTransferred = (this.memsrcSize + this.memdestSize) * 4;
@@ -12,13 +13,13 @@ class BaseReduceTest extends BaseTest {
 }
 
 class BaseU32ReduceTest extends BaseReduceTest {
-  constructor(params, info) {
-    super(params, info);
+  constructor(params) {
+    super(params);
     this.datatype = "u32";
   }
   validate = (memsrc, memdest) => {
     const sum = new Uint32Array([0]);
-    for (let i = 0; i < memsrc.length; sum[0] += memsrc[i++]);
+    for (let i = 0; i < memsrc.length; sum[0] += memsrc[i++]) {}
     if (memdest[0] != sum[0]) {
       return `Element ${0}: expected ${sum[0]}, instead saw ${memdest[0]}.`;
     } else {
@@ -28,8 +29,9 @@ class BaseU32ReduceTest extends BaseReduceTest {
 }
 
 class BaseF32ReduceTest extends BaseReduceTest {
-  constructor(params, info) {
-    super(params, info);
+  constructor(params) {
+    super(params);
+    this.datatype = "f32";
     this.randomizeInput = true;
   }
   validate = (memsrc, memdest) => {
@@ -43,31 +45,39 @@ class BaseF32ReduceTest extends BaseReduceTest {
   };
 }
 
-const AtomicGlobalU32ReduceTestParams = {
+const ReduceTestParams = {
   workgroupSize: range(2, 8).map((i) => 2 ** i),
   workgroupCount: range(0, 20).map((i) => 2 ** i),
 };
 
-const ReducePlots = function (info) {
-  return [
-    {
-      x: { field: "memsrcSize", label: "Input array size (B)" },
-      y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
-      stroke: { field: "workgroupSize" },
-      caption: `${info.category} | ${info.testname} | Lines are workgroup size`,
-    },
-    {
-      x: { field: "memsrcSize", label: "Input array size (B)" },
-      y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
-      stroke: { field: "workgroupCount" },
-      caption: `${info.category} | ${info.testname} | Lines are workgroup count`,
-    },
-  ];
+const ReduceWGSizePlot = {
+  x: { field: "memsrcSize", label: "Input array size (B)" },
+  y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+  stroke: { field: "workgroupSize" },
+  caption: "Lines are workgroup size",
 };
 
+class ReduceWGCountPlotX extends BasePlot {
+  plot = {
+    x: { field: "memsrcSize", label: "Input array size (B)" },
+    y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+    stroke: { field: "workgroupCount" },
+    caption: `${this.category} | ${this.testname} | Lines are workgroup count`,
+  };
+}
+
+function ReduceWGCountPlot() {
+  return {
+    x: { field: "memsrcSize", label: "Input array size (B)" },
+    y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+    stroke: { field: "workgroupCount" },
+    caption: `${this.category} | ${this.testname} | Lines are workgroup count`,
+  };
+}
+
 class AtomicGlobalU32ReduceTestClass extends BaseU32ReduceTest {
-  constructor(params, info) {
-    super(params, info);
+  constructor(params) {
+    super(params);
 
     this.kernel = () => /* wgsl */ `
       /* output */
@@ -84,16 +94,14 @@ class AtomicGlobalU32ReduceTestClass extends BaseU32ReduceTest {
   }
 }
 
-export const AtomicGlobalU32ReduceTestSuite = new BaseTestSuite(
-  {
-    category: "reduce",
-    testname: "atomic 1 element per thread global-atomic u32 sum reduction",
-    datatype: "u32",
-  },
-  AtomicGlobalU32ReduceTestClass,
-  AtomicGlobalU32ReduceTestParams,
-  ReducePlots
-);
+export const AtomicGlobalU32ReduceTestSuite = new BaseTestSuite({
+  category: "reduce",
+  testname: "atomic 1 element per thread global-atomic u32 sum reduction",
+  datatype: "u32",
+  params: ReduceTestParams,
+  primitive: AtomicGlobalU32ReduceTestClass,
+  plots: [ReduceWGSizePlot, ReduceWGCountPlot],
+});
 
 class AtomicGlobalU32SGReduceTestClass extends BaseU32ReduceTest {
   constructor(params, info) {
@@ -118,16 +126,11 @@ class AtomicGlobalU32SGReduceTestClass extends BaseU32ReduceTest {
       }`;
   }
 }
-export const AtomicGlobalU32SGReduceTestSuite = new BaseTestSuite(
-  {
-    category: "reduce",
-    testname: "atomic 1 element per thread per-subgroup u32 sum reduction",
-    datatype: "u32",
-  },
-  AtomicGlobalU32SGReduceTestClass,
-  AtomicGlobalU32ReduceTestParams,
-  ReducePlots
-);
+export const AtomicGlobalU32SGReduceTestSuite = new BaseTestSuite({
+  category: "reduce",
+  testname: "atomic 1 element per thread per-subgroup u32 sum reduction",
+  datatype: "u32",
+});
 
 class AtomicGlobalU32WGReduceTestClass extends BaseU32ReduceTest {
   constructor(params) {
@@ -158,7 +161,7 @@ class AtomicGlobalU32WGReduceTestClass extends BaseU32ReduceTest {
 
 export const AtomicGlobalU32WGReduceTestSuite = {
   class: AtomicGlobalU32WGReduceTestClass,
-  params: AtomicGlobalU32ReduceTestParams,
+  params: ReduceTestParams,
 };
 
 class AtomicGlobalF32WGReduceTestClass extends BaseF32ReduceTest {
@@ -223,7 +226,7 @@ class AtomicGlobalF32WGReduceTestClass extends BaseF32ReduceTest {
 
 export const AtomicGlobalF32WGReduceTestSuite = {
   class: AtomicGlobalF32WGReduceTestClass,
-  params: AtomicGlobalU32ReduceTestParams,
+  params: ReduceTestParams,
 };
 
 class AtomicGlobalNonAtomicWGF32ReduceTestClass extends BaseF32ReduceTest {
@@ -286,7 +289,7 @@ class AtomicGlobalNonAtomicWGF32ReduceTestClass extends BaseF32ReduceTest {
 
 export const AtomicGlobalNonAtomicWGF32ReduceTest = {
   class: AtomicGlobalNonAtomicWGF32ReduceTestClass,
-  params: AtomicGlobalU32ReduceTestParams,
+  params: ReduceTestParams,
 };
 
 class AtomicGlobalPrimedNonAtomicWGF32ReduceTestClass extends BaseF32ReduceTest {
@@ -350,5 +353,5 @@ class AtomicGlobalPrimedNonAtomicWGF32ReduceTestClass extends BaseF32ReduceTest 
 
 export const AtomicGlobalPrimedNonAtomicWGF32ReduceTest = {
   class: AtomicGlobalPrimedNonAtomicWGF32ReduceTestClass,
-  params: AtomicGlobalU32ReduceTestParams,
+  params: ReduceTestParams,
 };

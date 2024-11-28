@@ -96,7 +96,7 @@ async function main(navigator) {
   //];
   const testSuites = [
     AtomicGlobalU32ReduceTestSuite,
-    AtomicGlobalU32SGReduceTestSuite,
+    // AtomicGlobalU32SGReduceTestSuite,
     // AtomicGlobalU32WGReduceTestSuite,
     // AtomicGlobalF32WGReduceTestSuite,
     // AtomicGlobalNonAtomicWGF32ReduceTest,
@@ -336,7 +336,8 @@ dispatchGeometry: ${dispatchGeometry}`);
     console.log(testSuite);
     console.log(testSuite.getPlots);
 
-    for (let plot of testSuite.getPlots()) {
+    for (let plot of testSuite.getPlots(testSuite)) {
+      console.log(plot);
       /* default: if filter not specified, only take expts from the last test we ran */
       let filteredExpts = expts.filter(
         plot.filter ??
