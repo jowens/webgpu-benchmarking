@@ -1,5 +1,5 @@
 import { range } from "./util.mjs";
-import { BaseTest, BaseTestSuite, BasePlot } from "./basetest.mjs";
+import { BaseTest, BaseTestSuite } from "./basetest.mjs";
 
 class BaseReduceTest extends BaseTest {
   constructor(params) {
@@ -8,7 +8,7 @@ class BaseReduceTest extends BaseTest {
     this.memsrcSize = this.workgroupSize * this.workgroupCount;
     this.memdestSize = 1;
     this.bytesTransferred = (this.memsrcSize + this.memdestSize) * 4;
-    this.trials = 10;
+    this.trials = 2;
   }
 }
 
@@ -60,9 +60,11 @@ const ReduceWGSizePlot = {
 function ReduceWGCountPlot() {
   return {
     x: { field: "memsrcSize", label: "Input array size (B)" },
-    y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+    /* y.field is just showing off that we can have an embedded function */
+    /* { field: "bandwidth", ...} would do the same */
+    y: { field: (d) => d.bandwidth, label: "Achieved bandwidth (GB/s)" },
     stroke: { field: "workgroupCount" },
-    caption: `${this.category} | ${this.testname} | ${this.datatype} | Lines are workgroup count`,
+    caption: `${this.category} | ${this.testsuite} | ${this.datatype} | Lines are workgroup count`,
   };
 }
 
@@ -87,7 +89,7 @@ class AtomicGlobalU32ReduceTestClass extends BaseU32ReduceTest {
 
 export const AtomicGlobalU32ReduceTestSuite = new BaseTestSuite({
   category: "reduce",
-  testname: "atomic 1 element per thread global-atomic u32 sum reduction",
+  testsuite: "atomic 1 element per thread global-atomic u32 sum reduction",
   datatype: "u32",
   params: ReduceTestParams,
   primitive: AtomicGlobalU32ReduceTestClass,
@@ -117,16 +119,19 @@ class AtomicGlobalU32SGReduceTestClass extends BaseU32ReduceTest {
       }`;
   }
 }
+
 export const AtomicGlobalU32SGReduceTestSuite = new BaseTestSuite({
   category: "reduce",
-  testname: "atomic 1 element per thread per-subgroup u32 sum reduction",
+  testsuite: "atomic 1 element per thread per-subgroup u32 sum reduction",
   datatype: "u32",
+  params: ReduceTestParams,
+  primitive: AtomicGlobalU32ReduceTestClass,
+  plots: [ReduceWGSizePlot, ReduceWGCountPlot],
 });
 
 class AtomicGlobalU32WGReduceTestClass extends BaseU32ReduceTest {
   constructor(params) {
     super(params);
-    this.testname = "Atomic per-workgroup u32 sum reduction";
 
     this.kernel = () => /* wgsl */ `
       /* output */
@@ -149,18 +154,19 @@ class AtomicGlobalU32WGReduceTestClass extends BaseU32ReduceTest {
       }`;
   }
 }
-
-export const AtomicGlobalU32WGReduceTestSuite = {
-  class: AtomicGlobalU32WGReduceTestClass,
+export const AtomicGlobalU32WGReduceTestSuite = new BaseTestSuite({
+  category: "reduce",
+  testsuite: "Atomic per-workgroup u32 sum reduction",
+  datatype: "u32",
   params: ReduceTestParams,
-};
+  primitive: AtomicGlobalU32WGReduceTestClass,
+  plots: [ReduceWGSizePlot, ReduceWGCountPlot],
+});
 
 class AtomicGlobalF32WGReduceTestClass extends BaseF32ReduceTest {
   // https://github.com/gpuweb/gpuweb/issues/4894
   constructor(params) {
     super(params);
-    this.testname = "Atomic per-workgroup f32 sum reduction";
-    this.datatype = "f32";
 
     this.kernel = () => /* wgsl */ `
       /* output */
@@ -215,17 +221,19 @@ class AtomicGlobalF32WGReduceTestClass extends BaseF32ReduceTest {
   }
 }
 
-export const AtomicGlobalF32WGReduceTestSuite = {
-  class: AtomicGlobalF32WGReduceTestClass,
+export const AtomicGlobalF32WGReduceTestSuite = new BaseTestSuite({
+  category: "reduce",
+  testsuite: "Atomic per-workgroup f32 sum reduction",
+  datatype: "f32",
   params: ReduceTestParams,
-};
+  primitive: AtomicGlobalF32WGReduceTestClass,
+  plots: [ReduceWGSizePlot, ReduceWGCountPlot],
+});
 
 class AtomicGlobalNonAtomicWGF32ReduceTestClass extends BaseF32ReduceTest {
   // https://github.com/gpuweb/gpuweb/issues/4894
   constructor(params) {
     super(params);
-    this.testname = "Non-atomic per-workgroup, atomic-f32 sum reduction";
-    this.datatype = "f32";
 
     this.kernel = () => /* wgsl */ `
       enable subgroups;
@@ -278,16 +286,20 @@ class AtomicGlobalNonAtomicWGF32ReduceTestClass extends BaseF32ReduceTest {
   }
 }
 
-export const AtomicGlobalNonAtomicWGF32ReduceTest = {
-  class: AtomicGlobalNonAtomicWGF32ReduceTestClass,
+export const AtomicGlobalNonAtomicWGF32ReduceTest = new BaseTestSuite({
+  category: "reduce",
+  testsuite: "Non-atomic per-workgroup, atomic-f32 sum reduction",
+  datatype: "f32",
   params: ReduceTestParams,
-};
+  primitive: AtomicGlobalNonAtomicWGF32ReduceTestClass,
+  plots: [ReduceWGSizePlot, ReduceWGCountPlot],
+});
 
 class AtomicGlobalPrimedNonAtomicWGF32ReduceTestClass extends BaseF32ReduceTest {
   // https://github.com/gpuweb/gpuweb/issues/4894
   constructor(params) {
     super(params);
-    this.testname =
+    this.testsuite =
       "Non-atomic per-workgroup, atomic-f32 sum reduction, with primed atomic";
     this.datatype = "f32";
 
@@ -342,7 +354,11 @@ class AtomicGlobalPrimedNonAtomicWGF32ReduceTestClass extends BaseF32ReduceTest 
   }
 }
 
-export const AtomicGlobalPrimedNonAtomicWGF32ReduceTest = {
-  class: AtomicGlobalPrimedNonAtomicWGF32ReduceTestClass,
+export const AtomicGlobalPrimedNonAtomicWGF32ReduceTest = new BaseTestSuite({
+  category: "reduce",
+  testsuite: "Non-atomic per-workgroup, atomic-f32 sum reduction",
+  datatype: "f32",
   params: ReduceTestParams,
-};
+  primitive: AtomicGlobalPrimedNonAtomicWGF32ReduceTestClass,
+  plots: [ReduceWGSizePlot, ReduceWGCountPlot],
+});

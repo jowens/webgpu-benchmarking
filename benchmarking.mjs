@@ -96,20 +96,20 @@ async function main(navigator) {
   //];
   const testSuites = [
     AtomicGlobalU32ReduceTestSuite,
-    // AtomicGlobalU32SGReduceTestSuite,
-    // AtomicGlobalU32WGReduceTestSuite,
-    // AtomicGlobalF32WGReduceTestSuite,
-    // AtomicGlobalNonAtomicWGF32ReduceTest,
-    // AtomicGlobalPrimedNonAtomicWGF32ReduceTest,
+    //  AtomicGlobalU32SGReduceTestSuite,
+    //  AtomicGlobalU32WGReduceTestSuite,
+    //  AtomicGlobalF32WGReduceTestSuite,
+    //  AtomicGlobalNonAtomicWGF32ReduceTest,
+    //  AtomicGlobalPrimedNonAtomicWGF32ReduceTest,
   ];
 
-  let lastTestSeen = { testname: "", category: "" };
+  let lastTestSeen = { testsuite: "", category: "" };
 
   const expts = new Array(); // push new rows (experiments) onto this
   for (const testSuite of testSuites) {
     for (const params of combinations(testSuite.params)) {
       const test = testSuite.getTest(params);
-      lastTestSeen = { testname: test.testname, category: test.category };
+      lastTestSeen = { testsuite: test.testsuite, category: test.category };
       /* skip computation if no kernel */
       if ("kernel" in test) {
         /* given number of workgroups, compute dispatch geometry that respects limits */
@@ -142,18 +142,18 @@ async function main(navigator) {
           memsrcu32.byteLength != test.memsrcSize * memsrcf32.BYTES_PER_ELEMENT
         ) {
           fail(
-            `Test ${test.category} / ${test.testname}: memsrc{f,i}.byteLength (${memsrcf32.byteLength}, ${memsrcu32.byteLength}) incompatible with memsrcSize (${memsrcSize}))`
+            `Test ${test.category} / ${test.testsuite}: memsrc{f,i}.byteLength (${memsrcf32.byteLength}, ${memsrcu32.byteLength}) incompatible with memsrcSize (${memsrcSize}))`
           );
         }
         const memdestBytes = test.memdestSize * 4;
 
         const computeModule = device.createShaderModule({
-          label: `module: ${test.category} ${test.testname}`,
+          label: `module: ${test.category} ${test.testsuite}`,
           code: test.kernel(),
         });
 
         const kernelPipeline = device.createComputePipeline({
-          label: `${test.category} ${test.testname} compute pipeline`,
+          label: `${test.category} ${test.testsuite} compute pipeline`,
           layout: "auto",
           compute: {
             module: computeModule,
@@ -296,6 +296,7 @@ dispatchGeometry: ${dispatchGeometry}`);
           }
 
           timingHelper.getResult().then((ns) => {
+            console.log(test);
             const result = {};
             /* copy test fields into result */
             for (const key in test) {
@@ -303,6 +304,7 @@ dispatchGeometry: ${dispatchGeometry}`);
                 result[key] = test[key];
               }
             }
+            console.log(result);
             result.date = new Date();
             result.gpuinfo = adapter.info;
             result.time = ns / test.trials;
@@ -339,7 +341,7 @@ dispatchGeometry: ${dispatchGeometry}`);
       let filteredExpts = expts.filter(
         plot.filter ??
           ((row) =>
-            row.testname == lastTestSeen.testname &&
+            row.testsuite == lastTestSeen.testsuite &&
             row.category == lastTestSeen.category)
       );
       console.info(
@@ -408,7 +410,7 @@ dispatchGeometry: ${dispatchGeometry}`);
       if (saveSVG) {
         svgExport.downloadSvg(
           div.lastChild,
-          `${testSuite.testname}-${testSuite.category}`, // chart title: file name of exported image
+          `${testSuite.testsuite}-${testSuite.category}`, // chart title: file name of exported image
           {}
         );
       }
