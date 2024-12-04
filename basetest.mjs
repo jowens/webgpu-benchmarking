@@ -1,15 +1,73 @@
-export class BaseTest {
-  constructor(params) {
-    Object.assign(this, params);
-    if (this.constructor === BaseTest) {
-      throw new Error("Cannot instantiate abstract class BaseTest directly.");
-    }
-  }
-}
-
 export class BasePrimitive {
-  constructor(params) {
-    Object.assign(this, params);
+  constructor(args) {
+    // expect that args are:
+    // { device: device,
+    //   params: { param1: val1, param2: val2 },
+    //   bindings: { 0: binding0, 2: binding2 },
+    // }
+    if (this.constructor === BasePrimitive) {
+      throw new Error(
+        "Cannot instantiate abstract class BasePrimitive directly."
+      );
+    }
+    Object.assign(this, args.params);
+    // could do some defaults here
+    this.bindings = args.bindings;
+    this.device = args.device;
+  }
+  kernel() {
+    /* call this from a subclass instead */
+    throw new Error("Cannot call kernel() from abstract class BasePrimitive.");
+  }
+  getDispatch() {
+    /* call this from a subclass instead */
+    throw new Error(
+      "Cannot call getDispatch() from abstract class BasePrimitive."
+    );
+  }
+  async execute() {
+    const computeModule = this.device.createShaderModule({
+      label: `module: ${this.constructor.name}`,
+      code: this.kernel(),
+    });
+
+    const kernelPipeline = this.device.createComputePipeline({
+      label: `${this.constructor.name} compute pipeline`,
+      layout: "auto",
+      compute: {
+        module: computeModule,
+      },
+    });
+
+    const bindings = [];
+    for (const [index, binding] of Object.entries(this.bindings)) {
+      bindings.push({
+        binding: index,
+        resource: { buffer: binding },
+      });
+    }
+
+    const kernelBindGroup = this.device.createBindGroup({
+      label: `bindGroup for ${this.constructor.name} kernel`,
+      layout: kernelPipeline.getBindGroupLayout(0),
+      entries: bindings,
+    });
+
+    const encoder = this.device.createCommandEncoder({
+      label: `${this.constructor.name} primitive encoder`,
+    });
+
+    const kernelPass = encoder.beginComputePass(encoder, {
+      label: `${this.constructor.name} compute pass`,
+    });
+
+    kernelPass.setPipeline(kernelPipeline);
+    kernelPass.setBindGroup(0, kernelBindGroup);
+    kernelPass.dispatchWorkgroups(...this.getDispatch());
+    kernelPass.end();
+
+    const commandBuffer = encoder.finish();
+    return this.device.queue.submit([commandBuffer]);
   }
 }
 

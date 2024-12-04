@@ -31,24 +31,6 @@ export async function main(navigator) {
   }
   const memdestBytes = 4;
 
-  const primitive = new AtomicGlobalU32Reduce({
-    workgroupSize: 128,
-    workgroupCount: memsrcSize / 128,
-  });
-
-  const computeModule = device.createShaderModule({
-    label: `module: ${primitive.constructor.name}`,
-    code: primitive.kernel(),
-  });
-
-  const kernelPipeline = device.createComputePipeline({
-    label: `${primitive.constructor.name} compute pipeline`,
-    layout: "auto",
-    compute: {
-      module: computeModule,
-    },
-  });
-
   // allocate/create buffers on the GPU to hold in/out data
   const memsrcuBuffer = device.createBuffer({
     label: "memory source buffer (uint)",
@@ -69,32 +51,24 @@ export async function main(navigator) {
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   });
 
-  /** Set up bindGroups per compute kernel to tell the shader which buffers to use */
-  const kernelBindGroup = device.createBindGroup({
-    label: `bindGroup for ${primitive.constructor.name} kernel`,
-    layout: kernelPipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: memdestBuffer } },
-      {
-        binding: 1,
-        resource: {
-          buffer: memsrcuBuffer,
-        },
-      },
-    ],
+  const primitive = new AtomicGlobalU32Reduce({
+    device,
+    params: {
+      workgroupSize: 128,
+      workgroupCount: memsrcSize / 128,
+    },
+    bindings: {
+      0: memdestBuffer,
+      1: memsrcuBuffer,
+    },
   });
 
-  const timingHelper = new TimingHelper(device);
+  await primitive.execute();
+
+  // copy output back to host
   const encoder = device.createCommandEncoder({
     label: "timed kernel run encoder",
   });
-  const kernelPass = timingHelper.beginComputePass(encoder, {
-    label: "timed kernel compute pass",
-  });
-  kernelPass.setPipeline(kernelPipeline);
-  kernelPass.setBindGroup(0, kernelBindGroup);
-  kernelPass.dispatchWorkgroups(primitive.workgroupCount);
-  kernelPass.end();
   encoder.copyBufferToBuffer(
     memdestBuffer,
     0,
@@ -102,22 +76,8 @@ export async function main(navigator) {
     0,
     mappableMemdestBuffer.size
   );
-
-  // Finish encoding and submit the commands
   const commandBuffer = encoder.finish();
-  await device.queue.onSubmittedWorkDone();
-  const passStartTime = performance.now();
   device.queue.submit([commandBuffer]);
-  await device.queue.onSubmittedWorkDone();
-  const passEndTime = performance.now();
-
-  const resolveEncoder = device.createCommandEncoder({
-    label: "timestamp resolve encoder",
-  });
-  timingHelper.resolveTiming(resolveEncoder);
-  const resolveCommandBuffer = resolveEncoder.finish();
-  await device.queue.onSubmittedWorkDone();
-  device.queue.submit([resolveCommandBuffer]);
 
   // Read the results
   await mappableMemdestBuffer.mapAsync(GPUMapMode.READ);
@@ -126,7 +86,7 @@ export async function main(navigator) {
   );
   mappableMemdestBuffer.unmap();
 
-  console.info(`${computeModule.label}
+  console.info(`${primitive.constructor.name}
 workgroupCount: ${primitive.workgroupCount}
 workgroup size: ${primitive.workgroupSize}`);
   if (primitive.validate) {
@@ -139,7 +99,5 @@ workgroup size: ${primitive.workgroupSize}`);
   }
   console.debug(`memdest: ${memdest}`);
 
-  timingHelper.getResult().then((ns) => {
-    console.log(ns, "ns");
-  });
+  // currently no timing info
 }
