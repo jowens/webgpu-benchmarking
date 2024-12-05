@@ -1,5 +1,5 @@
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
-import { BinOpAddU32, BinOpMinU32 } from "./binop.mjs";
+import { BinOpAddU32, BinOpMinU32, BinOpMaxU32 } from "./binop.mjs";
 
 if (typeof process !== "undefined" && process.release.name === "node") {
   // running in Node
@@ -25,10 +25,10 @@ export async function main(navigator) {
   if (!device) {
     fail("Fatal error: Device does not support WebGPU.");
   }
-  const memsrcSize = 2 ** 10;
+  const memsrcSize = 2 ** 20;
   const memsrcu32 = new Uint32Array(memsrcSize);
   for (let i = 0; i < memsrcSize; i++) {
-    memsrcu32[i] = i == 0 ? 13 : memsrcu32[i - 1] + 1; // trying to get u32s
+    memsrcu32[i] = i == 0 ? 11 : memsrcu32[i - 1] + 1; // trying to get u32s
   }
   const memdestBytes = 4;
 
@@ -58,14 +58,13 @@ export async function main(navigator) {
   const primitive = new AtomicGlobalU32Reduce({
     device,
     params: {
+      /* these are optional, should choose a reasonable default */
       workgroupSize: 128,
       workgroupCount: memsrcSize / 128,
     },
-    binop: BinOpMinU32,
-    bindings: {
-      0: memdestBuffer,
-      1: memsrcuBuffer,
-    },
+    binop: BinOpMaxU32,
+    inputs: memsrcuBuffer,
+    outputs: memdestBuffer,
   });
 
   await primitive.execute();
