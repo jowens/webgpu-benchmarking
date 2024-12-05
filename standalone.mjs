@@ -1,4 +1,5 @@
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
+import { BinOpAddU32, BinOpMinU32 } from "./binop.mjs";
 
 if (typeof process !== "undefined" && process.release.name === "node") {
   // running in Node
@@ -24,10 +25,10 @@ export async function main(navigator) {
   if (!device) {
     fail("Fatal error: Device does not support WebGPU.");
   }
-  const memsrcSize = 2 ** 20;
+  const memsrcSize = 2 ** 10;
   const memsrcu32 = new Uint32Array(memsrcSize);
   for (let i = 0; i < memsrcSize; i++) {
-    memsrcu32[i] = i == 0 ? 0 : memsrcu32[i - 1] + 1; // trying to get u32s
+    memsrcu32[i] = i == 0 ? 13 : memsrcu32[i - 1] + 1; // trying to get u32s
   }
   const memdestBytes = 4;
 
@@ -42,7 +43,10 @@ export async function main(navigator) {
   const memdestBuffer = device.createBuffer({
     label: "memory destination buffer",
     size: memdestBytes,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    usage:
+      GPUBufferUsage.STORAGE |
+      GPUBufferUsage.COPY_SRC |
+      GPUBufferUsage.COPY_DST /* COPY_DST necessary for initialization */,
   });
 
   const mappableMemdestBuffer = device.createBuffer({
@@ -57,6 +61,7 @@ export async function main(navigator) {
       workgroupSize: 128,
       workgroupCount: memsrcSize / 128,
     },
+    binop: BinOpMinU32,
     bindings: {
       0: memdestBuffer,
       1: memsrcuBuffer,
