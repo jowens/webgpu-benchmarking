@@ -1,5 +1,11 @@
 import { range } from "./util.mjs";
-import { BasePrimitive, BaseTestSuite } from "./basetest.mjs";
+import {
+  BasePrimitive,
+  BaseTestSuite,
+  Kernel,
+  InitializeMemoryBlock,
+} from "./basetest.mjs";
+import { BinOpAddU32, BinOpMinU32 } from "./binop.mjs";
 
 // export both test suites and useful primitives
 
@@ -11,6 +17,7 @@ class BaseReduce extends BasePrimitive {
     this.memdestSize = 1;
     this.bytesTransferred = (this.memsrcSize + this.memdestSize) * 4;
     this.trials = 100;
+    this.binop = args.binop ?? new BinOpAdd();
   }
   getDispatch() {
     // todo this is too simple
@@ -24,10 +31,18 @@ class BaseU32Reduce extends BaseReduce {
     this.datatype = "u32";
   }
   validate = (memsrc, memdest) => {
-    const sum = new Uint32Array([0]);
-    for (let i = 0; i < memsrc.length; sum[0] += memsrc[i++]) {}
-    if (memdest[0] != sum[0]) {
-      return `Element ${0}: expected ${sum[0]}, instead saw ${memdest[0]}.`;
+    /* "reduction" is a one-element array, initialized to identity */
+    const reduction = new Uint32Array([this.binop.identity]);
+    for (
+      let i = 0;
+      i < memsrc.length;
+      reduction[0] = this.binop.op(reduction[0], memsrc[i++])
+    ) {}
+    console.log("Should validate to", reduction[0]);
+    if (memdest[0] != reduction[0]) {
+      return `Element ${0}: expected ${reduction[0]}, instead saw ${
+        memdest[0]
+      }.`;
     } else {
       return "";
     }
@@ -80,18 +95,29 @@ function ReduceWGCountPlot() {
 export class AtomicGlobalU32Reduce extends BaseU32Reduce {
   constructor(args) {
     super(args);
-    this.kernel = () => /* wgsl */ `
+    this.compute = [
+      new InitializeMemoryBlock(
+        this.outputs[0],
+        this.binop.identity,
+        this.datatype
+      ),
+      new Kernel(
+        () => /* wgsl */ `
       /* output */
       @group(0) @binding(0) var<storage, read_write> memDest: atomic<u32>;
       /* input */
       @group(0) @binding(1) var<storage, read> memSrc: array<u32>;
 
+      ${this.binop.wgslfn}
+
       @compute @workgroup_size(${this.workgroupSize}) fn globalU32ReduceKernel(
         @builtin(global_invocation_id) id: vec3u,
         @builtin(num_workgroups) nwg: vec3u) {
           let i = id.y * nwg.x * ${this.workgroupSize} + id.x;
-          atomicAdd(&memDest, memSrc[i]);
-      }`;
+          ${this.binop.wgslatomic}(&memDest, memSrc[i]);
+      }`
+      ),
+    ];
   }
 }
 
