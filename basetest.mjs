@@ -3,7 +3,9 @@ export class BasePrimitive {
     // expect that args are:
     // { device: device,
     //   params: { param1: val1, param2: val2 },
-    //   bindings: { 0: binding0, 2: binding2 },
+    //   uniforms: uniformbuffer0,
+    //   inputs: [inputbuffer0, inputbuffer1],
+    //   outputs: outputbuffer0,
     // }
     if (this.constructor === BasePrimitive) {
       throw new Error(
@@ -12,8 +14,26 @@ export class BasePrimitive {
     }
     Object.assign(this, args.params);
     // could do some defaults here
-    this.bindings = args.bindings;
-    this.device = args.device;
+
+    let field;
+
+    /* required arguments */
+    for (field of ["device"]) {
+      if (!(field in args)) {
+        throw new Error(
+          `Primitive ${this.constructor} requires a "${field}" argument.`
+        );
+      }
+      this[field] = args[field];
+    }
+
+    /* arguments that could be objects or arrays */
+    for (field of ["uniforms", "inputs", "outputs"]) {
+      if (field in args) {
+        const arr = Array.isArray(args[field]) ? args[field] : [args[field]];
+        this[field] = arr;
+      }
+    }
   }
   kernel() {
     /* call this from a subclass instead */
@@ -47,11 +67,16 @@ export class BasePrimitive {
           });
 
           const bindings = [];
-          for (const [index, binding] of Object.entries(this.bindings)) {
-            bindings.push({
-              binding: index,
-              resource: { buffer: binding },
-            });
+          let bindingIdx = 0;
+          for (const buffer of ["uniforms", "outputs", "inputs"]) {
+            if (buffer in this) {
+              for (const binding of this[buffer]) {
+                bindings.push({
+                  binding: bindingIdx++,
+                  resource: { buffer: binding },
+                });
+              }
+            }
           }
 
           const kernelBindGroup = this.device.createBindGroup({
@@ -70,24 +95,25 @@ export class BasePrimitive {
           kernelPass.end();
           break;
         case InitializeMemoryBlock:
-          let InitClass;
+          let DatatypeArray;
           switch (action.datatype) {
             case "f32":
-              InitClass = Float32Array;
+              DatatypeArray = Float32Array;
               break;
             case "i32":
-              InitClass = Int32Array;
+              DatatypeArray = Int32Array;
               break;
             case "u32":
             default:
-              InitClass = Uint32Array;
+              DatatypeArray = Uint32Array;
               break;
           }
-          /* initialize to action.value */
-          const initBlock = InitClass.from(
-            { length: action.buffer.size / InitClass.BYTES_PER_ELEMENT },
+          /* initialize entire array to action.value ... */
+          const initBlock = DatatypeArray.from(
+            { length: action.buffer.size / DatatypeArray.BYTES_PER_ELEMENT },
             () => action.value
           );
+          /* ... then write it into the buffer */
           this.device.queue.writeBuffer(
             action.buffer,
             0 /* offset */,
