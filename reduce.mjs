@@ -1,10 +1,6 @@
 import { range } from "./util.mjs";
-import {
-  BasePrimitive,
-  BaseTestSuite,
-  Kernel,
-  InitializeMemoryBlock,
-} from "./basetest.mjs";
+import { BasePrimitive, Kernel, InitializeMemoryBlock } from "./primitive.mjs";
+import { BaseTestSuite } from "./testsuite.mjs";
 import { BinOpAddU32, BinOpMinU32 } from "./binop.mjs";
 
 // export both test suites and useful primitives
@@ -17,11 +13,22 @@ class BaseReduce extends BasePrimitive {
     this.memdestSize = 1;
     this.bytesTransferred = (this.memsrcSize + this.memdestSize) * 4;
     this.trials = 100;
-    this.binop = args.binop ?? new BinOpAdd();
+    this.binop = args.binop;
+    this.numInputBuffers = 1;
+    this.numOutputBuffers = 1;
+    this.numUniformBuffers = 0;
   }
-  getDispatch() {
+  getDispatchGeometry() {
     // todo this is too simple
-    return [this.workgroupCount, 1];
+    let dispatchGeometry = [this.workgroupCount, 1];
+    while (
+      dispatchGeometry[0] > this.device.limits.maxComputeWorkgroupsPerDimension
+    ) {
+      /* too big */
+      dispatchGeometry[0] = Math.ceil(dispatchGeometry[0] / 2);
+      dispatchGeometry[1] *= 2;
+    }
+    return dispatchGeometry;
   }
 }
 
@@ -95,7 +102,9 @@ function ReduceWGCountPlot() {
 export class AtomicGlobalU32Reduce extends BaseU32Reduce {
   constructor(args) {
     super(args);
-    this.compute = [
+  }
+  compute() {
+    return [
       new InitializeMemoryBlock(
         this.outputs[0],
         this.binop.identity,
@@ -103,19 +112,19 @@ export class AtomicGlobalU32Reduce extends BaseU32Reduce {
       ),
       new Kernel(
         () => /* wgsl */ `
-      /* output */
-      @group(0) @binding(0) var<storage, read_write> memDest: atomic<u32>;
-      /* input */
-      @group(0) @binding(1) var<storage, read> memSrc: array<u32>;
+        /* output */
+        @group(0) @binding(0) var<storage, read_write> memDest: atomic<u32>;
+        /* input */
+        @group(0) @binding(1) var<storage, read> memSrc: array<u32>;
 
-      ${this.binop.wgslfn}
+        ${this.binop.wgslfn}
 
-      @compute @workgroup_size(${this.workgroupSize}) fn globalU32ReduceKernel(
-        @builtin(global_invocation_id) id: vec3u,
-        @builtin(num_workgroups) nwg: vec3u) {
-          let i = id.y * nwg.x * ${this.workgroupSize} + id.x;
-          ${this.binop.wgslatomic}(&memDest, memSrc[i]);
-      }`
+        @compute @workgroup_size(${this.workgroupSize}) fn globalU32ReduceKernel(
+          @builtin(global_invocation_id) id: vec3u,
+          @builtin(num_workgroups) nwg: vec3u) {
+            let i = id.y * nwg.x * ${this.workgroupSize} + id.x;
+            ${this.binop.wgslatomic}(&memDest, memSrc[i]);
+        }`
       ),
     ];
   }
@@ -127,13 +136,29 @@ export const AtomicGlobalU32ReduceTestSuite = new BaseTestSuite({
   datatype: "u32",
   params: ReduceParams,
   primitive: AtomicGlobalU32Reduce,
+  // inputs: [{}],
+  // outputs: [{}],
+  primitiveConfig: {
+    binop: BinOpAddU32,
+    gputimestamps: true,
+    /* set inputs and outputs later */
+    // inputs: memsrcuBuffer,
+    // outputs: memdestBuffer,
+  },
   plots: [ReduceWGSizePlot, ReduceWGCountPlot],
 });
 
 class AtomicGlobalU32SGReduce extends BaseU32Reduce {
   constructor(args) {
     super(args);
-    this.kernel = () => /* wgsl */ `
+    this.compute = [
+      new InitializeMemoryBlock(
+        this.outputs[0],
+        this.binop.identity,
+        this.datatype
+      ),
+      new Kernel(
+        () => /* wgsl */ `
       enable subgroups;
       /* output */
       @group(0) @binding(0) var<storage, read_write> memDest: atomic<u32>;
@@ -149,7 +174,9 @@ class AtomicGlobalU32SGReduce extends BaseU32Reduce {
           if (sgid == 0) {
             atomicAdd(&memDest, sgSum);
           }
-      }`;
+      }`
+      ),
+    ];
   }
 }
 

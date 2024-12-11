@@ -1,5 +1,6 @@
 import { combinations, range, fail, delay, download } from "./util.mjs";
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
+import { TestInputBuffer, TestOutputBuffer } from "./testbuffer.mjs";
 
 let Plot, JSDOM;
 let saveJSON = false;
@@ -49,8 +50,8 @@ import {
   AtomicGlobalU32SGReduceTestSuite,
   AtomicGlobalU32WGReduceTestSuite,
   AtomicGlobalF32WGReduceTestSuite,
-  AtomicGlobalNonAtomicWGF32ReduceTest,
-  AtomicGlobalPrimedNonAtomicWGF32ReduceTest,
+  AtomicGlobalNonAtomicWGF32ReduceTestSuite,
+  AtomicGlobalPrimedNonAtomicWGF32ReduceTestSuite,
 } from "./reduce.mjs";
 
 async function main(navigator) {
@@ -67,7 +68,6 @@ async function main(navigator) {
       ...(hasSubgroups ? ["subgroups"] : []),
     ],
   });
-
   adapter.info.toJSON = function () {
     return {
       architecture: this.architecture,
@@ -96,244 +96,126 @@ async function main(navigator) {
   //];
   const testSuites = [
     AtomicGlobalU32ReduceTestSuite,
-    //  AtomicGlobalU32SGReduceTestSuite,
-    //  AtomicGlobalU32WGReduceTestSuite,
-    //  AtomicGlobalF32WGReduceTestSuite,
-    //  AtomicGlobalNonAtomicWGF32ReduceTest,
-    //  AtomicGlobalPrimedNonAtomicWGF32ReduceTest,
+    //AtomicGlobalU32SGReduceTestSuite,
+    //AtomicGlobalU32WGReduceTestSuite,
+    //AtomicGlobalF32WGReduceTestSuite,
+    //AtomicGlobalNonAtomicWGF32ReduceTestSuite,
+    //AtomicGlobalPrimedNonAtomicWGF32ReduceTestSuite,
   ];
+  //const testSuites = [AtomicGlobalU32ReduceTestSuite];
 
   let lastTestSeen = { testsuite: "", category: "" };
 
   const expts = new Array(); // push new rows (experiments) onto this
   for (const testSuite of testSuites) {
-    for (const params of combinations(testSuite.params)) {
-      const test = testSuite.getTest(params);
-      lastTestSeen = { testsuite: test.testsuite, category: test.category };
-      /* skip computation if no kernel */
-      if ("kernel" in test) {
-        /* given number of workgroups, compute dispatch geometry that respects limits */
-        /* TODO: handle non-powers-of-two workgroup sizes here */
-        let dispatchGeometry;
-        if ("dispatchGeometry" in test) {
-          dispatchGeometry = test.dispatchGeometry;
-        } else {
-          dispatchGeometry = [test.workgroupCount, 1];
-          while (
-            dispatchGeometry[0] > device.limits.maxComputeWorkgroupsPerDimension
-          ) {
-            dispatchGeometry[0] = Math.ceil(dispatchGeometry[0] / 2);
-            dispatchGeometry[1] *= 2;
-          }
-        }
+    /* do we perform a computation? */
+    if (testSuite?.primitive?.prototype.compute) {
+      for (const params of combinations(testSuite.params)) {
+        const primitive = testSuite.getPrimitive({ device, params });
+        lastTestSeen = {
+          testsuite: testSuite.testsuite,
+          category: testSuite.category,
+        };
 
-        const memsrcf32 = new Float32Array(test.memsrcSize);
-        const memsrcu32 = new Uint32Array(test.memsrcSize);
-        for (let i = 0; i < test.memsrcSize; i++) {
-          memsrcf32[i] = test?.randomizeInput
-            ? Math.random() * 2.0 - 1.0
-            : i & (2 ** 22 - 1);
-          // Rand: [-1,1]; non-rand: roughly, range of 32b significand
-          memsrcu32[i] = i == 0 ? 0 : memsrcu32[i - 1] + 1; // trying to get u32s
-        }
-        if (
-          memsrcf32.byteLength !=
-            test.memsrcSize * memsrcf32.BYTES_PER_ELEMENT ||
-          memsrcu32.byteLength != test.memsrcSize * memsrcf32.BYTES_PER_ELEMENT
-        ) {
-          fail(
-            `Test ${test.category} / ${test.testsuite}: memsrc{f,i}.byteLength (${memsrcf32.byteLength}, ${memsrcu32.byteLength}) incompatible with memsrcSize (${memsrcSize}))`
+        /** for test purposes, let's initialize some buffers.
+         * Who determines their size? Philosophy of a TestSuite:
+         * The primitive computes their size BECAUSE the test suite
+         * has passed in parameters in the parameter sweep that
+         * should let the primitive compute the relevant sizes.
+         */
+        const buffers = { in: [], out: [], uniforms: [] };
+        for (let i = 0; i < primitive.numInputBuffers; i++) {
+          buffers["in"].push(
+            new TestInputBuffer(device, {
+              datatype: primitive.datatype,
+              size: primitive.memsrcSize,
+            })
           );
         }
-        const memdestBytes = test.memdestSize * 4;
+        primitive.inputs = buffers["in"];
 
-        const computeModule = device.createShaderModule({
-          label: `module: ${test.category} ${test.testsuite}`,
-          code: test.kernel(),
-        });
-
-        const kernelPipeline = device.createComputePipeline({
-          label: `${test.category} ${test.testsuite} compute pipeline`,
-          layout: "auto",
-          compute: {
-            module: computeModule,
-          },
-        });
-
-        // allocate/create buffers on the GPU to hold in/out data
-        const memsrcuBuffer = device.createBuffer({
-          label: "memory source buffer (int)",
-          size: memsrcu32.byteLength,
-          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-        });
-        device.queue.writeBuffer(memsrcuBuffer, 0, memsrcu32);
-        const memsrcfBuffer = device.createBuffer({
-          label: "memory source buffer (float)",
-          size: memsrcf32.byteLength,
-          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-        });
-        device.queue.writeBuffer(memsrcfBuffer, 0, memsrcf32);
-
-        const memdestBuffer = device.createBuffer({
-          label: "memory destination buffer",
-          size: memdestBytes,
-          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-        });
-
-        const mappableMemdestBuffer = device.createBuffer({
-          label: "mappable memory destination buffer",
-          size: memdestBytes,
-          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        });
-
-        const maxBindingSize = device.limits.maxStorageBufferBindingSize;
-        if (
-          (memsrcuBuffer.size <= maxBindingSize ||
-            memsrcfBuffer.size <= maxBindingSize) &&
-          memdestBuffer.size <= maxBindingSize &&
-          mappableMemdestBuffer.size <= maxBindingSize
-        ) {
-          /** Set up bindGroups per compute kernel to tell the shader which buffers to use */
-          const kernelBindGroup = device.createBindGroup({
-            label: "bindGroup for memcpy kernel",
-            layout: kernelPipeline.getBindGroupLayout(0),
-            entries: [
-              { binding: 0, resource: { buffer: memdestBuffer } },
-              {
-                binding: 1,
-                resource: {
-                  buffer:
-                    test.datatype == "u32" ? memsrcuBuffer : memsrcfBuffer,
-                },
-              },
-            ],
-          });
-
-          const prepassEncoder = device.createCommandEncoder({
-            label: "prepass kernel encoder",
-          });
-          /* run the kernel before we start timing, don't time overhead */
-          const kernelPrepass = prepassEncoder.beginComputePass({
-            label: "untimed kernel compute prepass",
-          });
-          kernelPrepass.setPipeline(kernelPipeline);
-          kernelPrepass.setBindGroup(0, kernelBindGroup);
-          for (let i = 0; i < 1; i++) {
-            /* just prime with one iteration */
-            kernelPrepass.dispatchWorkgroups(...dispatchGeometry);
-          }
-          kernelPrepass.end();
-          // Encode a command to copy the results to a mappable buffer.
-          // this is (from, to)
-          prepassEncoder.copyBufferToBuffer(
-            memdestBuffer,
-            0,
-            mappableMemdestBuffer,
-            0,
-            mappableMemdestBuffer.size
+        for (let i = 0; i < primitive.numOutputBuffers; i++) {
+          buffers["out"].push(
+            new TestOutputBuffer(device, {
+              datatype: primitive.datatype,
+              size: primitive.memdestSize,
+            })
           );
-          const prepassCommandBuffer = prepassEncoder.finish();
-          device.queue.submit([prepassCommandBuffer]);
+        }
+        primitive.outputs = buffers["out"];
+        // TODO: uniforms
 
-          const timingHelper = new TimingHelper(device);
-          const encoder = device.createCommandEncoder({
-            label: "timed kernel run encoder",
-          });
-          const kernelPass = timingHelper.beginComputePass(encoder, {
-            label: "timed kernel compute pass",
-          });
-          kernelPass.setPipeline(kernelPipeline);
-          kernelPass.setBindGroup(0, kernelBindGroup);
-          // TODO handle not evenly divisible by wgSize
-          for (let i = 0; i < test.trials; i++) {
-            kernelPass.dispatchWorkgroups(...dispatchGeometry);
+        // submit!
+        await primitive.execute();
+
+        // copy output back to host
+        const copyEncoder = device.createCommandEncoder({
+          label: "encoder: GPU output buffer data -> mappable buffers",
+        });
+        for (let i = 0; i < primitive.numOutputBuffers; i++) {
+          copyEncoder.copyBufferToBuffer(
+            buffers["out"][i].gpuBuffer,
+            0,
+            buffers["out"][i].mappableGPUBuffer,
+            0,
+            buffers["out"][i].mappableGPUBuffer.size
+          );
+        }
+        const copyCommandBuffer = copyEncoder.finish();
+        device.queue.submit([copyCommandBuffer]);
+
+        // Copy results to CPU and validate them
+        for (let i = 0; i < primitive.numOutputBuffers; i++) {
+          await buffers["out"][i].mappableGPUBuffer.mapAsync(GPUMapMode.READ);
+          buffers["out"][i].cpuBuffer = new (buffers["out"][i].getArrayType())(
+            buffers["out"][i].mappableGPUBuffer.getMappedRange().slice()
+          );
+          buffers["out"][i].mappableGPUBuffer.unmap();
+        }
+
+        console.info(`workgroupCount: ${primitive.workgroupCount}
+workgroup size: ${primitive.workgroupSize}
+dispatchGeometry: ${primitive.getDispatchGeometry()}`);
+        if (primitive.validate) {
+          /* TODO: this is currently hardcoded to validating (in[0], out[0]) */
+          const errorstr = primitive.validate(
+            buffers["in"][0].cpuBuffer,
+            buffers["out"][0].cpuBuffer
+          );
+          if (errorstr == "") {
+            console.info("Validation passed");
+          } else {
+            console.error(`Validation failed: ${errorstr}`);
           }
-          kernelPass.end();
+        }
 
-          // Finish encoding and submit the commands
-          const commandBuffer = encoder.finish();
-          await device.queue.onSubmittedWorkDone();
-          const passStartTime = performance.now();
-          device.queue.submit([commandBuffer]);
-          await device.queue.onSubmittedWorkDone();
-          const passEndTime = performance.now();
-
-          const resolveEncoder = device.createCommandEncoder({
-            label: "timestamp resolve encoder",
-          });
-          timingHelper.resolveTiming(resolveEncoder);
-          const resolveCommandBuffer = resolveEncoder.finish();
-          await device.queue.onSubmittedWorkDone();
-          device.queue.submit([resolveCommandBuffer]);
-
-          // Read the results
-          await mappableMemdestBuffer.mapAsync(GPUMapMode.READ);
-          const memdest =
-            test.datatype == "u32"
-              ? new Uint32Array(mappableMemdestBuffer.getMappedRange().slice())
-              : new Float32Array(
-                  mappableMemdestBuffer.getMappedRange().slice()
-                );
-          mappableMemdestBuffer.unmap();
-
-          console.info(`workgroupCount: ${test.workgroupCount}
-workgroup size: ${test.workgroupSize}
-dispatchGeometry: ${dispatchGeometry}`);
-          if (test.validate) {
-            const errorstr = test.validate(
-              // default: u32
-              test.datatype == "f32" ? memsrcf32 : memsrcu32,
-              memdest
-            );
-            if (errorstr == "") {
-              console.info("Validation passed");
-            } else {
-              console.error(`Validation failed: ${errorstr}`);
+        primitive.getResult().then((ns) => {
+          const result = {};
+          /* copy primitive's fields into result */
+          for (const [field, value] of Object.entries(primitive)) {
+            if (typeof value !== "object" && typeof value !== "function") {
+              result[field] = value;
             }
           }
-          if (test.dumpF) {
-            console.debug(`memdest: ${memdest}`);
+          result.date = new Date();
+          result.gpuinfo = adapter.info;
+          result.time = ns / primitive.trials;
+          result.cpugpuDelta = result.cpuns - result.time;
+          result.bandwidth = result.bytesTransferred / result.time;
+          result.bandwidthCPU = result.bytesTransferred / result.cpuns;
+          if (primitive.gflops) {
+            result.gflops = primitive.gflops(result.time);
           }
+          expts.push(result);
+        });
+        /* tear down -- TODO -- do we want to do this explicitly? */
+      } // end of running all combinations for this testSuite
 
-          timingHelper.getResult().then((ns) => {
-            console.log(test);
-            const result = {};
-            /* copy test fields into result */
-            for (const key in test) {
-              if (typeof test[key] !== "function" && key !== "description") {
-                result[key] = test[key];
-              }
-            }
-            console.log(result);
-            result.date = new Date();
-            result.gpuinfo = adapter.info;
-            result.time = ns / test.trials;
-            result.cpuns =
-              ((passEndTime - passStartTime) * 1000000.0) / test.trials;
-            if (result.time == 0) {
-              result.time = result.cpuns;
-            }
-            result.cpugpuDelta = result.cpuns - result.time;
-            result.bandwidth = result.bytesTransferred / result.time;
-            result.bandwidthCPU = result.bytesTransferred / result.cpuns;
-            if (test.gflops) {
-              result.gflops = test.gflops(result.time);
-            }
-            expts.push(result);
-          });
-        } // buffer size fits within device limits
-        /* tear down */
-        memsrcuBuffer.destroy();
-        memsrcfBuffer.destroy();
-        memdestBuffer.destroy();
-        mappableMemdestBuffer.destroy();
-      } // if there's a kernel to run
-    } // end of running all combinations for this testSuite
-
-    // delay is just to make sure previous jobs finish before plotting
-    // almost certainly the timer->then clause above should be written in a way
-    //   that lets me wait on it instead
-    await delay(2000);
+      // delay is just to make sure previous jobs finish before plotting
+      // almost certainly the timer->then clause above should be written in a way
+      //   that lets me wait on it instead
+      await delay(2000);
+    }
     console.info(expts);
 
     for (let plot of testSuite.getPlots()) {
@@ -382,14 +264,14 @@ dispatchGeometry: ${dispatchGeometry}`);
               dx: 3,
             })
           ),
-          Plot.text([plot?.text_tl ?? ""], {
+          Plot.text([plot.text_tl ?? ""], {
             lineWidth: 30,
             dx: 5,
             frameAnchor: "top-left",
           }),
-          Plot.text([plot?.text_br ?? ""], {
+          Plot.text(plot.text_br ?? "", {
             lineWidth: 30,
-            dy: -10,
+            dx: 5,
             frameAnchor: "bottom-right",
           }),
         ],
@@ -404,6 +286,7 @@ dispatchGeometry: ${dispatchGeometry}`);
         subtitle: plot?.subtitle,
         caption: plot?.caption,
       };
+      console.log(schema);
       const plotted = Plot.plot(schema);
       const div = document.querySelector("#plot");
       div.append(plotted);

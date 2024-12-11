@@ -101,7 +101,6 @@ workgroup size: ${primitive.workgroupSize}`);
       console.error(`Validation failed: ${errorstr}`);
     }
   }
-  console.debug(`memdest: ${memdest}`);
 
   // currently no timing info
 }

@@ -64,6 +64,14 @@ class TimingHelper {
         this.#state = "in progress";
       }
 
+      const resolve = () => this.#resolveTiming(encoder);
+      pass.end = (function (origFn) {
+        return function () {
+          origFn.call(this);
+          resolve();
+        };
+      })(pass.end);
+
       return pass;
     } else {
       return encoder[fnName](descriptor);
@@ -78,7 +86,7 @@ class TimingHelper {
     return this.#beginTimestampPass(encoder, "beginComputePass", descriptor);
   }
 
-  resolveTiming(encoder) {
+  #resolveTiming(encoder) {
     if (!this.#canTimestamp) {
       return;
     }
