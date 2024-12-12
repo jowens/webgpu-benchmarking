@@ -100,9 +100,18 @@ function ReduceWGCountPlot() {
     y: { field: (d) => d.bandwidth, label: "Achieved bandwidth (GB/s)" },
     stroke: { field: "workgroupCount" },
     text_br: (d) => `${d.gpuinfo.description}`,
-    caption: `${this.category} | ${this.testSuite} | ${this.datatype} | Lines are workgroup count`,
+    caption: `${this.category} | ${this.testSuite} | Lines are workgroup count`,
   };
 }
+
+const ReduceWGSizeBinOpPlot = {
+  x: { field: "memsrcSize", label: "Input array size (B)" },
+  y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+  fy: { field: "binop" },
+  stroke: { field: "workgroupSize" },
+  test_br: "gpuinfo.description",
+  caption: "Lines are workgroup size",
+};
 
 export class AtomicGlobalU32Reduce extends BaseU32Reduce {
   constructor(args) {
@@ -157,7 +166,7 @@ export const AtomicGlobalU32ReduceBinOpsTestSuite = new BaseTestSuite({
   primitiveConfig: {
     gputimestamps: true,
   },
-  plots: [ReduceWGSizePlot, ReduceWGCountPlot],
+  plots: [ReduceWGSizePlot, ReduceWGCountPlot, ReduceWGSizeBinOpPlot],
 });
 
 class AtomicGlobalU32SGReduce extends BaseU32Reduce {
