@@ -27,14 +27,14 @@ export class TestInputBuffer extends TestBuffer {
     this.type = "input";
 
     // since we're input, fill the buffer with useful data
-    for (let i = 0; i < this.memsrcSize; i++) {
+    for (let i = 0; i < this.size; i++) {
       if (this.datatype == "f32") {
         this.cpuBuffer[i] = config?.randomizeInput
           ? Math.random() * 2.0 - 1.0
           : i & (2 ** 22 - 1);
         // Rand: [-1,1]; non-rand: roughly, range of 32b significand
       } else if (this.datatype == "u32") {
-        this.cpuBuffer[i] = i == 0 ? 0 : memsrcu32[i - 1] + 1; // trying to get u32s
+        this.cpuBuffer[i] = i == 0 ? 0 : this.cpuBuffer[i - 1] + 1; // trying to get u32s
       }
       // otherwise, initialize nothing
     }
