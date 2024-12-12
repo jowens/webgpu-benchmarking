@@ -47,6 +47,7 @@ import {
 } from "./subgroups.mjs";
 import {
   AtomicGlobalU32ReduceTestSuite,
+  AtomicGlobalU32ReduceBinOpsTestSuite,
   AtomicGlobalU32SGReduceTestSuite,
   AtomicGlobalU32WGReduceTestSuite,
   AtomicGlobalF32WGReduceTestSuite,
@@ -95,7 +96,8 @@ async function main(navigator) {
   //  SubgroupSumWGTestSuite,
   //];
   const testSuites = [
-    AtomicGlobalU32ReduceTestSuite,
+    // AtomicGlobalU32ReduceTestSuite,
+    AtomicGlobalU32ReduceBinOpsTestSuite,
     //AtomicGlobalU32SGReduceTestSuite,
     //AtomicGlobalU32WGReduceTestSuite,
     //AtomicGlobalF32WGReduceTestSuite,
@@ -104,24 +106,27 @@ async function main(navigator) {
   ];
   //const testSuites = [AtomicGlobalU32ReduceTestSuite];
 
-  let lastTestSeen = { testsuite: "", category: "" };
+  let lastTestSeen = { testSuite: "", category: "" };
 
   const expts = new Array(); // push new rows (experiments) onto this
   for (const testSuite of testSuites) {
+    console.log(testSuite);
+    lastTestSeen = {
+      testSuite: testSuite.testSuite,
+      category: testSuite.category,
+    };
     /* do we perform a computation? */
     if (testSuite?.primitive?.prototype.compute) {
       for (const params of combinations(testSuite.params)) {
         const primitive = testSuite.getPrimitive({ device, params });
-        lastTestSeen = {
-          testsuite: testSuite.testsuite,
-          category: testSuite.category,
-        };
 
         /** for test purposes, let's initialize some buffers.
-         * Who determines their size? Philosophy of a TestSuite:
-         * The primitive computes their size BECAUSE the test suite
-         * has passed in parameters in the parameter sweep that
-         * should let the primitive compute the relevant sizes.
+         *    Initializing is the responsibility of the test suite.
+         *    Who determines their size/datatype?
+         * Philosophy of a TestSuite:
+         *    The primitive makes those decisions BECAUSE the test suite
+         *    has passed in parameters in the parameter sweep that
+         *    should let the primitive compute the relevant sizes.
          */
         const buffers = { in: [], out: [], uniforms: [] };
         for (let i = 0; i < primitive.numInputBuffers; i++) {
@@ -190,7 +195,10 @@ dispatchGeometry: ${primitive.getDispatchGeometry()}`);
         }
 
         primitive.getResult().then((ns) => {
-          const result = {};
+          const result = {
+            testSuite: testSuite.testSuite,
+            category: testSuite.category,
+          };
           /* copy primitive's fields into result */
           for (const [field, value] of Object.entries(primitive)) {
             if (typeof value !== "object" && typeof value !== "function") {
@@ -223,7 +231,7 @@ dispatchGeometry: ${primitive.getDispatchGeometry()}`);
       let filteredExpts = expts.filter(
         plot.filter ??
           ((row) =>
-            row.testsuite == lastTestSeen.testsuite &&
+            row.testSuite == lastTestSeen.testSuite &&
             row.category == lastTestSeen.category)
       );
       console.info(

@@ -1,7 +1,6 @@
 export class BaseTestSuite {
   constructor(config) {
     Object.assign(this, config);
-    this.config = config; // just to keep this encapsulated
     // depending on what's in config, instantiate:
     // primitive, processResults, plots, summarize
     //   each are a class
@@ -32,15 +31,13 @@ export class BaseTestSuite {
   getPrimitive(deviceAndParams) {
     // factory
     // arg to primitive is a single object, so what's below combines device and params
-    // we also need to add amy primitive-specific configuration info, specified in this.primitiveConfig
-    Object.assign(deviceAndParams, this.primitiveConfig);
-    const primitive = new this.primitive(deviceAndParams);
-    /* copy all string fields from TestSuite -> Primitive */
-    for (const key of Object.keys(this)) {
-      if (typeof this[key] == "string") {
-        primitive[key] = this[key];
-      }
-    }
+    // we also need to add any primitive-specific configuration info, specified in this.primitiveConfig
+    const primitive = new this.primitive({
+      ...deviceAndParams,
+      ...this.primitiveConfig,
+    });
+    /* original design: copy all string fields from TestSuite -> Primitive */
+    /* no longer do this -- unnecessary complexity */
     return primitive;
   }
   getPlots() {

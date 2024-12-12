@@ -30,7 +30,7 @@ export class BasePrimitive {
     }
     /* arguments that could be objects or arrays */
     for (const field of ["uniforms", "inputs", "outputs"]) {
-      this[`#{field}`] = undefined;
+      this[`#${field}`] = undefined;
     }
 
     // now let's walk through all the fields

@@ -1,9 +1,9 @@
 import { range } from "./util.mjs";
 import { BasePrimitive, Kernel, InitializeMemoryBlock } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
-import { BinOpAddU32, BinOpMinU32 } from "./binop.mjs";
+import { BinOpAddU32, BinOpMinU32, BinOpMaxU32 } from "./binop.mjs";
 
-// export both test suites and useful primitives
+// exports: TestSuites, Primitives
 
 class BaseReduce extends BasePrimitive {
   constructor(args) {
@@ -13,7 +13,6 @@ class BaseReduce extends BasePrimitive {
     this.memdestSize = 1;
     this.bytesTransferred = (this.memsrcSize + this.memdestSize) * 4;
     this.trials = 100;
-    this.binop = args.binop;
     this.numInputBuffers = 1;
     this.numOutputBuffers = 1;
     this.numUniformBuffers = 0;
@@ -78,6 +77,12 @@ const ReduceParams = {
   workgroupCount: range(0, 20).map((i) => 2 ** i),
 };
 
+const ReduceAndBinOpParams = {
+  workgroupSize: range(2, 8).map((i) => 2 ** i),
+  workgroupCount: range(0, 20).map((i) => 2 ** i),
+  binop: [BinOpAddU32, BinOpMinU32, BinOpMaxU32],
+};
+
 const ReduceWGSizePlot = {
   x: { field: "memsrcSize", label: "Input array size (B)" },
   y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
@@ -95,7 +100,7 @@ function ReduceWGCountPlot() {
     y: { field: (d) => d.bandwidth, label: "Achieved bandwidth (GB/s)" },
     stroke: { field: "workgroupCount" },
     text_br: (d) => `${d.gpuinfo.description}`,
-    caption: `${this.category} | ${this.testsuite} | ${this.datatype} | Lines are workgroup count`,
+    caption: `${this.category} | ${this.testSuite} | ${this.datatype} | Lines are workgroup count`,
   };
 }
 
@@ -132,18 +137,25 @@ export class AtomicGlobalU32Reduce extends BaseU32Reduce {
 
 export const AtomicGlobalU32ReduceTestSuite = new BaseTestSuite({
   category: "reduce",
-  testsuite: "atomic 1 element per thread global-atomic u32 sum reduction",
-  datatype: "u32",
+  testSuite: "atomic 1 element per thread global-atomic u32 sum reduction",
+  // datatype: "u32",
   params: ReduceParams,
   primitive: AtomicGlobalU32Reduce,
-  // inputs: [{}],
-  // outputs: [{}],
   primitiveConfig: {
     binop: BinOpAddU32,
     gputimestamps: true,
-    /* set inputs and outputs later */
-    // inputs: memsrcuBuffer,
-    // outputs: memdestBuffer,
+  },
+  plots: [ReduceWGSizePlot, ReduceWGCountPlot],
+});
+
+export const AtomicGlobalU32ReduceBinOpsTestSuite = new BaseTestSuite({
+  category: "reduce",
+  testSuite: "atomic 1 element per thread global-atomic u32 sum reduction",
+  // datatype: "u32",
+  params: ReduceAndBinOpParams,
+  primitive: AtomicGlobalU32Reduce,
+  primitiveConfig: {
+    gputimestamps: true,
   },
   plots: [ReduceWGSizePlot, ReduceWGCountPlot],
 });
