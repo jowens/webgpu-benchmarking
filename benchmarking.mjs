@@ -201,8 +201,15 @@ dispatchGeometry: ${primitive.getDispatchGeometry()}`);
           };
           /* copy primitive's fields into result */
           for (const [field, value] of Object.entries(primitive)) {
-            if (typeof value !== "object" && typeof value !== "function") {
-              result[field] = value;
+            if (typeof value !== "function") {
+              if (typeof value !== "object") {
+                result[field] = value;
+              } else {
+                /* object - if it's got a constructor, use the name */
+                if (value?.constructor?.name) {
+                  result[field] = value.constructor.name;
+                }
+              }
             }
           }
           result.date = new Date();
