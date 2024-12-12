@@ -44,7 +44,19 @@ class BaseU32Reduce extends BaseReduce {
       i < memsrc.length;
       reduction[0] = this.binop.op(reduction[0], memsrc[i++])
     ) {}
-    console.log("Should validate to", reduction[0]);
+    console.log(
+      "Should validate to",
+      reduction[0],
+      this.binop.constructor.name,
+      "init was",
+      this.binop.identity,
+      "length is",
+      memsrc.length,
+      "memsrc[",
+      memsrc.length - 1,
+      "] is",
+      memsrc[memsrc.length - 1]
+    );
     if (memdest[0] != reduction[0]) {
       return `Element ${0}: expected ${reduction[0]}, instead saw ${
         memdest[0]
