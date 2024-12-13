@@ -36,12 +36,21 @@ class BaseU32Reduce extends BaseReduce {
     super(args);
     this.datatype = "u32";
   }
-  validate = (memsrc, memdest) => {
+  /** format of "buffers":
+   * buffers["in"] = vector of Buffer objects, need "cpubuffer"
+   *     buffers["in"][0].cpuBuffer,
+    buffers["out"][0].cpuBuffer
+  );
+   */
+  validate = (buffersIn) => {
     /* "reduction" is a one-element array, initialized to identity */
+    const buffers = this.bindingsToTypedArrays(buffersIn);
+    const memsrc = buffers["in"][0];
+    const memdest = buffers["out"][0];
     const reduction = new Uint32Array([this.binop.identity]);
     for (
       let i = 0;
-      i < memsrc.length;
+      i < buffers["in"][0].length;
       reduction[0] = this.binop.op(reduction[0], memsrc[i++])
     ) {}
     console.log(

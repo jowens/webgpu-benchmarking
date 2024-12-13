@@ -183,10 +183,7 @@ workgroup size: ${primitive.workgroupSize}
 dispatchGeometry: ${primitive.getDispatchGeometry()}`);
         if (primitive.validate) {
           /* TODO: this is currently hardcoded to validating (in[0], out[0]) */
-          const errorstr = primitive.validate(
-            buffers["in"][0].cpuBuffer,
-            buffers["out"][0].cpuBuffer
-          );
+          const errorstr = primitive.validate(buffers);
           if (errorstr == "") {
             console.info("Validation passed");
           } else {

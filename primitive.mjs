@@ -100,22 +100,66 @@ export class BasePrimitive {
      * - *TestBuffer
      * Returns a GPUBuffer
      */
-    let outputBuffer;
+    let gpuBuffer;
     switch (binding.constructor) {
       case GPUBuffer:
-        outputBuffer = binding;
+        gpuBuffer = binding;
         break;
       case TestInputBuffer: // fallthrough deliberate
       case TestOutputBuffer:
-        outputBuffer = binding.gpuBuffer;
+        gpuBuffer = binding.gpuBuffer;
         break;
       default:
         console.error(
-          `Primitive:getGPUBinding: Unknown datatype for buffer: ${typeof binding}`
+          `Primitive:getGPUBufferFromBinding: Unknown datatype for buffer: ${typeof binding}`
         );
         break;
     }
-    return outputBuffer;
+    return gpuBuffer;
+  }
+  getCPUBufferFromBinding(binding) {
+    /**
+     * Input is some sort of buffer object. Currently recognized:
+     * - TypedArray
+     * - *TestBuffer
+     * Returns a TypedArray
+     */
+    let cpuBuffer;
+    switch (binding.constructor) {
+      case TestInputBuffer: // fallthrough deliberate
+      case TestOutputBuffer:
+        cpuBuffer = binding.cpuBuffer;
+        break;
+      case Uint32Array:
+      case Int32Array:
+      case Float32Array:
+        cpuBuffer = binding;
+      default:
+        console.error(
+          `Primitive:getCPUBufferFromBinding: Unknown datatype for buffer: ${typeof binding}`
+        );
+        break;
+    }
+    return cpuBuffer;
+  }
+  /**
+   * Ensures output is an object with members "in", "out" where
+   *     each member is an array of TypedArrays
+   */
+  bindingsToTypedArrays(bindings) {
+    // https://stackoverflow.com/questions/65824084/how-to-tell-if-an-object-is-a-typed-array
+    const TypedArray = Object.getPrototypeOf(Uint8Array);
+    const bindingsOut = {};
+    for (const type of ["in", "out"]) {
+      if (bindings[type] instanceof TypedArray) {
+        /* already a typed array! */
+        bindingsOut[type] = [bindings[type]];
+      } else {
+        /* array of something we need to convert */
+        bindingsOut[type] = bindings[type].map(this.getCPUBufferFromBinding);
+      }
+    }
+    return bindingsOut;
   }
   async execute() {
     const encoder = this.device.createCommandEncoder({

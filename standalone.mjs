@@ -94,7 +94,7 @@ export async function main(navigator) {
 workgroupCount: ${primitive.workgroupCount}
 workgroup size: ${primitive.workgroupSize}`);
   if (primitive.validate) {
-    const errorstr = primitive.validate(memsrcu32, memdest);
+    const errorstr = primitive.validate({ in: memsrcu32, out: memdest });
     if (errorstr == "") {
       console.info("Validation passed");
     } else {
