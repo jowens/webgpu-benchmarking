@@ -36,23 +36,27 @@ class BaseU32Reduce extends BaseReduce {
     super(args);
     this.datatype = "u32";
   }
-  /** format of "buffers":
-   * buffers["in"] = vector of Buffer objects, need "cpubuffer"
-   *     buffers["in"][0].cpuBuffer,
-    buffers["out"][0].cpuBuffer
-  );
+  /** expected format of "buffersIn":
+   * { "in": [TypedArray], "out": [TypedArray] }
+   * if it's not in that format, bindingsToTypedArrays should convert it
+   * bindingsToTypedArrays expects an argument of
+   *     { "in": [somethingBufferish], "out": [somethingBufferish] }
+   *     or
+   *     { "in": TypedArray, "out": TypedArray }
    */
   validate = (buffersIn) => {
-    /* "reduction" is a one-element array, initialized to identity */
     const buffers = this.bindingsToTypedArrays(buffersIn);
     const memsrc = buffers["in"][0];
     const memdest = buffers["out"][0];
+    /* "reduction" is a one-element array, initialized to identity */
     const reduction = new Uint32Array([this.binop.identity]);
     for (
       let i = 0;
       i < buffers["in"][0].length;
       reduction[0] = this.binop.op(reduction[0], memsrc[i++])
-    ) {}
+    ) {
+      /*empty on purpose */
+    }
     console.log(
       "Should validate to",
       reduction[0],

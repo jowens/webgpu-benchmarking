@@ -145,6 +145,12 @@ export class BasePrimitive {
   /**
    * Ensures output is an object with members "in", "out" where
    *     each member is an array of TypedArrays
+   * output: { "in": [TypedArray], "out": [TypedArray] }
+   * if input is not in that format, bindingsToTypedArrays converts it
+   * it should convert inputs of:
+   *     { "in": [somethingBufferish], "out": [somethingBufferish] }
+   *     or
+   *     { "in": TypedArray, "out": TypedArray }
    */
   bindingsToTypedArrays(bindings) {
     // https://stackoverflow.com/questions/65824084/how-to-tell-if-an-object-is-a-typed-array
