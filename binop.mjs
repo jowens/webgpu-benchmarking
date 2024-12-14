@@ -22,6 +22,7 @@ class BinOpAdd extends BinOp {
         break;
     }
     this.wgslfn = `fn binop(a : ${this.datatype}, b : ${this.datatype}) -> ${this.datatype} {return a+b;}`;
+    this.subgroupOp = "subgroupAdd";
     this.op = (a, b) => a + b;
   }
 }
@@ -49,6 +50,7 @@ class BinOpMin extends BinOp {
     this.op = (a, b) => Math.min(a, b);
     this.wgslfn = `fn binop(a : ${this.datatype}, b : ${this.datatype}) -> ${this.datatype} {return min(a,b);}`;
     this.wgslatomic = "atomicMin";
+    this.subgroupOp = "subgroupMin";
   }
 }
 
@@ -75,6 +77,7 @@ class BinOpMax extends BinOp {
     this.op = (a, b) => Math.max(a, b);
     this.wgslfn = `fn binop(a : ${this.datatype}, b : ${this.datatype}) -> ${this.datatype} {return max(a,b);}`;
     this.wgslatomic = "atomicMax";
+    this.subgroupOp = "subgroupMax";
   }
 }
 
@@ -88,6 +91,8 @@ class BinOpMultiply extends BinOp {
     this.identity = 1;
     this.op = (a, b) => a * b;
     this.wgslfn = `fn binop(a : ${this.datatype}, b : ${this.datatype}) -> ${this.datatype} {return a*b;}`;
+    this.wgslatomic = "atomicMul";
+    this.subgroupOp = "subgroupMul";
   }
 }
 
