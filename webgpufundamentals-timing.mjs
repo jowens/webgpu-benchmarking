@@ -126,7 +126,10 @@ class TimingHelper {
     if (!this.#canTimestamp) {
       return 0;
     }
-    assert(this.#state === "wait for result", "must call resolveTiming");
+    assert(
+      this.#state === "wait for result",
+      `must call resolveTiming (state === ${this.#state})`
+    );
     this.#state = "free";
 
     const resultBuffer = this.#resultBuffer;
