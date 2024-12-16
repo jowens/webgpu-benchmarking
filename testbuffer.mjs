@@ -7,9 +7,9 @@ class TestBuffer {
     if (!("label" in config)) {
       this.label = `Buffer (datatype: ${config.datatype}; size: ${config.size})`;
     }
-    this.cpuBuffer = new (this.getArrayType())(this.size);
+    this.cpuBuffer = new (this.datatypeToTypedArray())(this.size);
   }
-  getArrayType() {
+  datatypeToTypedArray() {
     switch (this.datatype) {
       case "f32":
         return Float32Array;
