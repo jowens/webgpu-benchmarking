@@ -48,6 +48,7 @@ import {
 import {
   AtomicGlobalU32ReduceTestSuite,
   AtomicGlobalU32ReduceBinOpsTestSuite,
+  NoAtomicPKReduceTestSuite,
   AtomicGlobalU32SGReduceTestSuite,
   AtomicGlobalU32WGReduceTestSuite,
   AtomicGlobalF32WGReduceTestSuite,
@@ -97,7 +98,8 @@ async function main(navigator) {
   //];
   const testSuites = [
     // AtomicGlobalU32ReduceTestSuite,
-    AtomicGlobalU32ReduceBinOpsTestSuite,
+    // AtomicGlobalU32ReduceBinOpsTestSuite,
+    NoAtomicPKReduceTestSuite,
     //AtomicGlobalU32SGReduceTestSuite,
     //AtomicGlobalU32WGReduceTestSuite,
     //AtomicGlobalF32WGReduceTestSuite,
@@ -172,15 +174,14 @@ async function main(navigator) {
         // Copy results to CPU and validate them
         for (let i = 0; i < primitive.numOutputBuffers; i++) {
           await buffers["out"][i].mappableGPUBuffer.mapAsync(GPUMapMode.READ);
-          buffers["out"][i].cpuBuffer = new (buffers["out"][i].getArrayType())(
+          buffers["out"][i].cpuBuffer = new (buffers["out"][
+            i
+          ].datatypeToTypedArray())(
             buffers["out"][i].mappableGPUBuffer.getMappedRange().slice()
           );
           buffers["out"][i].mappableGPUBuffer.unmap();
         }
 
-        console.info(`workgroupCount: ${primitive.workgroupCount}
-workgroup size: ${primitive.workgroupSize}
-dispatchGeometry: ${primitive.getDispatchGeometry()}`);
         if (primitive.validate) {
           /* TODO: this is currently hardcoded to validating (in[0], out[0]) */
           const errorstr = primitive.validate(buffers);
@@ -192,6 +193,10 @@ dispatchGeometry: ${primitive.getDispatchGeometry()}`);
         }
 
         primitive.getResult().then((ns) => {
+          // ns might be a list, in which case just add together by now
+          if (ns instanceof Array) {
+            ns = ns.reduce((x, a) => x + a, 0);
+          }
           const result = {
             testSuite: testSuite.testSuite,
             category: testSuite.category,
@@ -211,7 +216,7 @@ dispatchGeometry: ${primitive.getDispatchGeometry()}`);
           }
           result.date = new Date();
           result.gpuinfo = adapter.info;
-          result.time = ns / primitive.trials;
+          result.time = ns / testSuite.trials;
           result.cpugpuDelta = result.cpuns - result.time;
           result.bandwidth = result.bytesTransferred / result.time;
           result.bandwidthCPU = result.bytesTransferred / result.cpuns;
@@ -220,7 +225,6 @@ dispatchGeometry: ${primitive.getDispatchGeometry()}`);
           }
           expts.push(result);
         });
-        /* tear down -- TODO -- do we want to do this explicitly? */
       } // end of running all combinations for this testSuite
 
       // delay is just to make sure previous jobs finish before plotting

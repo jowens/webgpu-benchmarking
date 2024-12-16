@@ -56,7 +56,13 @@ export class BasePrimitive {
           break;
       }
     }
+
+    this.bindings = [];
   }
+  /**
+   * #{uniforms, inputs, outputs} are ALWAYS arrays of buffers. Setting
+   *     a single buffer converts to an array of size 1.
+   */
   #uniforms;
   #inputs;
   #outputs;
@@ -92,6 +98,18 @@ export class BasePrimitive {
     throw new Error(
       "Cannot call getDispatchGeometry() from abstract class BasePrimitive."
     );
+  }
+  getSimpleDispatchGeometry() {
+    // todo this is too simple
+    let dispatchGeometry = [this.workgroupCount, 1];
+    while (
+      dispatchGeometry[0] > this.device.limits.maxComputeWorkgroupsPerDimension
+    ) {
+      /* too big */
+      dispatchGeometry[0] = Math.ceil(dispatchGeometry[0] / 2);
+      dispatchGeometry[1] *= 2;
+    }
+    return dispatchGeometry;
   }
   getGPUBufferFromBinding(binding) {
     /**
@@ -178,50 +196,98 @@ export class BasePrimitive {
      * TODO: memoize these constructs
      */
 
-    /* begin timestamp prep */
+    /* begin timestamp prep - count kernels, allocate 2 timestamps/kernel */
     let kernelCount = 0; // how many kernels are there total?
     if (this.gputimestamps) {
       for (const action of this.compute()) {
-        if (action.constructor == Kernel) {
+        if (action.constructor == Kernel && action.enabled()) {
           kernelCount++;
         }
       }
     }
     this.#timingHelper = new TimingHelper(this.device, kernelCount);
 
+    /* populate the u/o/i declared bindings before we process any new ones */
+
+    let bindingIdx = 0;
+    for (const buffer of ["uniforms", "outputs", "inputs"]) {
+      if (this[buffer] !== undefined) {
+        for (const binding of this[buffer]) {
+          this.bindings.push({
+            binding: bindingIdx++,
+            resource: { buffer: this.getGPUBufferFromBinding(binding) },
+          });
+        }
+      }
+    }
+
+    const bindGroupLayout = this.device.createBindGroupLayout({
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: "storage" }, // {"uniform", "storage", "read-only-storage"}
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: "storage" },
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: "storage" },
+        },
+      ],
+    });
+    const pipelineLayout = this.device.createPipelineLayout({
+      bindGroupLayouts: [bindGroupLayout],
+    });
+
     for (const action of this.compute()) {
       switch (action.constructor) {
         case Kernel:
+          if (!action.enabled()) {
+            /* don't run this kernel at all */
+            break;
+          }
+          /* action.kernel can be a string or a function */
+          let kernelString;
+          switch (typeof action.kernel) {
+            case "string":
+              kernelString = action.kernel;
+              break;
+            case "function":
+              /* have never used kernelArgs, but let's support it anyway */
+              kernelString = action.kernel(action.kernelArgs);
+              break;
+            default:
+              throw new Error(
+                "Primitive::Kernel: kernel must be a function or a string"
+              );
+              break;
+          }
+          if (action.debugPrintKernel) {
+            console.log(kernelString);
+          }
+
           const computeModule = this.device.createShaderModule({
             label: `module: ${this.constructor.name}`,
-            code: action.kernel(),
+            code: kernelString,
           });
 
           const kernelPipeline = this.device.createComputePipeline({
             label: `${this.constructor.name} compute pipeline`,
-            layout: "auto",
+            layout: pipelineLayout, //"auto",
             compute: {
               module: computeModule,
             },
           });
 
-          const bindings = [];
-          let bindingIdx = 0;
-          for (const buffer of ["uniforms", "outputs", "inputs"]) {
-            if (this[buffer] !== undefined) {
-              for (const binding of this[buffer]) {
-                bindings.push({
-                  binding: bindingIdx++,
-                  resource: { buffer: this.getGPUBufferFromBinding(binding) },
-                });
-              }
-            }
-          }
-
           const kernelBindGroup = this.device.createBindGroup({
             label: `bindGroup for ${this.constructor.name} kernel`,
             layout: kernelPipeline.getBindGroupLayout(0),
-            entries: bindings,
+            entries: this.bindings,
           });
 
           const kernelDescriptor = {
@@ -234,7 +300,26 @@ export class BasePrimitive {
 
           kernelPass.setPipeline(kernelPipeline);
           kernelPass.setBindGroup(0, kernelBindGroup);
-          kernelPass.dispatchWorkgroups(...this.getDispatchGeometry());
+          /* For binding geometry:
+           *     Look in kernel first, then to primitive if nothing in kernel
+           * There was some binding wonkiness with using ?? to pick the gDG call
+           * so that's why there's an if statement instead
+           *
+           * todo: dispatchGeometry should be able to be an array or number, not
+           *     just a function
+           * */
+          let dispatchGeometry;
+          if (action.getDispatchGeometry) {
+            dispatchGeometry = action.getDispatchGeometry();
+          } else {
+            dispatchGeometry = this.getDispatchGeometry();
+          }
+          kernelPass.dispatchWorkgroups(...dispatchGeometry);
+
+          console.info(`memsrcSize: ${this.memsrcSize}
+workgroupCount: ${this.workgroupCount}
+workgroupSize: ${this.workgroupSize}
+dispatchGeometry: ${dispatchGeometry}`);
           kernelPass.end();
           break;
         case InitializeMemoryBlock:
@@ -251,7 +336,24 @@ export class BasePrimitive {
               DatatypeArray = Uint32Array;
               break;
           }
-          /* initialize entire array to action.value ... */
+          if (typeof action.buffer === "string") {
+            /** if we specify a buffer by a string,
+             * go find the actual buffer associated with that string.
+             * pick first one we find, in bindings order */
+            for (const binding of this.bindings) {
+              if (binding.resource.buffer.label == action.buffer) {
+                action.buffer = binding.resource.buffer;
+                break;
+              }
+            }
+            if (typeof action.buffer === "string") {
+              /* we didn't find a buffer; the string didn't match any of them */
+              throw new Error(
+                `Primitive::InitializeMemoryBlock: Could not find buffer named ${action.buffer}.`
+              );
+            }
+          }
+          /* initialize entire CPU-side array to action.value ... */
           const initBlock = DatatypeArray.from(
             { length: action.buffer.size / DatatypeArray.BYTES_PER_ELEMENT },
             () => action.value
@@ -263,6 +365,23 @@ export class BasePrimitive {
             0 /* offset */,
             initBlock
           );
+          break;
+        case AllocateBuffer:
+          console.log(this);
+          const allocatedBuffer = this.device.createBuffer({
+            label: action.label,
+            size: action.size,
+            usage:
+              action.usage ??
+              /* default: read AND write */
+              GPUBufferUsage.STORAGE |
+                GPUBufferUsage.COPY_SRC |
+                GPUBufferUsage.COPY_DST,
+          });
+          this.bindings.push({
+            binding: this.bindings.length,
+            resource: { buffer: allocatedBuffer },
+          });
           break;
       }
     }
@@ -277,15 +396,36 @@ export class BasePrimitive {
 }
 
 export class Kernel {
-  constructor(k) {
-    this.kernel = k;
+  constructor(args) {
+    this.label = "kernel"; // default
+    if (typeof args == "function") {
+      /* the function takes an optional arg object and returns the kernel string */
+      this.kernel = args;
+    } else {
+      /* more complicated objects */
+      /* one field should be "kernel" */
+      if (!args.kernel || typeof args.kernel !== "function") {
+        throw new Error(
+          "Kernel::constructor: Requires a 'kernel' field that is a function that returns the kernel string"
+        );
+      }
+      Object.assign(this, args);
+    }
+  }
+  enabled() {
+    /* default: enabled */
+    return this.enable ?? true;
   }
 }
 
 export class InitializeMemoryBlock {
-  constructor(buffer, value, datatype) {
-    this.buffer = buffer;
-    this.value = value;
-    this.datatype = datatype;
+  constructor(args) {
+    Object.assign(this, args);
+  }
+}
+
+export class AllocateBuffer {
+  constructor(args) {
+    Object.assign(this, args);
   }
 }
