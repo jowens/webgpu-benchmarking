@@ -119,8 +119,23 @@ async function main(navigator) {
     };
     /* do we perform a computation? */
     if (testSuite?.primitive?.prototype.compute) {
+      const uniqueRuns = new Set(); // if uniqueRuns is defined, don't run dups
       for (const params of combinations(testSuite.params)) {
         const primitive = testSuite.getPrimitive({ device, params });
+
+        if (testSuite.uniqueRuns) {
+          /* check if we've done this before */
+          /* this is untested */
+          const key = testSuite.uniqueRuns.map((x) => primitive[x]).join();
+          if (uniqueRuns.has(key)) {
+            /* already seen it, don't run it */
+            console.log("Already seen", key);
+            continue;
+          } else {
+            console.log("Haven't seen", key);
+            uniqueRuns.add(key);
+          }
+        }
 
         /** for test purposes, let's initialize some buffers.
          *    Initializing is the responsibility of the test suite.
@@ -153,7 +168,7 @@ async function main(navigator) {
         // TODO: uniforms
 
         // submit!
-        await primitive.execute();
+        await primitive.execute({ trials: testSuite.trials });
 
         // copy output back to host
         const copyEncoder = device.createCommandEncoder({
