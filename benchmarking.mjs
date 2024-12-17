@@ -129,10 +129,8 @@ async function main(navigator) {
           const key = testSuite.uniqueRuns.map((x) => primitive[x]).join();
           if (uniqueRuns.has(key)) {
             /* already seen it, don't run it */
-            console.log("Already seen", key);
             continue;
           } else {
-            console.log("Haven't seen", key);
             uniqueRuns.add(key);
           }
         }
