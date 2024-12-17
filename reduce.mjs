@@ -210,11 +210,12 @@ export class NoAtomicPKReduce extends BaseU32Reduce {
       Math.ceil(this.memsrcSize / this.workgroupSize),
       this.maxGSLWorkgroupCount
     );
+    this.numPartials = this.workgroupCount;
     /* args should contain binop, datatype */
   }
   compute() {
     return [
-      new AllocateBuffer({ label: "partials", size: this.workgroupCount * 4 }),
+      new AllocateBuffer({ label: "partials", size: this.numPartials * 4 }),
       new InitializeMemoryBlock({
         buffer: "partials",
         value: this.binop.identity,
@@ -293,7 +294,7 @@ export class NoAtomicPKReduce extends BaseU32Reduce {
 
         ${this.binop.wgslfn}
 
-        @compute @workgroup_size(${this.workgroupSize}) fn noAtomicPKReduceIntoPartials(
+        @compute @workgroup_size(${this.numPartials}) fn noAtomicPKReduceIntoPartials(
           @builtin(global_invocation_id) id: vec3u /* 3D thread id in compute shader grid */,
           @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
           @builtin(local_invocation_index) lid: u32 /* thread index in workgroup */,
