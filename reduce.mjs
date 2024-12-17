@@ -113,8 +113,16 @@ const ReduceWGSizePlot = {
   caption: "Lines are workgroup size",
 };
 
+const ReduceWGCountPlot = {
+  x: { field: "memsrcSize", label: "Input array size (B)" },
+  y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+  stroke: { field: "workgroupCount" },
+  test_br: "gpuinfo.description",
+  caption: "Lines are workgroup count",
+};
+
 /* needs to be a function if we do string interpolation */
-function ReduceWGCountPlot() {
+function ReduceWGCountFnPlot() {
   return {
     x: { field: "memsrcSize", label: "Input array size (B)" },
     /* y.field is just showing off that we can have an embedded function */
@@ -197,17 +205,19 @@ export class NoAtomicPKReduce extends BaseU32Reduce {
   /* persistent kernel, no atomics */
   constructor(args) {
     super(args);
-    this.workgroupSize = 256;
-    this.workgroupCount = Math.ceil(this.memsrcSize / this.workgroupSize);
-    /* expect: binop, datatype */
+    this.workgroupSize = this.workgroupSize ?? 256;
+    this.workgroupCount = Math.min(
+      Math.ceil(this.memsrcSize / this.workgroupSize),
+      this.maxGSLWorkgroupCount
+    );
+    /* args should contain binop, datatype */
   }
   compute() {
     return [
       new AllocateBuffer({ label: "partials", size: this.workgroupCount * 4 }),
       new InitializeMemoryBlock({
         buffer: "partials",
-        value: 42,
-        // value: this.binop.identity,
+        value: this.binop.identity,
         datatype: this.datatype,
       }),
       new InitializeMemoryBlock({
@@ -268,6 +278,10 @@ export class NoAtomicPKReduce extends BaseU32Reduce {
             }
         }`,
         label: "noAtomicPKReduceIntoPartials",
+        getDispatchGeometry: () => {
+          /* this is a grid-stride loop, so limit the dispatch */
+          return [this.workgroupCount];
+        },
       }),
       /* second kernel: reduce partials into final output */
       new Kernel({
@@ -292,58 +306,37 @@ export class NoAtomicPKReduce extends BaseU32Reduce {
         label: "noAtomicPKReduceIntoPartials",
         getDispatchGeometry: () => {
           /* This reduce is defined to do its final step with one workgroup */
-          return [1, 1];
+          return [1];
         },
         enable: true,
         debugPrintKernel: false,
-      }),
-      /* second alternative kernel: reduce partials into final output */
-      new Kernel({
-        kernel: () => /* wgsl */ `
-              /* output */
-              @group(0) @binding(0) var<storage, read_write> memDest: array<${this.datatype}>;
-              /* input */
-              @group(0) @binding(2) var<storage, read_write> partials: array<${this.datatype}>;////
-
-              ${this.binop.wgslfn}
-
-              @compute @workgroup_size(${this.workgroupSize}) fn noAtomicPKReduceIntoPartials(
-                @builtin(global_invocation_id) id: vec3u,
-                @builtin(num_workgroups) nwg: vec3u,
-                @builtin(local_invocation_index) lid: u32 /* 1D thread index within workgroup */,
-              ) {
-                  let i = id.y * nwg.x * ${this.workgroupSize} + id.x;
-                  if (lid == 0) {
-                    memDest[0] = partials[2];
-                  }
-              }`,
-        label: "noAtomicPKReduceIntoPartials",
-        getDispatchGeometry: () => {
-          /* This reduce is defined to do its final step with one workgroup */
-          return [1, 1];
-        },
-        enable: false,
       }),
     ];
   }
 }
 
 const PKReduceParams = {
-  memsrcSize: range(8, 26).map((i) => 2 ** i),
+  memsrcSize: range(8, 26).map((i) => 2 ** i) /* slowest */,
+  maxGSLWorkgroupCount: range(2, 8).map((i) => 2 ** i),
+  workgroupSize: range(5, 8).map((i) => 2 ** i),
 };
 
 export const NoAtomicPKReduceTestSuite = new BaseTestSuite({
   category: "reduce",
   testSuite: "no-atomic persistent-kernel u32 sum reduction",
-  trials: 100,
+  trials: 1,
   params: PKReduceParams,
+  uniqueRuns: ["memsrcSize", "workgroupCount", "workgroupSize"],
   primitive: NoAtomicPKReduce,
   primitiveConfig: {
     datatype: "u32",
     binop: BinOpAddU32,
     gputimestamps: true,
   },
-  plots: [ReduceWGSizePlot, ReduceWGCountPlot],
+  plots: [
+    { ...ReduceWGSizePlot, ...{ fy: { field: "workgroupCount" } } },
+    { ...ReduceWGCountPlot, ...{ fy: { field: "workgroupSize" } } },
+  ],
 });
 
 class AtomicGlobalU32SGReduce extends BaseU32Reduce {
