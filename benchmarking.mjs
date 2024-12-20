@@ -124,8 +124,8 @@ async function main(navigator) {
         const primitive = testSuite.getPrimitive({ device, params });
 
         if (testSuite.uniqueRuns) {
-          /* check if we've done this before */
-          /* this is untested */
+          /* check if we've done this specific run before */
+          /* fingerprint is a string, since strings can be keys in a Set() */
           const key = testSuite.uniqueRuns.map((x) => primitive[x]).join();
           if (uniqueRuns.has(key)) {
             /* already seen it, don't run it */
@@ -165,79 +165,98 @@ async function main(navigator) {
         primitive.outputs = buffers["out"];
         // TODO: uniforms
 
-        // submit!
-        await primitive.execute({ trials: testSuite.trials });
+        // TEST FOR CORRECTNESS
+        if (testSuite.validate) {
+          // submit ONE run just for correctness
+          await primitive.execute();
 
-        // copy output back to host
-        const copyEncoder = device.createCommandEncoder({
-          label: "encoder: GPU output buffer data -> mappable buffers",
-        });
-        for (let i = 0; i < primitive.numOutputBuffers; i++) {
-          copyEncoder.copyBufferToBuffer(
-            buffers["out"][i].gpuBuffer,
-            0,
-            buffers["out"][i].mappableGPUBuffer,
-            0,
-            buffers["out"][i].mappableGPUBuffer.size
-          );
-        }
-        const copyCommandBuffer = copyEncoder.finish();
-        device.queue.submit([copyCommandBuffer]);
+          // copy output back to host
+          const copyEncoder = device.createCommandEncoder({
+            label: "encoder: GPU output buffer data -> mappable buffers",
+          });
+          for (let i = 0; i < primitive.numOutputBuffers; i++) {
+            copyEncoder.copyBufferToBuffer(
+              buffers["out"][i].gpuBuffer,
+              0,
+              buffers["out"][i].mappableGPUBuffer,
+              0,
+              buffers["out"][i].mappableGPUBuffer.size
+            );
+          }
+          const copyCommandBuffer = copyEncoder.finish();
+          device.queue.submit([copyCommandBuffer]);
 
-        // Copy results to CPU and validate them
-        for (let i = 0; i < primitive.numOutputBuffers; i++) {
-          await buffers["out"][i].mappableGPUBuffer.mapAsync(GPUMapMode.READ);
-          buffers["out"][i].cpuBuffer = new (buffers["out"][
-            i
-          ].datatypeToTypedArray())(
-            buffers["out"][i].mappableGPUBuffer.getMappedRange().slice()
-          );
-          buffers["out"][i].mappableGPUBuffer.unmap();
-        }
+          // Copy results to CPU and validate them
+          for (let i = 0; i < primitive.numOutputBuffers; i++) {
+            await buffers["out"][i].mappableGPUBuffer.mapAsync(GPUMapMode.READ);
+            buffers["out"][i].cpuBuffer = new (buffers["out"][
+              i
+            ].datatypeToTypedArray())(
+              buffers["out"][i].mappableGPUBuffer.getMappedRange().slice()
+            );
+            buffers["out"][i].mappableGPUBuffer.unmap();
+          }
 
-        if (primitive.validate) {
-          /* TODO: this is currently hardcoded to validating (in[0], out[0]) */
-          const errorstr = primitive.validate(buffers);
-          if (errorstr == "") {
-            console.info("Validation passed");
+          if (primitive.validate) {
+            /* TODO: this is currently hardcoded to validating (in[0], out[0]) */
+            const errorstr = primitive.validate(buffers);
+            if (errorstr == "") {
+              console.info("Validation passed");
+            } else {
+              console.error(`Validation failed: ${errorstr}`);
+            }
           } else {
-            console.error(`Validation failed: ${errorstr}`);
+            console.error(
+              `Primitive ${primitive.label} has no validation routine`
+            );
           }
-        }
+        } // end of TEST FOR CORRECTNESS
 
-        primitive.getResult().then((ns) => {
-          // ns might be a list, in which case just add together by now
-          if (ns instanceof Array) {
-            ns = ns.reduce((x, a) => x + a, 0);
-          }
-          const result = {
-            testSuite: testSuite.testSuite,
-            category: testSuite.category,
-          };
-          /* copy primitive's fields into result */
-          for (const [field, value] of Object.entries(primitive)) {
-            if (typeof value !== "function") {
-              if (typeof value !== "object") {
-                result[field] = value;
-              } else {
-                /* object - if it's got a constructor, use the name */
-                if (value?.constructor?.name) {
-                  result[field] = value.constructor.name;
+        // TEST FOR PERFORMANCE
+        if (testSuite?.trials > 0) {
+          primitive.execute({
+            trials: testSuite.trials,
+            enableCPUTiming: true,
+          });
+
+          primitive.getResult().then(({ gpuTotalTimeNS, cpuTotalTimeNS }) => {
+            console.log(gpuTotalTimeNS, cpuTotalTimeNS);
+            const result = {
+              testSuite: testSuite.testSuite,
+              category: testSuite.category,
+            };
+            if (gpuTotalTimeNS instanceof Array) {
+              // gpuTotalTimeNS might be a list, in which case just add together for now
+              result.gpuTotalTimeNSArray = gpuTotalTimeNS;
+              gpuTotalTimeNS = gpuTotalTimeNS.reduce((x, a) => x + a, 0);
+            }
+            /* copy primitive's fields into result */
+            for (const [field, value] of Object.entries(primitive)) {
+              if (typeof value !== "function") {
+                if (typeof value !== "object") {
+                  result[field] = value;
+                } else {
+                  /* object - if it's got a constructor, use the name */
+                  /* useful for "binop" or other parameters */
+                  if (value?.constructor?.name) {
+                    result[field] = value.constructor.name;
+                  }
                 }
               }
             }
-          }
-          result.date = new Date();
-          result.gpuinfo = adapter.info;
-          result.time = ns / testSuite.trials;
-          result.cpugpuDelta = result.cpuns - result.time;
-          result.bandwidth = result.bytesTransferred / result.time;
-          result.bandwidthCPU = result.bytesTransferred / result.cpuns;
-          if (primitive.gflops) {
-            result.gflops = primitive.gflops(result.time);
-          }
-          expts.push(result);
-        });
+            result.date = new Date();
+            result.gpuinfo = adapter.info;
+            result.gputime = gpuTotalTimeNS / testSuite.trials;
+            result.cputime = cpuTotalTimeNS / testSuite.trials;
+            result.cpugpuDelta = result.cputime - result.gputime;
+            result.bandwidth = result.bytesTransferred / result.gputime;
+            result.bandwidthCPU = result.bytesTransferred / result.cputime;
+            if (primitive.gflops) {
+              result.gflops = primitive.gflops(result.gputime);
+            }
+            expts.push(result);
+          });
+        } // end of TEST FOR PERFORMANCE
       } // end of running all combinations for this testSuite
 
       // delay is just to make sure previous jobs finish before plotting
