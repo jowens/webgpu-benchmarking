@@ -9,7 +9,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 }
 
 // import primitive only, no test suite
-import { AtomicGlobalU32Reduce } from "./reduce.mjs";
+import { NoAtomicPKReduce } from "./reduce.mjs";
 
 export async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -55,16 +55,15 @@ export async function main(navigator) {
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   });
 
-  const primitive = new AtomicGlobalU32Reduce({
+  const primitive = new NoAtomicPKReduce({
     device,
     params: {
-      /* these are optional, should choose a reasonable default */
-      workgroupSize: 128,
-      workgroupCount: memsrcSize / 128,
+      /* tunable parameters - if none, use defaults */
     },
-    binop: BinOpMaxU32,
-    inputs: memsrcuBuffer,
-    outputs: memdestBuffer,
+    datatype: "u32",
+    gputimestamps: true, //// TODO should work without this
+    binop: BinOpMinU32,
+    buffers: [memdestBuffer, memsrcuBuffer],
   });
 
   await primitive.execute();
@@ -90,9 +89,6 @@ export async function main(navigator) {
   );
   mappableMemdestBuffer.unmap();
 
-  console.info(`${primitive.constructor.name}
-workgroupCount: ${primitive.workgroupCount}
-workgroup size: ${primitive.workgroupSize}`);
   if (primitive.validate) {
     const errorstr = primitive.validate({ in: memsrcu32, out: memdest });
     if (errorstr == "") {
@@ -101,6 +97,5 @@ workgroup size: ${primitive.workgroupSize}`);
       console.error(`Validation failed: ${errorstr}`);
     }
   }
-
-  // currently no timing info
+  // currently no timing computation, that's fine
 }
