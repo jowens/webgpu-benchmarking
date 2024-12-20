@@ -1,6 +1,6 @@
 // not thrilled this uses idx, would rather do destructuring and not rely on idx/length
-// would also like to see this done with a generatora
-function combinations(obj) {
+// would also like to see this done with a generator
+export function combinations(obj) {
   const keys = Object.keys(obj);
   const values = Object.values(obj);
 
@@ -24,22 +24,34 @@ function combinations(obj) {
   return gen(values, 0);
 }
 
-const range = (min, max /* [min, max] */) =>
+export const range = (min, max /* [min, max] */) =>
   [...Array(max - min + 1).keys()].map((i) => i + min);
 
-function fail(msg) {
+export function fail(msg) {
   // eslint-disable-next-line no-alert
   alert(msg);
 }
 
+export function datatypeToTypedArray(datatype) {
+  switch (datatype) {
+    case "f32":
+      return Float32Array;
+    case "i32":
+      return Int32Array;
+    case "u32":
+      return Uint32Array;
+  }
+  return undefined;
+}
+
 // https://stackoverflow.com/questions/8896327/jquery-wait-delay-1-second-without-executing-code
-const delay = (millis) =>
+export const delay = (millis) =>
   new Promise((resolve, reject) => {
     setTimeout((_) => resolve(), millis);
   });
 
 // https://stackoverflow.com/questions/3665115/how-to-create-a-file-in-memory-for-user-to-download-but-not-through-server
-function download(content, mimeType, filename) {
+export function download(content, mimeType, filename) {
   const a = document.createElement("a"); // Create "a" element
   if (mimeType == "application/json") {
     content = JSON.stringify(content);
@@ -51,5 +63,3 @@ function download(content, mimeType, filename) {
   a.click(); // Start downloading
   URL.revokeObjectURL(url);
 }
-
-export { combinations, range, fail, delay, download };
