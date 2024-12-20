@@ -15,22 +15,25 @@ class TimingHelper {
   #resultBuffer;
   #resultBuffers = [];
   #passNumber;
-  #maxPasses;
+  #numKernels;
   // state can be 'free', 'in progress', 'need resolve', 'wait for result'
   #state = "free";
 
-  constructor(device, maxPasses = 1) {
+  constructor(device, numKernels = 1) {
     this.#device = device;
     this.#passNumber = 0;
-    this.#maxPasses = maxPasses;
+    this.#numKernels = numKernels;
     this.#canTimestamp = device.features.has("timestamp-query");
     if (this.#canTimestamp) {
       this.#querySet = device.createQuerySet({
         type: "timestamp",
-        count: maxPasses * 2,
+        count: numKernels * 2,
       });
       this.#resolveBuffer = device.createBuffer({
         size: this.#querySet.count * 8,
+        label: `TimingHelper resolve buffer of size ${
+          this.#querySet.count * 8
+        }`,
         usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
       });
     }
@@ -56,7 +59,7 @@ class TimingHelper {
       });
 
       this.#passNumber++;
-      if (this.#passNumber == this.#maxPasses) {
+      if (this.#passNumber == this.#numKernels) {
         /* finished all passes */
         this.#state = "need resolve";
       } else {
@@ -90,7 +93,7 @@ class TimingHelper {
     if (!this.#canTimestamp) {
       return;
     }
-    if (this.#passNumber != this.#maxPasses) {
+    if (this.#passNumber != this.#numKernels) {
       return;
     }
     assert(
@@ -103,6 +106,7 @@ class TimingHelper {
       this.#resultBuffers.pop() ||
       this.#device.createBuffer({
         size: this.#resolveBuffer.size,
+        label: `TimingHelper result buffer of size ${this.#resolveBuffer.size}`,
         usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
       });
 
