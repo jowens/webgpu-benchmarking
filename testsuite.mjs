@@ -1,5 +1,11 @@
 export class BaseTestSuite {
   constructor(config) {
+    // start with defaults, can be overridden in config
+    // defaults are "validate output" and "do 1 timing trial"
+    this.validate = true;
+    this.trials = 1;
+
+    // now load in config
     Object.assign(this, config);
     // depending on what's in config, instantiate:
     // primitive, processResults, plots, summarize
