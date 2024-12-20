@@ -7,58 +7,49 @@ import {
 } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import { BinOpAddU32, BinOpMinU32, BinOpMaxU32 } from "./binop.mjs";
+import { datatypeToTypedArray } from "./util.mjs";
 
 // exports: TestSuites, Primitives
 
 class BaseReduce extends BasePrimitive {
   constructor(args) {
     super(args);
-    // every reduce test sets the following
-    this.memdestSize = 1;
-    if (!this.memsrcSize) {
-      this.memsrcSize = this.workgroupSize * this.workgroupCount;
+
+    for (const required of ["datatype"]) {
+      if (!this[required]) {
+        throw new Error(
+          `${this.constructor.name}: ${required} is a required parameter.`
+        );
+      }
     }
-    this.bytesTransferred = (this.memsrcSize + this.memdestSize) * 4;
-    /* do I really need these next three? */
-    this.numInputBuffers = 1;
-    this.numOutputBuffers = 1;
-    this.numUniformBuffers = 0;
-    /* delegate to simple call from BasePrimitive */
+
+    // every reduce test sets the following
+    this.inputBytes = this.buffers[1].size;
+    this.outputBytes = this.buffers[0].size;
+    this.bytesTransferred = this.inputBytes + this.outputBytes;
+
+    /* initialize buffer structures for all reduces */
+    this.bufferDescription = { 0: "storage", 1: "read-only-storage" };
+
+    /* by default, delegate to simple call from BasePrimitive */
     this.getDispatchGeometry = this.getSimpleDispatchGeometry;
   }
-}
-
-class BaseU32Reduce extends BaseReduce {
-  constructor(args) {
-    super(args);
-    this.datatype = "u32";
-  }
-  /** expected format of "buffersIn":
-   * { "in": [TypedArray], "out": [TypedArray] }
-   * if it's not in that format, bindingsToTypedArrays should convert it
-   * bindingsToTypedArrays expects an argument of
-   *     { "in": [somethingBufferish], "out": [somethingBufferish] }
-   *     or
-   *     { "in": TypedArray, "out": TypedArray }
-   */
-  validate = (buffersIn) => {
-    const buffers = this.bindingsToTypedArrays(buffersIn);
+  validate = (buffersArg) => {
+    const buffers = this.bindingsToTypedArrays(buffersArg);
     const memsrc = buffers["in"][0];
     const memdest = buffers["out"][0];
     /* "reduction" is a one-element array, initialized to identity */
-    const reduction = new Uint32Array([this.binop.identity]);
-    for (
-      let i = 0;
-      i < buffers["in"][0].length;
-      reduction[0] = this.binop.op(reduction[0], memsrc[i++])
-    ) {
-      /* empty on purpose */
+    const reduction = new (datatypeToTypedArray(this.datatype))([
+      this.binop.identity,
+    ]);
+    for (let i = 0; i < buffers["in"][0].length; i++) {
+      reduction[0] = this.binop.op(reduction[0], memsrc[i]);
     }
     console.log(
       "Should validate to",
       reduction[0],
       this.binop.constructor.name,
-      "init was",
+      "identity is",
       this.binop.identity,
       "length is",
       memsrc.length,
@@ -67,29 +58,20 @@ class BaseU32Reduce extends BaseReduce {
       "] is",
       memsrc[memsrc.length - 1]
     );
-    if (memdest[0] != reduction[0]) {
+    function validates(cpu, gpu, datatype) {
+      switch (datatype) {
+        case "f32":
+          return Math.abs(cpu - gpu) / cpu > 0.001;
+        default:
+          return cpu == gpu;
+      }
+    }
+    if (validates(reduction[0], memdest[0], this.datatype)) {
+      return "";
+    } else {
       return `Element ${0}: expected ${reduction[0]}, instead saw ${
         memdest[0]
       }.`;
-    } else {
-      return "";
-    }
-  };
-}
-
-class BaseF32Reduce extends BaseReduce {
-  constructor(args) {
-    super(args);
-    this.datatype = "f32";
-    this.randomizeInput = true;
-  }
-  validate = (memsrc, memdest) => {
-    const sum = new Float32Array([0]); // [0.0]; //
-    for (let i = 0; i < memsrc.length; sum[0] += memsrc[i++]);
-    if (Math.abs(sum[0] - memdest[0]) / sum[0] > 0.001) {
-      return `Element ${0}: expected ${sum[0]}, instead saw ${memdest[0]}.`;
-    } else {
-      return "";
     }
   };
 }
@@ -106,7 +88,7 @@ const ReduceAndBinOpParams = {
 };
 
 const ReduceWGSizePlot = {
-  x: { field: "memsrcSize", label: "Input array size (B)" },
+  x: { field: "inputBytes", label: "Input array size (B)" },
   y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
   stroke: { field: "workgroupSize" },
   test_br: "gpuinfo.description",
@@ -114,7 +96,7 @@ const ReduceWGSizePlot = {
 };
 
 const ReduceWGCountPlot = {
-  x: { field: "memsrcSize", label: "Input array size (B)" },
+  x: { field: "inputBytes", label: "Input array size (B)" },
   y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
   stroke: { field: "workgroupCount" },
   test_br: "gpuinfo.description",
@@ -124,7 +106,7 @@ const ReduceWGCountPlot = {
 /* needs to be a function if we do string interpolation */
 function ReduceWGCountFnPlot() {
   return {
-    x: { field: "memsrcSize", label: "Input array size (B)" },
+    x: { field: "inputBytes", label: "Input array size (B)" },
     /* y.field is just showing off that we can have an embedded function */
     /* { field: "bandwidth", ...} would do the same */
     y: { field: (d) => d.bandwidth, label: "Achieved bandwidth (GB/s)" },
@@ -135,7 +117,7 @@ function ReduceWGCountFnPlot() {
 }
 
 const ReduceWGSizeBinOpPlot = {
-  x: { field: "memsrcSize", label: "Input array size (B)" },
+  x: { field: "inputByes", label: "Input array size (B)" },
   y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
   fy: { field: "binop" },
   stroke: { field: "workgroupSize" },
@@ -143,8 +125,9 @@ const ReduceWGSizeBinOpPlot = {
   caption: "Lines are workgroup size",
 };
 
-export class AtomicGlobalU32Reduce extends BaseU32Reduce {
+export class AtomicGlobalU32Reduce extends BaseReduce {
   constructor(args) {
+    this.datatype = "u32";
     super(args);
   }
   compute() {
@@ -201,19 +184,36 @@ export const AtomicGlobalU32ReduceBinOpsTestSuite = new BaseTestSuite({
   plots: [ReduceWGSizePlot, ReduceWGCountPlot, ReduceWGSizeBinOpPlot],
 });
 
-export class NoAtomicPKReduce extends BaseU32Reduce {
+export class NoAtomicPKReduce extends BaseReduce {
   /* persistent kernel, no atomics */
   constructor(args) {
     super(args);
+    /* Check for required parameters for this kernel first */
+    for (const required of ["binop", "datatype"]) {
+      if (!this[required]) {
+        throw new Error(
+          `${this.constructor.name}: ${required} is a required parameter.`
+        );
+      }
+    }
+
+    /* Set reasonable defaults for tunable parameters */
     this.workgroupSize = this.workgroupSize ?? 256;
+    this.maxGSLWorkgroupCount = this.maxGSLWorkgroupCount ?? 256;
+
+    /* this sets all the rest of the necessary parameters */
+    this.updateSettings();
+  }
+  updateSettings() {
+    /* Compute settings based on tunable parameters */
     this.workgroupCount = Math.min(
-      Math.ceil(this.memsrcSize / this.workgroupSize),
+      Math.ceil(this.buffers[1].size / this.workgroupSize),
       this.maxGSLWorkgroupCount
     );
     this.numPartials = this.workgroupCount;
-    /* args should contain binop, datatype */
   }
   compute() {
+    console.log("entry point to compute()", this);
     return [
       new AllocateBuffer({ label: "partials", size: this.numPartials * 4 }),
       new InitializeMemoryBlock({
@@ -222,7 +222,7 @@ export class NoAtomicPKReduce extends BaseU32Reduce {
         datatype: this.datatype,
       }),
       new InitializeMemoryBlock({
-        buffer: this.outputs[0],
+        buffer: this.buffers[0],
         value: this.binop.identity,
         datatype: this.datatype,
       }),
@@ -233,7 +233,7 @@ export class NoAtomicPKReduce extends BaseU32Reduce {
         /* output */
         @group(0) @binding(2) var<storage, read_write> partials: array<${this.datatype}>;
         /* input */
-        @group(0) @binding(1) var<storage, read_write> memSrc: array<${this.datatype}>;////
+        @group(0) @binding(1) var<storage, read> memSrc: array<${this.datatype}>;////
 
         var<workgroup> temp: array<${this.datatype}, 32>; // zero initialized
 
@@ -278,7 +278,7 @@ export class NoAtomicPKReduce extends BaseU32Reduce {
               partials[wgid.x] = acc;
             }
         }`,
-        label: "noAtomicPKReduceIntoPartials",
+        label: "noAtomicPKReduce workgroup reduce -> partials",
         getDispatchGeometry: () => {
           /* this is a grid-stride loop, so limit the dispatch */
           return [this.workgroupCount];
@@ -288,9 +288,9 @@ export class NoAtomicPKReduce extends BaseU32Reduce {
       new Kernel({
         kernel: () => /* wgsl */ `
         /* output */
-        @group(0) @binding(0) var<storage, read_write> memDest: atomic<${this.datatype}>;
+        @group(0) @binding(0) var<storage, read_write> memDest: atomic<${this.datatype}>;////
         /* input */
-        @group(0) @binding(2) var<storage, read_write> partials: array<${this.datatype}>;////
+        @group(0) @binding(2) var<storage, read_write> partials: array<${this.datatype}>;
 
         ${this.binop.wgslfn}
 
@@ -304,30 +304,36 @@ export class NoAtomicPKReduce extends BaseU32Reduce {
               ${this.binop.wgslatomic}(&memDest, partials[i]);
             }
         }`,
-        label: "noAtomicPKReduceIntoPartials",
+        label: "noAtomicPKReduce partials->final",
         getDispatchGeometry: () => {
           /* This reduce is defined to do its final step with one workgroup */
           return [1];
         },
         enable: true,
-        debugPrintKernel: false,
+        debugPrintKernel: true,
       }),
     ];
   }
 }
 
 const PKReduceParams = {
-  memsrcSize: range(8, 26).map((i) => 2 ** i) /* slowest */,
+  inputSize: range(8, 26).map((i) => 2 ** i) /* slowest */,
   maxGSLWorkgroupCount: range(2, 8).map((i) => 2 ** i),
   workgroupSize: range(5, 8).map((i) => 2 ** i),
+};
+
+const PKReduceParamsSingleton = {
+  inputSize: [2 ** 20],
+  maxGSLWorkgroupCount: [2 ** 5],
+  workgroupSize: [2 ** 6],
 };
 
 export const NoAtomicPKReduceTestSuite = new BaseTestSuite({
   category: "reduce",
   testSuite: "no-atomic persistent-kernel u32 sum reduction",
-  trials: 1,
-  params: PKReduceParams,
-  uniqueRuns: ["memsrcSize", "workgroupCount", "workgroupSize"],
+  trials: 100,
+  params: PKReduceParamsSingleton,
+  uniqueRuns: ["inputSize", "workgroupCount", "workgroupSize"],
   primitive: NoAtomicPKReduce,
   primitiveConfig: {
     datatype: "u32",
@@ -340,8 +346,9 @@ export const NoAtomicPKReduceTestSuite = new BaseTestSuite({
   ],
 });
 
-class AtomicGlobalU32SGReduce extends BaseU32Reduce {
+class AtomicGlobalU32SGReduce extends BaseReduce {
   constructor(args) {
+    this.datatype = "u32";
     super(args);
     this.compute = [
       new InitializeMemoryBlock({
@@ -381,8 +388,9 @@ export const AtomicGlobalU32SGReduceTestSuite = new BaseTestSuite({
   plots: [ReduceWGSizePlot, ReduceWGCountPlot],
 });
 
-class AtomicGlobalU32WGReduce extends BaseU32Reduce {
+class AtomicGlobalU32WGReduce extends BaseReduce {
   constructor(args) {
+    this.datatype = "u32";
     super(args);
     this.kernel = () => /* wgsl */ `
       enable subgroups;
@@ -418,9 +426,10 @@ export const AtomicGlobalU32WGReduceTestSuite = new BaseTestSuite({
   plots: [ReduceWGSizePlot, ReduceWGCountPlot],
 });
 
-class AtomicGlobalF32WGReduce extends BaseF32Reduce {
+class AtomicGlobalF32WGReduce extends BaseReduce {
   // https://github.com/gpuweb/gpuweb/issues/4894
   constructor(args) {
+    this.datatype = "f32";
     super(args);
     this.kernel = () => /* wgsl */ `
       /* output */
@@ -484,9 +493,10 @@ export const AtomicGlobalF32WGReduceTestSuite = new BaseTestSuite({
   plots: [ReduceWGSizePlot, ReduceWGCountPlot],
 });
 
-class AtomicGlobalNonAtomicWGF32Reduce extends BaseF32Reduce {
+class AtomicGlobalNonAtomicWGF32Reduce extends BaseReduce {
   // https://github.com/gpuweb/gpuweb/issues/4894
   constructor(args) {
+    this.datatype = "f32";
     super(args);
     this.kernel = () => /* wgsl */ `
       enable subgroups;
@@ -548,13 +558,13 @@ export const AtomicGlobalNonAtomicWGF32ReduceTestSuite = new BaseTestSuite({
   plots: [ReduceWGSizePlot, ReduceWGCountPlot],
 });
 
-class AtomicGlobalPrimedNonAtomicWGF32Reduce extends BaseF32Reduce {
+class AtomicGlobalPrimedNonAtomicWGF32Reduce extends BaseReduce {
   // https://github.com/gpuweb/gpuweb/issues/4894
   constructor(args) {
+    this.datatype = "f32";
     super(args);
     this.testsuite =
       "Non-atomic per-workgroup, atomic-f32 sum reduction, with primed atomic";
-    this.datatype = "f32";
 
     this.kernel = () => /* wgsl */ `
       enable subgroups;
