@@ -1,3 +1,5 @@
+import { datatypeToTypedArray } from "./util.mjs";
+
 // this is only for benchmarking purposes, not designed for production
 class TestBuffer {
   constructor(device, config) {
@@ -7,20 +9,10 @@ class TestBuffer {
     if (!("label" in config)) {
       this.label = `Buffer (datatype: ${config.datatype}; size: ${config.size})`;
     }
-    this.cpuBuffer = new (this.datatypeToTypedArray())(this.size);
-  }
-  datatypeToTypedArray() {
-    switch (this.datatype) {
-      case "f32":
-        return Float32Array;
-      case "i32":
-        return Int32Array;
-      case "u32":
-        return Uint32Array;
-    }
-    return undefined;
+    this.cpuBuffer = new (datatypeToTypedArray())(this.size);
   }
 }
+
 export class TestInputBuffer extends TestBuffer {
   constructor(device, config) {
     super(device, config);
