@@ -5,7 +5,7 @@ export class BasePrimitive {
   constructor(args) {
     // expect that args are:
     // { device: device,
-    //   params: { param1: val1, param2: val2 },
+    //   params: { param1: val1, param2: val2 }, // TUNABLE params
     //   someConfigurationSetting: thatSetting,
     //   gputimestamps: true,
     //   uniforms: uniformbuffer0,
@@ -17,23 +17,22 @@ export class BasePrimitive {
         "Cannot instantiate abstract class BasePrimitive directly."
       );
     }
+    /* set label first */
+    if (!("label" in args)) {
+      this.label = this.constructor.name;
+    }
 
-    /* required arguments, and handled first */
-    for (const field of ["device"]) {
-      if (!(field in args)) {
+    /* required arguments, and handled next */
+    for (const requiredField of ["device"]) {
+      if (!(requiredField in args)) {
         throw new Error(
-          `Primitive ${this.constructor.name} requires a "${field}" argument.`
+          `Primitive ${this.label} requires a "${requiredField}" argument.`
         );
       }
-      /* set this first so that it can be used below */
-      this[field] = args[field];
-    }
-    /* arguments that could be objects or arrays */
-    for (const field of ["uniforms", "inputs", "outputs"]) {
-      this[`#${field}`] = undefined;
+      this[requiredField] = args[requiredField];
     }
 
-    // now let's walk through all the fields
+    // now let's walk through all the args
     for (const [field, value] of Object.entries(args)) {
       switch (field) {
         case "params":
@@ -48,46 +47,59 @@ export class BasePrimitive {
         case "device":
           /* do nothing, handled above */
           break;
-        case "uniforms":
-        case "inputs":
-        case "outputs": // fall-through deliberate
         default:
+          /* copy it into the primitive */
           this[field] = value;
           break;
       }
     }
+  }
 
-    this.bindings = [];
-  }
-  /**
-   * #{uniforms, inputs, outputs} are ALWAYS arrays of buffers. Setting
-   *     a single buffer converts to an array of size 1.
-   */
-  #uniforms;
-  #inputs;
-  #outputs;
-  set uniforms(val) {
-    const arr = Array.isArray(val) ? val : [val];
-    this.#uniforms = arr;
-  }
-  get uniforms() {
-    return this.#uniforms;
-  }
-  set inputs(val) {
-    const arr = Array.isArray(val) ? val : [val];
-    this.#inputs = arr;
-  }
-  get inputs() {
-    return this.#inputs;
-  }
-  set outputs(val) {
-    const arr = Array.isArray(val) ? val : [val];
-    this.#outputs = arr;
-  }
-  get outputs() {
-    return this.#outputs;
-  }
+  #bufferDescription; // this holds all buffer state for the primitive
+  #bindGroupLayout;
+  #pipelineLayout;
   #timingHelper;
+
+  set bufferDescription(obj) {
+    // TODO: have a "defer" entry that doesn't rebuild this if set
+    this.#bufferDescription = obj;
+    /* now rebuild bindGroupLayout and pipelineLayout */
+    const entries = [];
+    for (const [binding, type] of Object.entries(this.#bufferDescription)) {
+      // "binding" is a string, so turn it back into an int here
+      entries.push({
+        binding: parseInt(binding, 10),
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type },
+      });
+    }
+    console.log("Entries in set bufferDescription:", entries);
+    this.#bindGroupLayout = this.device.createBindGroupLayout({
+      entries,
+      label: `${this.label} bind group with ${entries.length} entries`,
+    });
+    this.#pipelineLayout = this.device.createPipelineLayout({
+      bindGroupLayouts: [this.#bindGroupLayout],
+      label: `${this.label} pipeline layout (${this.#bindGroupLayout.label})`,
+    });
+    console.log(
+      "#bindgrouplayout",
+      this.#bindGroupLayout,
+      "#pipelinelayout",
+      this.#pipelineLayout
+    );
+  }
+  get bufferDescription() {
+    return this.#bufferDescription;
+  }
+  getBindGroupEntries() {
+    const entries = [];
+    for (const binding in this.bufferDescription) {
+      entries.push({ binding, resource: { buffer: this.buffers[binding] } });
+    }
+    console.log("getBindGroupEntries", entries);
+    return entries;
+  }
 
   kernel() {
     /* call this from a subclass instead */
@@ -160,6 +172,9 @@ export class BasePrimitive {
     }
     return cpuBuffer;
   }
+  updateBufferInternals() {
+    /* rebuild any internal structures with respect to buffers */
+  }
   /**
    * Ensures output is an object with members "in", "out" where
    *     each member is an array of TypedArrays
@@ -185,14 +200,20 @@ export class BasePrimitive {
     }
     return bindingsOut;
   }
-  async execute(args) {
+  async execute(args = {}) {
     /** loop through each of the actions listed in this.compute(),
      * instantiating whatever WebGPU constructs are necessary to run them
      *
      * TODO: memoize these constructs
      */
 
+    /* set up defaults */
+    if (!("trials" in args)) {
+      args.trials = 1;
+    }
+
     /* begin timestamp prep - count kernels, allocate 2 timestamps/kernel */
+    console.log("gputimestamps:", this.gputimestamps);
     let kernelCount = 0; // how many kernels are there total?
     if (this.gputimestamps) {
       for (const action of this.compute()) {
@@ -201,199 +222,181 @@ export class BasePrimitive {
         }
       }
     }
+    console.log("Kernel count:", kernelCount);
 
-    /* populate the u/o/i declared bindings before we process any new ones */
-
-    let bindingIdx = 0;
-    for (const buffer of ["uniforms", "outputs", "inputs"]) {
-      if (this[buffer] !== undefined) {
-        for (const binding of this[buffer]) {
-          this.bindings.push({
-            binding: bindingIdx++,
-            resource: { buffer: this.getGPUBufferFromBinding(binding) },
-          });
-        }
-      }
-    }
-
-    const bindGroupLayout = this.device.createBindGroupLayout({
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: "storage" }, // {"uniform", "storage", "read-only-storage"}
-        },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: "storage" },
-        },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: "storage" },
-        },
-      ],
+    const encoder = this.device.createCommandEncoder({
+      label: `${this.label} primitive encoder`,
     });
-    const pipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [bindGroupLayout],
-    });
-
-    for (let trial = 0; trial < args.trials ?? 1; trial++) {
-      const encoder = this.device.createCommandEncoder({
-        label: `${this.constructor.name} primitive encoder`,
-      });
-      this.#timingHelper = new TimingHelper(this.device, kernelCount);
-      for (const action of this.compute()) {
-        switch (action.constructor) {
-          case Kernel:
-            if (!action.enabled()) {
-              /* don't run this kernel at all */
+    this.#timingHelper = new TimingHelper(this.device, kernelCount);
+    for (const action of this.compute()) {
+      switch (action.constructor) {
+        case Kernel:
+          if (!action.enabled()) {
+            /* don't run this kernel at all */
+            break;
+          }
+          /* action.kernel can be a string or a function */
+          let kernelString;
+          switch (typeof action.kernel) {
+            case "string":
+              kernelString = action.kernel;
               break;
-            }
-            /* action.kernel can be a string or a function */
-            let kernelString;
-            switch (typeof action.kernel) {
-              case "string":
-                kernelString = action.kernel;
-                break;
-              case "function":
-                /* have never used kernelArgs, but let's support it anyway */
-                kernelString = action.kernel(action.kernelArgs);
-                break;
-              default:
-                throw new Error(
-                  "Primitive::Kernel: kernel must be a function or a string"
-                );
-                break;
-            }
-            if (action.debugPrintKernel) {
-              console.log(kernelString);
-            }
+            case "function":
+              /* have never used kernelArgs, but let's support it anyway */
+              kernelString = action.kernel(action.kernelArgs);
+              break;
+            default:
+              throw new Error(
+                "Primitive::Kernel: kernel must be a function or a string"
+              );
+              break;
+          }
+          if (action.debugPrintKernel) {
+            console.log(kernelString);
+          }
 
-            const computeModule = this.device.createShaderModule({
-              label: `module: ${this.constructor.name}`,
-              code: kernelString,
-            });
+          const computeModule = this.device.createShaderModule({
+            label: `module: ${this.label}`,
+            code: kernelString,
+          });
 
-            const kernelPipeline = this.device.createComputePipeline({
-              label: `${this.constructor.name} compute pipeline`,
-              layout: pipelineLayout, //"auto",
-              compute: {
-                module: computeModule,
-              },
-            });
+          console.log(this);
 
-            const kernelBindGroup = this.device.createBindGroup({
-              label: `bindGroup for ${this.constructor.name} kernel`,
-              layout: kernelPipeline.getBindGroupLayout(0),
-              entries: this.bindings,
-            });
+          const kernelPipeline = this.device.createComputePipeline({
+            label: `${this.label} compute pipeline`,
+            layout: this.#pipelineLayout,
+            compute: {
+              module: computeModule,
+            },
+          });
 
-            const kernelDescriptor = {
-              label: `${this.constructor.name} compute pass`,
-            };
+          const kernelBindGroup = this.device.createBindGroup({
+            label: `bindGroup for ${this.label} kernel`,
+            layout: kernelPipeline.getBindGroupLayout(0),
+            entries: this.getBindGroupEntries(),
+          });
 
-            const kernelPass = this.gputimestamps
-              ? this.#timingHelper.beginComputePass(encoder, kernelDescriptor)
-              : encoder.beginComputePass(kernelDescriptor);
+          const kernelDescriptor = {
+            label: `${this.label} compute pass`,
+          };
 
-            kernelPass.setPipeline(kernelPipeline);
-            kernelPass.setBindGroup(0, kernelBindGroup);
-            /* For binding geometry:
-             *     Look in kernel first, then to primitive if nothing in kernel
-             * There was some binding wonkiness with using ?? to pick the gDG call
-             * so that's why there's an if statement instead
-             *
-             * todo: dispatchGeometry should be able to be an array or number, not
-             *     just a function
-             * */
-            let dispatchGeometry;
-            if (action.getDispatchGeometry) {
-              dispatchGeometry = action.getDispatchGeometry();
-            } else {
-              dispatchGeometry = this.getDispatchGeometry();
-            }
+          const kernelPass = this.gputimestamps
+            ? this.#timingHelper.beginComputePass(encoder, kernelDescriptor)
+            : encoder.beginComputePass(kernelDescriptor);
+
+          kernelPass.setPipeline(kernelPipeline);
+          kernelPass.setBindGroup(0, kernelBindGroup);
+          /* For binding geometry:
+           *     Look in kernel first, then to primitive if nothing in kernel
+           * There was some binding wonkiness with using ?? to pick the gDG call
+           * so that's why there's an if statement instead
+           *
+           * TODO: dispatchGeometry should be able to be an array or number, not
+           *     just a function
+           * */
+          let dispatchGeometry;
+          if (action.getDispatchGeometry) {
+            dispatchGeometry = action.getDispatchGeometry();
+          } else {
+            dispatchGeometry = this.getDispatchGeometry();
+          }
+          /* trials might be >1 so make sure additional runs are idempotent */
+          for (let trial = 0; trial < args.trials ?? 1; trial++) {
+            console.log("DISPATCHING:", dispatchGeometry);
             kernelPass.dispatchWorkgroups(...dispatchGeometry);
+          }
 
-            console.info(`memsrcSize: ${this.memsrcSize}
+          console.info(`inputBytes: ${this.inputBytes}
 workgroupCount: ${this.workgroupCount}
 workgroupSize: ${this.workgroupSize}
 maxGSLWorkgroupCount: ${this.maxGSLWorkgroupCount}
 dispatchGeometry: ${dispatchGeometry}`);
-            kernelPass.end();
-            break;
-          case InitializeMemoryBlock:
-            let DatatypeArray;
-            switch (action.datatype) {
-              case "f32":
-                DatatypeArray = Float32Array;
+          kernelPass.end();
+          break;
+        case InitializeMemoryBlock:
+          let DatatypeArray;
+          switch (action.datatype) {
+            case "f32":
+              DatatypeArray = Float32Array;
+              break;
+            case "i32":
+              DatatypeArray = Int32Array;
+              break;
+            case "u32":
+            default:
+              DatatypeArray = Uint32Array;
+              break;
+          }
+          if (typeof action.buffer === "string") {
+            /** if we specify a buffer by a string,
+             * go find the actual buffer associated with that string.
+             * pick first one we find, in bindings order */
+            for (const buffer of this.buffers) {
+              if (buffer.label == action.buffer) {
+                action.buffer = buffer;
                 break;
-              case "i32":
-                DatatypeArray = Int32Array;
-                break;
-              case "u32":
-              default:
-                DatatypeArray = Uint32Array;
-                break;
+              }
             }
             if (typeof action.buffer === "string") {
-              /** if we specify a buffer by a string,
-               * go find the actual buffer associated with that string.
-               * pick first one we find, in bindings order */
-              for (const binding of this.bindings) {
-                if (binding.resource.buffer.label == action.buffer) {
-                  action.buffer = binding.resource.buffer;
-                  break;
-                }
-              }
-              if (typeof action.buffer === "string") {
-                /* we didn't find a buffer; the string didn't match any of them */
-                throw new Error(
-                  `Primitive::InitializeMemoryBlock: Could not find buffer named ${action.buffer}.`
-                );
-              }
+              /* we didn't find a buffer; the string didn't match any of them */
+              throw new Error(
+                `Primitive::InitializeMemoryBlock: Could not find buffer named ${action.buffer}.`
+              );
             }
-            /* initialize entire CPU-side array to action.value ... */
-            const initBlock = DatatypeArray.from(
-              { length: action.buffer.size / DatatypeArray.BYTES_PER_ELEMENT },
-              () => action.value
-            );
+          }
+          /* initialize entire CPU-side array to action.value ... */
+          const initBlock = DatatypeArray.from(
+            { length: action.buffer.size / DatatypeArray.BYTES_PER_ELEMENT },
+            () => action.value
+          );
 
-            /* ... then write it into the buffer */
-            this.device.queue.writeBuffer(
-              this.getGPUBufferFromBinding(action.buffer),
-              0 /* offset */,
-              initBlock
-            );
-            break;
-          case AllocateBuffer:
-            console.log(this);
-            const allocatedBuffer = this.device.createBuffer({
-              label: action.label,
-              size: action.size,
-              usage:
-                action.usage ??
-                /* default: read AND write */
-                GPUBufferUsage.STORAGE |
-                  GPUBufferUsage.COPY_SRC |
-                  GPUBufferUsage.COPY_DST,
-            });
-            this.bindings.push({
-              binding: this.bindings.length,
-              resource: { buffer: allocatedBuffer },
-            });
-            break;
-        }
+          /* ... then write it into the buffer */
+          this.device.queue.writeBuffer(
+            this.getGPUBufferFromBinding(action.buffer),
+            0 /* offset */,
+            initBlock
+          );
+          break;
+        case AllocateBuffer:
+          const allocatedBuffer = this.device.createBuffer({
+            label: action.label,
+            size: action.size,
+            usage:
+              action.usage ??
+              /* default: read AND write */
+              GPUBufferUsage.STORAGE |
+                GPUBufferUsage.COPY_SRC |
+                GPUBufferUsage.COPY_DST,
+          });
+          const bufferLen = this.buffers.push(allocatedBuffer);
+          /** and update this primitive's buffer description object;
+           * this will trigger a rebuild of bindGroup and pipeline layouts */
+          this.bufferDescription = {
+            ...this.bufferDescription,
+            [bufferLen - 1]: action.bufferType ?? "storage",
+          };
+          action.bufferType ?? "storage";
+          break;
       }
-
-      const commandBuffer = encoder.finish();
-      this.device.queue.submit([commandBuffer]);
     }
-    await this.device.queue.onSubmittedWorkDone();
+
+    /* TODO: Is this the right way to do timing? */
+    const commandBuffer = encoder.finish();
+    if (args?.enableCPUTiming) {
+      await this.device.queue.onSubmittedWorkDone();
+      this.cpuStartTime = performance.now();
+    }
+    this.device.queue.submit([commandBuffer]);
+    if (args?.enableCPUTiming) {
+      await this.device.queue.onSubmittedWorkDone();
+      this.cpuEndTime = performance.now();
+    }
   }
   async getResult() {
-    return this.#timingHelper.getResult();
+    return {
+      gpuTotalTimeNS: this.#timingHelper.getResult(),
+      cpuTotalTimeNS: (this.cpuEndTime - this.cpuStartTime) * 1000000.0,
+    };
   }
 }
 
