@@ -29,7 +29,9 @@ class BaseReduce extends BasePrimitive {
     this.bytesTransferred = this.inputBytes + this.outputBytes;
 
     /* initialize buffer structures for all reduces */
-    this.bufferDescription = { 0: "storage", 1: "read-only-storage" };
+    /* SHOULD BE read-only for input, but that screws up calling kernel twice */
+    // this.bufferDescription = { 0: "storage", 1: "read-only-storage" };
+    this.bufferDescription = { 0: "storage", 1: "storage" };
 
     /* by default, delegate to simple call from BasePrimitive */
     this.getDispatchGeometry = this.getSimpleDispatchGeometry;
@@ -117,7 +119,7 @@ function ReduceWGCountFnPlot() {
 }
 
 const ReduceWGSizeBinOpPlot = {
-  x: { field: "inputByes", label: "Input array size (B)" },
+  x: { field: "inputBytes", label: "Input array size (B)" },
   y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
   fy: { field: "binop" },
   stroke: { field: "workgroupSize" },
@@ -212,6 +214,66 @@ export class NoAtomicPKReduce extends BaseReduce {
     );
     this.numPartials = this.workgroupCount;
   }
+  reductionKernelDefinition = ({ inBinding, outBinding }) => {
+    /** this needs to be an arrow function so "this" is the Primitive
+     *  that declares it
+     */
+
+    /** this definition could be inline when the kernel is specified,
+     * but since we call it twice, we move it here
+     */
+    return /* wgsl */ `
+      enable subgroups;
+      /* output */
+      @group(0) @binding(${outBinding}) var<storage, read_write> outBuffer: array<${this.datatype}>;
+      /* input */
+      /* ideally this is read, not read_write, but then we can't call the kernel twice with partials */
+      @group(0) @binding(${inBinding}) var<storage, read_write> inBuffer: array<${this.datatype}>;
+
+      var<workgroup> temp: array<${this.datatype}, 32>; // zero initialized
+
+      ${this.binop.wgslfn}
+
+      @compute @workgroup_size(${this.workgroupSize}) fn noAtomicPKReduceIntoPartials(
+        @builtin(global_invocation_id) id: vec3u /* 3D thread id in compute shader grid */,
+        @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
+        @builtin(workgroup_id) wgid: vec3u /* 3D workgroup id within compute shader grid */,
+        @builtin(local_invocation_index) lid: u32 /* 1D thread index within workgroup */,
+        @builtin(subgroup_size) sgsz: u32, /* 32 on Apple GPUs */
+        @builtin(subgroup_invocation_id) sgid: u32 /* 1D thread index within subgroup */) {
+          /* TODO: fix 'assume id.y == 0 always' */
+          var acc: ${this.datatype} = ${this.binop.identity};
+          var numSubgroups = ${this.workgroupSize} / sgsz;
+          for (var i = id.x;
+            i < arrayLength(&inBuffer);
+            i += nwg.x * ${this.workgroupSize}) {
+              /* on every iteration, grab wkgpsz items */
+              acc = binop(acc, inBuffer[i]);
+          }
+          /* acc contains a partial sum for every thread */
+          workgroupBarrier();
+          /* now we need to reduce acc within our workgroup */
+          /* switch to local IDs only. write into wg memory */
+          acc = ${this.binop.subgroupOp}(acc);
+          var mySubgroupID = lid / sgsz;
+          if (subgroupElect()) {
+            /* I'm the first element in my subgroup */
+            temp[mySubgroupID] = acc;
+          }
+          workgroupBarrier(); /* completely populate wg memory */
+          if (lid < sgsz) { /* only activate 0th subgroup */
+            /* read sums of all other subgroups into acc, in parallel across the subgroup */
+            /* acc is only valid for lid < numSubgroups, so ... */
+            /* select(f, t, cond) */
+            acc = select(${this.binop.identity}, temp[lid], lid < numSubgroups);
+          }
+          /* acc is called here for everyone, but it only matters for thread 0 */
+          acc = ${this.binop.subgroupOp}(acc);
+          if (lid == 0) {
+            outBuffer[wgid.x] = acc;
+          }
+        }`;
+  };
   compute() {
     console.log("entry point to compute()", this);
     return [
@@ -228,56 +290,8 @@ export class NoAtomicPKReduce extends BaseReduce {
       }),
       /* first kernel: per-workgroup persistent-kernel reduce */
       new Kernel({
-        kernel: () => /* wgsl */ `
-        enable subgroups;
-        /* output */
-        @group(0) @binding(2) var<storage, read_write> partials: array<${this.datatype}>;
-        /* input */
-        @group(0) @binding(1) var<storage, read> memSrc: array<${this.datatype}>;////
-
-        var<workgroup> temp: array<${this.datatype}, 32>; // zero initialized
-
-        ${this.binop.wgslfn}
-
-        @compute @workgroup_size(${this.workgroupSize}) fn noAtomicPKReduceIntoPartials(
-          @builtin(global_invocation_id) id: vec3u /* 3D thread id in compute shader grid */,
-          @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
-          @builtin(workgroup_id) wgid: vec3u /* 3D workgroup id within compute shader grid */,
-          @builtin(local_invocation_index) lid: u32 /* 1D thread index within workgroup */,
-          @builtin(subgroup_size) sgsz: u32, /* 32 on Apple GPUs */
-          @builtin(subgroup_invocation_id) sgid: u32 /* 1D thread index within subgroup */) {
-            /* TODO: fix 'assume id.y == 0 always' */
-            var acc: ${this.datatype} = ${this.binop.identity};
-            var numSubgroups = ${this.workgroupSize} / sgsz;
-            for (var i = id.x;
-              i < arrayLength(&memSrc);
-              i += nwg.x * ${this.workgroupSize}) {
-                /* on every iteration, grab wkgpsz items */
-                acc = binop(acc, memSrc[i]);
-            }
-            /* acc contains a partial sum for every thread */
-            workgroupBarrier();
-            /* now we need to reduce acc within our workgroup */
-            /* switch to local IDs only. write into wg memory */
-            acc = ${this.binop.subgroupOp}(acc);
-            var mySubgroupID = lid / sgsz;
-            if (subgroupElect()) {
-              /* I'm the first element in my subgroup */
-              temp[mySubgroupID] = acc;
-            }
-            workgroupBarrier(); /* completely populate wg memory */
-            if (lid < sgsz) { /* only activate 0th subgroup */
-              /* read sums of all other subgroups into acc, in parallel across the subgroup */
-              /* acc is only valid for lid < numSubgroups, so ... */
-              /* select(f, t, cond) */
-              acc = select(${this.binop.identity}, temp[lid], lid < numSubgroups);
-            }
-            /* acc is called here for everyone, but it only matters for thread 0 */
-            acc = ${this.binop.subgroupOp}(acc);
-            if (lid == 0) {
-              partials[wgid.x] = acc;
-            }
-        }`,
+        kernel: this.reductionKernelDefinition,
+        kernelArgs: { inBinding: 1, outBinding: 2 },
         label: "noAtomicPKReduce workgroup reduce -> partials",
         getDispatchGeometry: () => {
           /* this is a grid-stride loop, so limit the dispatch */
@@ -286,24 +300,8 @@ export class NoAtomicPKReduce extends BaseReduce {
       }),
       /* second kernel: reduce partials into final output */
       new Kernel({
-        kernel: () => /* wgsl */ `
-        /* output */
-        @group(0) @binding(0) var<storage, read_write> memDest: atomic<${this.datatype}>;////
-        /* input */
-        @group(0) @binding(2) var<storage, read_write> partials: array<${this.datatype}>;
-
-        ${this.binop.wgslfn}
-
-        @compute @workgroup_size(${this.numPartials}) fn noAtomicPKReduceIntoPartials(
-          @builtin(global_invocation_id) id: vec3u /* 3D thread id in compute shader grid */,
-          @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
-          @builtin(local_invocation_index) lid: u32 /* thread index in workgroup */,
-        ) {
-            let i = id.y * nwg.x * ${this.workgroupSize} + id.x;
-            if (i < arrayLength(&partials)) {
-              ${this.binop.wgslatomic}(&memDest, partials[i]);
-            }
-        }`,
+        kernel: this.reductionKernelDefinition,
+        kernelArgs: { inBinding: 2, outBinding: 0 },
         label: "noAtomicPKReduce partials->final",
         getDispatchGeometry: () => {
           /* This reduce is defined to do its final step with one workgroup */
