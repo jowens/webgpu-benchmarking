@@ -7,6 +7,7 @@ import {
   BinOpMinF32,
   BinOpMaxF32,
 } from "./binop.mjs";
+import { datatypeToTypedArray } from "./util.mjs";
 
 if (typeof process !== "undefined" && process.release.name === "node") {
   // running in Node
@@ -33,19 +34,27 @@ export async function main(navigator) {
     fail("Fatal error: Device does not support WebGPU.");
   }
   const memsrcSize = 2 ** 20; // items, not bytes
-  const memsrcu32 = new Uint32Array(memsrcSize);
+  const datatype = "f32";
+  const memsrcX32 = new (datatypeToTypedArray(datatype))(memsrcSize);
   for (let i = 0; i < memsrcSize; i++) {
-    memsrcu32[i] = i == 0 ? 11 : memsrcu32[i - 1] + 1; // trying to get u32s
+    switch (datatype) {
+      case "u32":
+        memsrcX32[i] = i == 0 ? 11 : memsrcX32[i - 1] + 1; // trying to get u32s
+        break;
+      case "f32":
+        memsrcX32[i] = i + 42;
+        break;
+    }
   }
   const memdestBytes = 4;
 
   // allocate/create buffers on the GPU to hold in/out data
-  const memsrcuBuffer = device.createBuffer({
+  const memsrcBuffer = device.createBuffer({
     label: "memory source buffer (uint)",
-    size: memsrcu32.byteLength,
+    size: memsrcX32.byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
-  device.queue.writeBuffer(memsrcuBuffer, 0, memsrcu32);
+  device.queue.writeBuffer(memsrcBuffer, 0, memsrcX32);
 
   const memdestBuffer = device.createBuffer({
     label: "memory destination buffer",
@@ -67,10 +76,10 @@ export async function main(navigator) {
     params: {
       /* tunable parameters - if none, use defaults */
     },
-    datatype: "f32",
+    datatype: datatype,
     gputimestamps: true, //// TODO should work without this
-    binop: BinOpAddF32,
-    buffers: [memdestBuffer, memsrcuBuffer],
+    binop: BinOpMaxF32,
+    buffers: [memdestBuffer, memsrcBuffer],
   });
 
   await primitive.execute();
@@ -91,13 +100,13 @@ export async function main(navigator) {
 
   // Read the results
   await mappableMemdestBuffer.mapAsync(GPUMapMode.READ);
-  const memdest = new Uint32Array(
+  const memdest = new (datatypeToTypedArray(datatype))(
     mappableMemdestBuffer.getMappedRange().slice()
   );
   mappableMemdestBuffer.unmap();
 
   if (primitive.validate) {
-    const errorstr = primitive.validate({ in: memsrcu32, out: memdest });
+    const errorstr = primitive.validate({ in: memsrcX32, out: memdest });
     if (errorstr == "") {
       console.info("Validation passed");
     } else {
