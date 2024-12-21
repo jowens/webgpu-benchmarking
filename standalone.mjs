@@ -1,5 +1,12 @@
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
-import { BinOpAddU32, BinOpMinU32, BinOpMaxU32 } from "./binop.mjs";
+import {
+  BinOpAddU32,
+  BinOpMinU32,
+  BinOpMaxU32,
+  BinOpAddF32,
+  BinOpMinF32,
+  BinOpMaxF32,
+} from "./binop.mjs";
 
 if (typeof process !== "undefined" && process.release.name === "node") {
   // running in Node
@@ -25,7 +32,7 @@ export async function main(navigator) {
   if (!device) {
     fail("Fatal error: Device does not support WebGPU.");
   }
-  const memsrcSize = 2 ** 20;
+  const memsrcSize = 2 ** 20; // items, not bytes
   const memsrcu32 = new Uint32Array(memsrcSize);
   for (let i = 0; i < memsrcSize; i++) {
     memsrcu32[i] = i == 0 ? 11 : memsrcu32[i - 1] + 1; // trying to get u32s
@@ -60,9 +67,9 @@ export async function main(navigator) {
     params: {
       /* tunable parameters - if none, use defaults */
     },
-    datatype: "u32",
+    datatype: "f32",
     gputimestamps: true, //// TODO should work without this
-    binop: BinOpMinU32,
+    binop: BinOpAddF32,
     buffers: [memdestBuffer, memsrcuBuffer],
   });
 
