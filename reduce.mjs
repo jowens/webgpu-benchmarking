@@ -281,16 +281,6 @@ export class NoAtomicPKReduce extends BaseReduce {
   compute() {
     return [
       new AllocateBuffer({ label: "partials", size: this.numPartials * 4 }),
-      new InitializeMemoryBlock({
-        buffer: "partials",
-        value: this.binop.identity,
-        datatype: this.datatype,
-      }),
-      new InitializeMemoryBlock({
-        buffer: this.buffers[0],
-        value: this.binop.identity,
-        datatype: this.datatype,
-      }),
       /* first kernel: per-workgroup persistent-kernel reduce */
       new Kernel({
         kernel: this.reductionKernelDefinition,
