@@ -37,7 +37,7 @@ class BinOpMin extends BinOp {
     /* identity depends on datatype */
     switch (this.datatype) {
       case "f32":
-        this.identity = 3.40282346638529e38; // FLT_MAX
+        this.identity = 3.402823466385288e38; // FLT_MAX
         break;
       case "i32":
         this.identity = 0x7fffffff;
@@ -64,7 +64,7 @@ class BinOpMax extends BinOp {
     /* identity depends on datatype */
     switch (this.datatype) {
       case "f32":
-        this.identity = -3.40282346638529e38; // -FLT_MAX
+        this.identity = -3.402823466385288e38; // -FLT_MAX
         break;
       case "i32":
         this.identity = 0xf0000000;
