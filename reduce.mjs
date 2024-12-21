@@ -51,6 +51,9 @@ class BaseReduce extends BasePrimitive {
       this.label,
       "should validate to",
       reduction[0],
+      "and actually validates to",
+      memdest[0],
+      "\n",
       this.binop.constructor.name,
       "identity is",
       this.binop.identity,
@@ -64,7 +67,7 @@ class BaseReduce extends BasePrimitive {
     function validates(cpu, gpu, datatype) {
       switch (datatype) {
         case "f32":
-          return Math.abs(cpu - gpu) / cpu > 0.001;
+          return Math.abs(cpu - gpu) / cpu < 0.001;
         default:
           return cpu == gpu;
       }
