@@ -73,7 +73,6 @@ export class BasePrimitive {
         buffer: { type },
       });
     }
-    console.log("Entries in set bufferDescription:", entries);
     this.#bindGroupLayout = this.device.createBindGroupLayout({
       entries,
       label: `${this.label} bind group with ${entries.length} entries`,
@@ -82,12 +81,6 @@ export class BasePrimitive {
       bindGroupLayouts: [this.#bindGroupLayout],
       label: `${this.label} pipeline layout (${this.#bindGroupLayout.label})`,
     });
-    console.log(
-      "#bindgrouplayout",
-      this.#bindGroupLayout,
-      "#pipelinelayout",
-      this.#pipelineLayout
-    );
   }
   get bufferDescription() {
     return this.#bufferDescription;
@@ -97,7 +90,6 @@ export class BasePrimitive {
     for (const binding in this.bufferDescription) {
       entries.push({ binding, resource: { buffer: this.buffers[binding] } });
     }
-    console.log("getBindGroupEntries", entries);
     return entries;
   }
 
@@ -213,7 +205,6 @@ export class BasePrimitive {
     }
 
     /* begin timestamp prep - count kernels, allocate 2 timestamps/kernel */
-    console.log("gputimestamps:", this.gputimestamps);
     let kernelCount = 0; // how many kernels are there total?
     if (this.gputimestamps) {
       for (const action of this.compute()) {
@@ -222,8 +213,6 @@ export class BasePrimitive {
         }
       }
     }
-    console.log("Kernel count:", kernelCount);
-
     const encoder = this.device.createCommandEncoder({
       label: `${this.label} primitive encoder`,
     });
@@ -259,8 +248,6 @@ export class BasePrimitive {
             label: `module: ${this.label}`,
             code: kernelString,
           });
-
-          console.log(this);
 
           const kernelPipeline = this.device.createComputePipeline({
             label: `${this.label} compute pipeline`,
@@ -302,11 +289,11 @@ export class BasePrimitive {
           }
           /* trials might be >1 so make sure additional runs are idempotent */
           for (let trial = 0; trial < args.trials ?? 1; trial++) {
-            console.log("DISPATCHING:", dispatchGeometry);
             kernelPass.dispatchWorkgroups(...dispatchGeometry);
           }
 
-          console.info(`inputBytes: ${this.inputBytes}
+          console.info(`${this.label} | ${action.label}
+inputBytes: ${this.inputBytes}
 workgroupCount: ${this.workgroupCount}
 workgroupSize: ${this.workgroupSize}
 maxGSLWorkgroupCount: ${this.maxGSLWorkgroupCount}

@@ -48,7 +48,8 @@ class BaseReduce extends BasePrimitive {
       reduction[0] = this.binop.op(reduction[0], memsrc[i]);
     }
     console.log(
-      "Should validate to",
+      this.label,
+      "should validate to",
       reduction[0],
       this.binop.constructor.name,
       "identity is",
@@ -275,7 +276,6 @@ export class NoAtomicPKReduce extends BaseReduce {
         }`;
   };
   compute() {
-    console.log("entry point to compute()", this);
     return [
       new AllocateBuffer({ label: "partials", size: this.numPartials * 4 }),
       new InitializeMemoryBlock({
@@ -308,7 +308,7 @@ export class NoAtomicPKReduce extends BaseReduce {
           return [1];
         },
         enable: true,
-        debugPrintKernel: true,
+        debugPrintKernel: false,
       }),
     ];
   }
