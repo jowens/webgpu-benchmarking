@@ -1,7 +1,7 @@
 import { range } from "./util.mjs";
-import { BaseTest } from "./basetest.mjs";
+import { BasePrimitive } from "./primitive.mjs";
 
-class SubgroupIDBaseTest extends BaseTest {
+class SubgroupIDBaseTest extends BasePrimitive {
   constructor(params) {
     super(params);
     this.category = "subgroups";

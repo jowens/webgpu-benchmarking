@@ -1,6 +1,6 @@
 import { range } from "./util.mjs";
-import { BaseTest } from "./basetest.mjs";
-class BaseMembwTest extends BaseTest {
+import { BasePrimitive } from "./primitive.mjs";
+class BaseMembwTest extends BasePrimitive {
   constructor(params) {
     super(params); // writes parameters into this class
     this.category = "membw";

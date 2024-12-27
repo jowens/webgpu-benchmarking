@@ -1,5 +1,5 @@
 import { range } from "./util.mjs";
-import { BaseTest } from "./basetest.mjs";
+import { BasePrimitive } from "./primitive.mjs";
 
 const MaddTestParams = {
   workgroupSize: range(0, 7).map((i) => 2 ** i),
@@ -7,7 +7,7 @@ const MaddTestParams = {
   opsPerThread: range(2, 10).map((i) => 2 ** i),
 };
 
-class MaddTestClass extends BaseTest {
+class MaddTestClass extends BasePrimitive {
   constructor(params) {
     super(params); // writes parameters into this class
     this.category = "madd";

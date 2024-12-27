@@ -1,12 +1,12 @@
 import { range } from "./util.mjs";
-import { BaseTest } from "./basetest.mjs";
+import { BasePrimitive } from "./primitive.mjs";
 
 const StridedReadTestParams = {
   workgroupSize: [32, 64, 96, 128, 160, 192, 224, 256], // range(0, 8).map((i) => 2 ** i),
   log2stride: range(0, 12),
 };
 
-class StridedReadTestClass extends BaseTest {
+class StridedReadTestClass extends BasePrimitive {
   constructor(params) {
     super(params); // writes parameters into this class
     this.category = "strided-read";

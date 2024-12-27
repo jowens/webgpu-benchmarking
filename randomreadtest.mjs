@@ -1,11 +1,11 @@
 import { range } from "./util.mjs";
-import { BaseTest } from "./basetest.mjs";
+import { BasePrimitive } from "./primitive.mjs";
 
 const RandomReadTestParams = {
   workgroupSize: [32, 64, 96, 128, 160, 192, 224, 256], // range(0, 8).map((i) => 2 ** i),
 };
 
-class RandomReadTestClass extends BaseTest {
+class RandomReadTestClass extends BasePrimitive {
   constructor(params) {
     super(params); // writes parameters into this class
     this.category = "random-read";
