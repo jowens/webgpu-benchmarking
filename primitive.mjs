@@ -4,12 +4,14 @@ import { TimingHelper } from "./webgpufundamentals-timing.mjs";
 export class BasePrimitive {
   constructor(args) {
     // expect that args are:
-    // { device: device,
-    //   params: { param1: val1, param2: val2 }, // TUNABLE params
+    // { device: device,   // REQUIRED
+    //   label: label,
+    //   tuning: { param1: val1, param2: val2 }, // TUNABLE params
     //   someConfigurationSetting: thatSetting,
     //   gputimestamps: true,
     //   uniforms: uniformbuffer0,
-    //   inputs: [inputbuffer0, inputbuffer1],
+    //   inputBuffer0: inputbuffer0,
+    //   inputBuffer1: inputbuffer1,
     //   outputs: outputbuffer0,
     // }
     if (this.constructor === BasePrimitive) {
@@ -35,10 +37,6 @@ export class BasePrimitive {
     // now let's walk through all the args
     for (const [field, value] of Object.entries(args)) {
       switch (field) {
-        case "params":
-          /* paste these directly into the primitive (flattened) */
-          Object.assign(this, args.params);
-          break;
         case "gputimestamps":
           /* only set this if BOTH it's requested AND it's enabled in the device */
           this.gputimestamps =
@@ -88,7 +86,13 @@ export class BasePrimitive {
   getBindGroupEntries() {
     const entries = [];
     for (const binding in this.bufferDescription) {
-      entries.push({ binding, resource: { buffer: this.buffers[binding] } });
+      if (this.buffers[binding].buffer) {
+        /* has a buffer member: this is a GPUBufferBinding */
+        entries.push({ binding, resource: this.buffers[binding] });
+      } else {
+        /* otherwise, this is a GPUBuffer, which we then wrap in a GPUBufferBinding */
+        entries.push({ binding, resource: { buffer: this.buffers[binding] } });
+      }
     }
     return entries;
   }
