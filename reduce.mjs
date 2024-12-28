@@ -5,6 +5,7 @@ import {
   InitializeMemoryBlock,
   AllocateBuffer,
 } from "./primitive.mjs";
+import { toGPUBufferBinding, getBufferSize } from "./buffer.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import { BinOpAddU32, BinOpMinU32, BinOpMaxU32 } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
@@ -23,10 +24,12 @@ class BaseReduce extends BasePrimitive {
       }
     }
 
-    // every reduce test sets the following
-    this.inputBytes = this.buffers[1].size;
-    this.outputBytes = this.buffers[0].size;
-    this.bytesTransferred = this.inputBytes + this.outputBytes;
+    for (const buffer of ["inputBuffer", "outputBuffer"]) {
+      if (!this[buffer]) {
+        this[buffer] = undefined;
+      }
+    }
+    this.buffers = [this.outputBuffer, this.inputBuffer];
 
     /* initialize buffer structures for all reduces */
     /* SHOULD BE read-only for input, but that screws up calling kernel twice */
@@ -36,6 +39,13 @@ class BaseReduce extends BasePrimitive {
     /* by default, delegate to simple call from BasePrimitive */
     this.getDispatchGeometry = this.getSimpleDispatchGeometry;
   }
+
+  #buffers;
+
+  bytesTransferred() {
+    return this.inputBuffer.size + this.outputBuffer.size;
+  }
+
   validate = (buffersArg) => {
     const buffers = this.bindingsToTypedArrays(buffersArg);
     const memsrc = buffers["in"][0];
@@ -55,6 +65,7 @@ class BaseReduce extends BasePrimitive {
       memdest[0],
       "\n",
       this.binop.constructor.name,
+      this.binop.datatype,
       "identity is",
       this.binop.identity,
       "length is",
@@ -168,7 +179,7 @@ export const AtomicGlobalU32ReduceTestSuite = new BaseTestSuite({
   testSuite: "atomic 1 element per thread global-atomic u32 sum reduction",
   // datatype: "u32",
   trials: 100,
-  params: ReduceParams,
+  tuningParams: ReduceParams,
   primitive: AtomicGlobalU32Reduce,
   primitiveConfig: {
     binop: BinOpAddU32,
@@ -213,7 +224,7 @@ export class NoAtomicPKReduce extends BaseReduce {
   updateSettings() {
     /* Compute settings based on tunable parameters */
     this.workgroupCount = Math.min(
-      Math.ceil(this.buffers[1].size / this.workgroupSize),
+      Math.ceil(getBufferSize(this.buffers[1]) / this.workgroupSize),
       this.maxGSLWorkgroupCount
     );
     this.numPartials = this.workgroupCount;
