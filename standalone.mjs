@@ -73,13 +73,12 @@ export async function main(navigator) {
 
   const primitive = new NoAtomicPKReduce({
     device,
-    params: {
-      /* tunable parameters - if none, use defaults */
-    },
+    binop: BinOpMaxF32,
     datatype: datatype,
     gputimestamps: true, //// TODO should work without this
-    binop: BinOpMaxF32,
-    buffers: [memdestBuffer, memsrcBuffer],
+    // inputBuffer and outputBuffer are Reduce-specific names
+    inputBuffer: { buffer: memsrcBuffer, offset: 0 },
+    outputBuffer: memdestBuffer,
   });
 
   await primitive.execute();
