@@ -77,7 +77,8 @@ export async function main(navigator) {
     datatype: datatype,
     gputimestamps: true, //// TODO should work without this
     // inputBuffer and outputBuffer are Reduce-specific names
-    inputBuffer: { buffer: memsrcBuffer, offset: 0 },
+    // inputBuffer: { buffer: memsrcBuffer, offset: 0 },
+    inputBuffer: memsrcBuffer,
     outputBuffer: memdestBuffer,
   });
 
