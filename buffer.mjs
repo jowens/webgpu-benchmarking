@@ -1,5 +1,15 @@
 import { datatypeToTypedArray } from "./util.mjs";
 
+/** Buffer class
+ * Goal: handles all buffer-related tasks
+ * Can be a GPUBuffer only, or also have a CPU backing buffer
+ * Needs to be able to export necessary info for binding
+ *
+ * Members:
+ * - gpuBuffer (GPUBuffer or GPUBufferBinding)
+ * - cpuBuffer (optional)
+ */
+
 export function toGPUBufferBinding(obj) {
   switch (obj.constructor) {
     case GPUBufferBinding:
@@ -21,17 +31,21 @@ export function getBufferSize(obj) {
 }
 
 class Buffer {
-  constructor(args) {}
-}
-
-export class InputBuffer extends Buffer {
   constructor(args) {
-    super(args);
+    Object.assign(this, args);
   }
 }
 
-export class OutputBuffer extends Buffer {
+export class ReadWriteBuffer extends Buffer {
   constructor(args) {
     super(args);
+    this.layoutObjectType = "storage";
+  }
+}
+
+export class ReadOnlyBuffer extends Buffer {
+  constructor(args) {
+    super(args);
+    this.layoutObjectType = "read-only-storage";
   }
 }
