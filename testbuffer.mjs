@@ -2,26 +2,28 @@ import { datatypeToTypedArray } from "./util.mjs";
 
 // this is only for benchmarking purposes, not designed for production
 class TestBuffer {
-  constructor(device, config) {
-    Object.assign(this, config);
-    /* expect config to contain datatype and size */
-    this.device = device;
-    if (!("label" in config)) {
-      this.label = `Buffer (datatype: ${config.datatype}; size: ${config.size})`;
+  constructor(args) {
+    Object.assign(this, args);
+    if (!("device" in args)) {
+      console.error("A TestBuffer must be initialized with a device");
     }
-    this.cpuBuffer = new (datatypeToTypedArray())(this.size);
+    /* expect args to contain datatype and size */
+    if (!("label" in args)) {
+      this.label = `Buffer (datatype: ${args.datatype}; size: ${args.size})`;
+    }
+    this.cpuBuffer = new (datatypeToTypedArray(this.datatype))(this.size);
   }
 }
 
 export class TestInputBuffer extends TestBuffer {
-  constructor(device, config) {
-    super(device, config);
+  constructor(args) {
+    super(args);
     this.type = "input";
 
     // since we're input, fill the buffer with useful data
     for (let i = 0; i < this.size; i++) {
       if (this.datatype == "f32") {
-        this.cpuBuffer[i] = config?.randomizeInput
+        this.cpuBuffer[i] = args?.randomizeInput
           ? Math.random() * 2.0 - 1.0
           : i & (2 ** 22 - 1);
         // Rand: [-1,1]; non-rand: roughly, range of 32b significand
@@ -30,7 +32,7 @@ export class TestInputBuffer extends TestBuffer {
       }
       // otherwise, initialize nothing
     }
-    this.gpuBuffer = device.createBuffer({
+    this.gpuBuffer = this.device.createBuffer({
       label: this.label,
       size: this.cpuBuffer.byteLength,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -39,11 +41,11 @@ export class TestInputBuffer extends TestBuffer {
   }
 }
 export class TestOutputBuffer extends TestBuffer {
-  constructor(device, config) {
-    super(device, config);
+  constructor(args) {
+    super(args);
     this.type = "output";
 
-    this.gpuBuffer = device.createBuffer({
+    this.gpuBuffer = this.device.createBuffer({
       label: this.label,
       size: this.cpuBuffer.byteLength,
       /** Output-only buffers may not need COPY_DST but we might
@@ -57,7 +59,7 @@ export class TestOutputBuffer extends TestBuffer {
         GPUBufferUsage.COPY_DST,
     });
 
-    this.mappableGPUBuffer = device.createBuffer({
+    this.mappableGPUBuffer = this.device.createBuffer({
       label: "mappable memory destination buffer",
       size: this.cpuBuffer.byteLength,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
