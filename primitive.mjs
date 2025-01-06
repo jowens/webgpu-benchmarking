@@ -1,7 +1,11 @@
+import { Buffer } from "./buffer.mjs";
 import { TestInputBuffer, TestOutputBuffer } from "./testbuffer.mjs";
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
 
 export class BasePrimitive {
+  static pipelineLayoutsCache = new Map();
+  #timingHelper;
+
   constructor(args) {
     // expect that args are:
     // { device: device,   // REQUIRED
@@ -51,56 +55,26 @@ export class BasePrimitive {
           break;
       }
     }
+
+    this.__buffers = {}; // this is essentially private
   }
 
-  #bufferDescription; // this holds all buffer state for the primitive
-  #bindGroupLayout;
-  #pipelineLayout;
-  #timingHelper;
-
-  set bufferDescription(obj) {
-    // TODO: have a "defer" entry that doesn't rebuild this if set
-    this.#bufferDescription = obj;
-    /* now rebuild bindGroupLayout and pipelineLayout */
-    const entries = [];
-    for (const [binding, type] of Object.entries(this.#bufferDescription)) {
-      // "binding" is a string, so turn it back into an int here
-      entries.push({
-        binding: parseInt(binding, 10),
-        visibility: GPUShaderStage.COMPUTE,
-        buffer: { type },
-      });
+  registerBuffer(bufferObj) {
+    switch (typeof bufferObj) {
+      case "string":
+        this.__buffers[bufferObj] = new Buffer({
+          label: bufferObj,
+          buffer: this[bufferObj],
+        });
+      default:
+        this.__buffers[bufferObj.label] = new Buffer(bufferObj);
     }
-    this.#bindGroupLayout = this.device.createBindGroupLayout({
-      entries,
-      label: `${this.label} bind group with ${entries.length} entries`,
-    });
-    this.#pipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.#bindGroupLayout],
-      label: `${this.label} pipeline layout (${this.#bindGroupLayout.label})`,
-    });
-  }
-  get bufferDescription() {
-    return this.#bufferDescription;
-  }
-  getBindGroupEntries() {
-    const entries = [];
-    for (const binding in this.bufferDescription) {
-      if (this.buffers[binding].buffer) {
-        /* has a buffer member: this is a GPUBufferBinding */
-        entries.push({ binding, resource: this.buffers[binding] });
-      } else {
-        /* otherwise, this is a GPUBuffer, which we then wrap in a GPUBufferBinding */
-        entries.push({ binding, resource: { buffer: this.buffers[binding] } });
-      }
-    }
-    return entries;
   }
 
-  kernel() {
-    /* call this from a subclass instead */
-    throw new Error("Cannot call kernel() from abstract class BasePrimitive.");
+  getBuffer(label) {
+    return this.__buffers[label];
   }
+
   getDispatchGeometry() {
     /* call this from a subclass instead */
     throw new Error(
@@ -208,6 +182,16 @@ export class BasePrimitive {
       args.trials = 1;
     }
 
+    /* do we need to register any new buffers specified in execute? */
+    for (const knownBuffer of this.knownBuffers) {
+      if (knownBuffer in args) {
+        this.registerBuffer({
+          label: knownBuffer,
+          buffer: args[knownBuffer],
+        });
+      }
+    }
+
     /* begin timestamp prep - count kernels, allocate 2 timestamps/kernel */
     let kernelCount = 0; // how many kernels are there total?
     if (this.gputimestamps) {
@@ -253,18 +237,65 @@ export class BasePrimitive {
             code: kernelString,
           });
 
+          // build up bindGroupLayouts and pipelineLayout
+          var pipelineLayout;
+          if (action.bufferTypes in BasePrimitive.pipelineLayoutsCache) {
+            /* cached, use it */
+            pipelineLayout =
+              BasePrimitive.pipelineLayoutsCache[action.bufferTypes];
+          } else {
+            /* first build up bindGroupLayouts, then create a pipeline layout */
+            const bindGroupLayouts = [];
+            for (const bufferTypesGroup of action.bufferTypes) {
+              /* could also cache bind groups */
+              const entries = [];
+              bufferTypesGroup.forEach((element, index) => {
+                if (element !== "") {
+                  // not sure if this is right comparison for an empty elt?
+                  entries.push({
+                    binding: index,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: element },
+                  });
+                }
+              });
+              const bindGroupLayout = this.device.createBindGroupLayout({
+                entries,
+              });
+              bindGroupLayouts.push(bindGroupLayout);
+            }
+            pipelineLayout = this.device.createPipelineLayout({
+              bindGroupLayouts,
+            });
+            /* and cache it */
+            BasePrimitive.pipelineLayoutsCache[action.bufferTypes] =
+              pipelineLayout;
+          }
+          pipelineLayout.label = `${this.label} compute pipeline`;
+
           const kernelPipeline = this.device.createComputePipeline({
             label: `${this.label} compute pipeline`,
-            layout: this.#pipelineLayout,
+            layout: pipelineLayout,
             compute: {
               module: computeModule,
             },
           });
 
+          if (action.bindings.size > 1) {
+            console.error(
+              "Primitive::execute::Kernel currently only supports one bind group",
+              action.bindings
+            );
+          }
+
           const kernelBindGroup = this.device.createBindGroup({
             label: `bindGroup for ${this.label} kernel`,
             layout: kernelPipeline.getBindGroupLayout(0),
-            entries: this.getBindGroupEntries(),
+            /* the [0] below is because we only support 1 bind group */
+            entries: action.bindings[0].map((element, index) => ({
+              binding: index,
+              resource: this.__buffers[element].buffer,
+            })),
           });
 
           const kernelDescriptor = {
@@ -359,14 +390,7 @@ dispatchGeometry: ${dispatchGeometry}`);
                 GPUBufferUsage.COPY_SRC |
                 GPUBufferUsage.COPY_DST,
           });
-          const bufferLen = this.buffers.push(allocatedBuffer);
-          /** and update this primitive's buffer description object;
-           * this will trigger a rebuild of bindGroup and pipeline layouts */
-          this.bufferDescription = {
-            ...this.bufferDescription,
-            [bufferLen - 1]: action.bufferType ?? "storage",
-          };
-          action.bufferType ?? "storage";
+          this.registerBuffer({ label: action.label, buffer: allocatedBuffer });
           break;
       }
     }

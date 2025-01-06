@@ -30,20 +30,38 @@ export function getBufferSize(obj) {
   }
 }
 
-class Buffer {
+export class Buffer {
+  #buffer; // this is a GPUBufferBinding
   constructor(args) {
     Object.assign(this, args);
   }
+
+  set buffer(b) {
+    if (b?.buffer) {
+      /* this is already a GPUBufferBinding */
+      this.#buffer = b;
+    } else {
+      /* this is a GPUBuffer or undefined, make it a GPUBufferBinding */
+      this.#buffer = { buffer: b };
+    }
+  }
+  get buffer() {
+    return this.#buffer;
+  }
+
+  get size() {
+    return this.#buffer.size ?? this.#buffer.buffer.size;
+  }
 }
 
-export class ReadWriteBuffer extends Buffer {
+class ReadWriteBuffer extends Buffer {
   constructor(args) {
     super(args);
     this.layoutObjectType = "storage";
   }
 }
 
-export class ReadOnlyBuffer extends Buffer {
+class ReadOnlyBuffer extends Buffer {
   constructor(args) {
     super(args);
     this.layoutObjectType = "read-only-storage";

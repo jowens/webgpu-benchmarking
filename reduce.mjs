@@ -5,7 +5,7 @@ import {
   InitializeMemoryBlock,
   AllocateBuffer,
 } from "./primitive.mjs";
-import { toGPUBufferBinding, getBufferSize } from "./buffer.mjs";
+import { toGPUBufferBinding, getBufferSize, Buffer } from "./buffer.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import { BinOpAddU32, BinOpMinU32, BinOpMaxU32 } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
@@ -24,26 +24,23 @@ class BaseReduce extends BasePrimitive {
       }
     }
 
-    for (const buffer of ["inputBuffer", "outputBuffer"]) {
-      if (!this[buffer]) {
-        this[buffer] = undefined;
+    this.knownBuffers = ["inputBuffer", "outputBuffer"];
+
+    for (const knownBuffer of this.knownBuffers) {
+      if (knownBuffer in args) {
+        this.registerBuffer({ label: knownBuffer, buffer: args[knownBuffer] });
+        delete this[knownBuffer]; // let's make sure it's in one place only
       }
     }
-    this.buffers = [this.outputBuffer, this.inputBuffer];
-
-    /* initialize buffer structures for all reduces */
-    /* SHOULD BE read-only for input, but that screws up calling kernel twice */
-    // this.bufferDescription = { 0: "storage", 1: "read-only-storage" };
-    this.bufferDescription = { 0: "storage", 1: "storage" };
 
     /* by default, delegate to simple call from BasePrimitive */
     this.getDispatchGeometry = this.getSimpleDispatchGeometry;
   }
 
-  #buffers;
-
   bytesTransferred() {
-    return this.inputBuffer.size + this.outputBuffer.size;
+    return (
+      this.getBuffer("inputBuffer").size + this.getBuffer("inputBuffer").size
+    );
   }
 
   validate = (buffersArg) => {
@@ -213,23 +210,23 @@ export class NoAtomicPKReduce extends BaseReduce {
         );
       }
     }
+  }
 
+  finalizeRuntimeParameters() {
     /* Set reasonable defaults for tunable parameters */
     this.workgroupSize = this.workgroupSize ?? 256;
     this.maxGSLWorkgroupCount = this.maxGSLWorkgroupCount ?? 256;
 
-    /* this sets all the rest of the necessary parameters */
-    this.updateSettings();
-  }
-  updateSettings() {
     /* Compute settings based on tunable parameters */
     this.workgroupCount = Math.min(
-      Math.ceil(getBufferSize(this.buffers[1]) / this.workgroupSize),
+      Math.ceil(
+        getBufferSize(this.getBuffer("inputBuffer")) / this.workgroupSize
+      ),
       this.maxGSLWorkgroupCount
     );
     this.numPartials = this.workgroupCount;
   }
-  reductionKernelDefinition = ({ inBinding, outBinding }) => {
+  reductionKernelDefinition = () => {
     /** this needs to be an arrow function so "this" is the Primitive
      *  that declares it
      */
@@ -240,10 +237,9 @@ export class NoAtomicPKReduce extends BaseReduce {
     return /* wgsl */ `
       enable subgroups;
       /* output */
-      @group(0) @binding(${outBinding}) var<storage, read_write> outBuffer: array<${this.datatype}>;
+      @group(0) @binding(0) var<storage, read_write> outBuffer: array<${this.datatype}>;
       /* input */
-      /* ideally this is read, not read_write, but then we can't call the kernel twice with partials */
-      @group(0) @binding(${inBinding}) var<storage, read_write> inBuffer: array<${this.datatype}>;
+      @group(0) @binding(1) var<storage, read> inBuffer: array<${this.datatype}>;
 
       var<workgroup> temp: array<${this.datatype}, 32>; // zero initialized
 
@@ -290,12 +286,17 @@ export class NoAtomicPKReduce extends BaseReduce {
         }`;
   };
   compute() {
+    this.finalizeRuntimeParameters();
     return [
-      new AllocateBuffer({ label: "partials", size: this.numPartials * 4 }),
+      new AllocateBuffer({
+        label: "partials",
+        size: this.numPartials * 4,
+      }),
       /* first kernel: per-workgroup persistent-kernel reduce */
       new Kernel({
         kernel: this.reductionKernelDefinition,
-        kernelArgs: { inBinding: 1, outBinding: 2 },
+        bufferTypes: [["storage", "read-only-storage"]],
+        bindings: [["partials", "inputBuffer"]],
         label: "noAtomicPKReduce workgroup reduce -> partials",
         getDispatchGeometry: () => {
           /* this is a grid-stride loop, so limit the dispatch */
@@ -305,7 +306,8 @@ export class NoAtomicPKReduce extends BaseReduce {
       /* second kernel: reduce partials into final output */
       new Kernel({
         kernel: this.reductionKernelDefinition,
-        kernelArgs: { inBinding: 2, outBinding: 0 },
+        bufferTypes: [["storage", "read-only-storage"]],
+        bindings: [["outputBuffer", "partials"]],
         label: "noAtomicPKReduce partials->final",
         getDispatchGeometry: () => {
           /* This reduce is defined to do its final step with one workgroup */
