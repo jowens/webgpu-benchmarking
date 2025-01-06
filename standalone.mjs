@@ -78,11 +78,11 @@ export async function main(navigator) {
     gputimestamps: true, //// TODO should work without this
     // inputBuffer and outputBuffer are Reduce-specific names
     // inputBuffer: { buffer: memsrcBuffer, offset: 0 },
-    inputBuffer: memsrcBuffer,
+    // inputBuffer: memsrcBuffer,
     outputBuffer: memdestBuffer,
   });
 
-  await primitive.execute();
+  await primitive.execute({ inputBuffer: memsrcBuffer });
 
   // copy output back to host
   const encoder = device.createCommandEncoder({
