@@ -328,7 +328,9 @@ export class BasePrimitive {
           }
 
           console.info(`${this.label} | ${action.label}
-inputBytes: ${this.inputBytes}
+size of bindings: ${action.bindings[0].map(
+            (e) => this.__buffers[e].buffer.buffer.size
+          )}
 workgroupCount: ${this.workgroupCount}
 workgroupSize: ${this.workgroupSize}
 maxGSLWorkgroupCount: ${this.maxGSLWorkgroupCount}
