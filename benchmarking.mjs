@@ -1,6 +1,9 @@
 import { combinations, range, fail, delay, download } from "./util.mjs";
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
-import { TestInputBuffer, TestOutputBuffer } from "./testbuffer.mjs";
+import {
+  CreateInputBufferWithCPU,
+  CreateOutputBufferWithCPU,
+} from "./buffer.mjs";
 
 let Plot, JSDOM;
 let saveJSON = false;
@@ -121,7 +124,8 @@ async function main(navigator) {
     if (testSuite?.primitive?.prototype.compute) {
       const uniqueRuns = new Set(); // if uniqueRuns is defined, don't run dups
       for (const params of combinations(testSuite.params)) {
-        const primitive = testSuite.getPrimitive({ device, params });
+        console.log("params", params);
+        const primitive = testSuite.getPrimitive({ device, ...params });
 
         if (testSuite.uniqueRuns) {
           /* check if we've done this specific run before */
@@ -143,27 +147,22 @@ async function main(navigator) {
          *    has passed in parameters in the parameter sweep that
          *    should let the primitive compute the relevant sizes.
          */
-        const buffers = { in: [], out: [], uniforms: [] };
-        for (let i = 0; i < primitive.numInputBuffers; i++) {
-          buffers["in"].push(
-            new TestInputBuffer(device, {
-              datatype: primitive.datatype,
-              size: primitive.memsrcSize,
-            })
-          );
-        }
-        primitive.inputs = buffers["in"];
 
-        for (let i = 0; i < primitive.numOutputBuffers; i++) {
-          buffers["out"].push(
-            new TestOutputBuffer(device, {
-              datatype: primitive.datatype,
-              size: primitive.memdestSize,
-            })
-          );
-        }
-        primitive.outputs = buffers["out"];
-        // TODO: uniforms
+        /* these next two buffers have both CPU and GPU buffers within them */
+        const testInputBuffer = new CreateInputBufferWithCPU({
+          device,
+          datatype: primitive.datatype,
+          size: primitive.inputSize,
+          label: "inputBuffer",
+        });
+        primitive.registerBuffer(testInputBuffer);
+
+        const testOutputBuffer = new CreateOutputBufferWithCPU({
+          device,
+          datatype: primitive.datatype,
+          size: 1,
+        });
+        primitive.registerBuffer(testOutputBuffer);
 
         // TEST FOR CORRECTNESS
         if (testSuite.validate) {
