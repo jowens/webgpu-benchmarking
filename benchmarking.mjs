@@ -161,6 +161,7 @@ async function main(navigator) {
           device,
           datatype: primitive.datatype,
           size: 1,
+          label: "outputBuffer",
         });
         primitive.registerBuffer(testOutputBuffer);
 

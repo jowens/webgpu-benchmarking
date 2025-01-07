@@ -78,6 +78,7 @@ export class BasePrimitive {
             break;
         }
     }
+    console.log(this.__buffers);
   }
 
   getBuffer(label) {
@@ -296,6 +297,14 @@ export class BasePrimitive {
               action.bindings
             );
           }
+
+          console.log(action.bindings[0]);
+          console.log(
+            action.bindings[0].map((element, index) => ({
+              binding: index,
+              resource: this.__buffers[element].buffer,
+            }))
+          );
 
           const kernelBindGroup = this.device.createBindGroup({
             label: `bindGroup for ${this.label} kernel`,

@@ -34,17 +34,24 @@ export class Buffer {
   }
 
   get size() {
-    console.log(this);
     return this.gpuBuffer?.size ?? this.gpuBuffer?.buffer?.size;
   }
 }
 
-export class BufferWithCPU extends Buffer {
+class BufferWithCPU extends Buffer {
   /* this class uses this.cpuBuffer */
   constructor(args) {
     /** don't pass "size" to parent constructor, the gpuBuffer constructor
      * has no notion of that, an arg of size is only used for the CPU buffer
      */
+    if (!("device" in args)) {
+      console.error("A CreateXBuffer must be initialized with a device");
+    }
+    if (!("label" in args)) {
+      console.error(
+        "A CreateXBuffer must be initialized with a label, likely one of the knownBuffers associated with the primitive"
+      );
+    }
     const { size, ...argsNotSize } = args;
     super(argsNotSize);
     this.cpuBuffer = new (datatypeToTypedArray(this.datatype))(size);
@@ -54,9 +61,7 @@ export class BufferWithCPU extends Buffer {
 export class CreateInputBufferWithCPU extends BufferWithCPU {
   constructor(args) {
     super(args);
-    if (!("device" in args)) {
-      console.error("A TestBuffer must be initialized with a device");
-    }
+
     // since we're input, fill the buffer with useful data
     for (let i = 0; i < args.size; i++) {
       if (this.datatype == "f32") {
