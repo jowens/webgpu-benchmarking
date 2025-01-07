@@ -67,7 +67,16 @@ export class BasePrimitive {
           buffer: this[bufferObj],
         });
       default:
-        this.__buffers[bufferObj.label] = new Buffer(bufferObj);
+        switch (bufferObj.constructor.name) {
+          case "CreateInputBufferWithCPU":
+          case "CreateOutputBufferWithCPU":
+            /* already created the buffer, don't remake it */
+            this.__buffers[bufferObj.label] = bufferObj;
+            break;
+          default:
+            this.__buffers[bufferObj.label] = new Buffer(bufferObj);
+            break;
+        }
     }
   }
 
