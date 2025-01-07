@@ -10,60 +10,95 @@ import { datatypeToTypedArray } from "./util.mjs";
  * - cpuBuffer (optional)
  */
 
-export function toGPUBufferBinding(obj) {
-  switch (obj.constructor) {
-    case GPUBufferBinding:
-      return obj;
-    case GPUBuffer:
-    default:
-      return GPUBufferBinding(obj);
-  }
-}
-
-export function getBufferSize(obj) {
-  if (obj.size) {
-    return obj.size;
-  } else if (obj.buffer.size) {
-    return obj.buffer.size;
-  } else {
-    return -1;
-  }
-}
-
 export class Buffer {
-  #buffer; // this is a GPUBufferBinding
+  // "gpuBuffer" is a GPUBufferBinding
   constructor(args) {
     Object.assign(this, args);
+    /* generally expect args to contain datatype and size */
+    if (!("label" in args)) {
+      this.label = `Buffer (datatype: ${this.datatype}; size: ${this.size})`;
+    }
   }
 
   set buffer(b) {
     if (b?.buffer) {
       /* this is already a GPUBufferBinding */
-      this.#buffer = b;
+      this.gpuBuffer = b;
     } else {
       /* this is a GPUBuffer or undefined, make it a GPUBufferBinding */
-      this.#buffer = { buffer: b };
+      this.gpuBuffer = { buffer: b };
     }
   }
   get buffer() {
-    return this.#buffer;
+    return this.gpuBuffer;
   }
 
   get size() {
-    return this.#buffer.size ?? this.#buffer.buffer.size;
+    console.log(this);
+    return this.gpuBuffer?.size ?? this.gpuBuffer?.buffer?.size;
   }
 }
 
-class ReadWriteBuffer extends Buffer {
+export class BufferWithCPU extends Buffer {
+  /* this class uses this.cpuBuffer */
   constructor(args) {
-    super(args);
-    this.layoutObjectType = "storage";
+    /** don't pass "size" to parent constructor, the gpuBuffer constructor
+     * has no notion of that, an arg of size is only used for the CPU buffer
+     */
+    const { size, ...argsNotSize } = args;
+    super(argsNotSize);
+    this.cpuBuffer = new (datatypeToTypedArray(this.datatype))(size);
   }
 }
 
-class ReadOnlyBuffer extends Buffer {
+export class CreateInputBufferWithCPU extends BufferWithCPU {
   constructor(args) {
     super(args);
-    this.layoutObjectType = "read-only-storage";
+    if (!("device" in args)) {
+      console.error("A TestBuffer must be initialized with a device");
+    }
+    // since we're input, fill the buffer with useful data
+    for (let i = 0; i < args.size; i++) {
+      if (this.datatype == "f32") {
+        this.cpuBuffer[i] = args?.randomizeInput
+          ? Math.random() * 2.0 - 1.0
+          : i & (2 ** 22 - 1);
+        // Rand: [-1,1]; non-rand: roughly, range of 32b significand
+      } else if (this.datatype == "u32") {
+        this.cpuBuffer[i] = i == 0 ? 0 : this.cpuBuffer[i - 1] + 1; // trying to get u32s
+      }
+      // otherwise, initialize nothing
+    }
+    this.gpuBuffer = this.device.createBuffer({
+      label: this.label,
+      size: this.cpuBuffer.byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    this.device.queue.writeBuffer(this.gpuBuffer, 0, this.cpuBuffer);
+  }
+}
+
+export class CreateOutputBufferWithCPU extends BufferWithCPU {
+  constructor(args) {
+    super(args);
+    this.gpuBuffer = this.device.createBuffer({
+      label: this.label,
+      size: this.cpuBuffer.byteLength,
+      /** Output-only buffers may not need COPY_DST but we might
+       * initialize them with a buffer copy, so be safe and set it
+       *
+       * This might be a performance issue if COPY_DST costs something
+       */
+      usage:
+        GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_SRC |
+        GPUBufferUsage.COPY_DST,
+    });
+
+    this.mappableGPUBuffer = this.device.createBuffer({
+      label: "mappable memory destination buffer",
+      size: this.cpuBuffer.byteLength,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
   }
 }
