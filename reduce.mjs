@@ -5,7 +5,7 @@ import {
   InitializeMemoryBlock,
   AllocateBuffer,
 } from "./primitive.mjs";
-import { toGPUBufferBinding, getBufferSize, Buffer } from "./buffer.mjs";
+import { Buffer } from "./buffer.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import { BinOpAddU32, BinOpMinU32, BinOpMaxU32 } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
@@ -219,9 +219,7 @@ export class NoAtomicPKReduce extends BaseReduce {
 
     /* Compute settings based on tunable parameters */
     this.workgroupCount = Math.min(
-      Math.ceil(
-        getBufferSize(this.getBuffer("inputBuffer")) / this.workgroupSize
-      ),
+      Math.ceil(this.getBuffer("inputBuffer").size / this.workgroupSize),
       this.maxGSLWorkgroupCount
     );
     this.numPartials = this.workgroupCount;
