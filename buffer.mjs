@@ -17,7 +17,7 @@ import { datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
  */
 
 export class Buffer {
-  #gpuBuffer; /* this is a GPUBufferBinding */
+  #gpuBuffer; /* this ALWAYS stores a GPUBufferBinding */
   #mappableGPUBuffer;
   #cpuBuffer;
   constructor(args) {
@@ -45,7 +45,7 @@ export class Buffer {
       );
       if (this.args.initializeCPUBuffer) {
         // since we're input, fill the buffer with useful data
-        for (let i = 0; i < argsSize; i++) {
+        for (let i = 0; i < this.args.size; i++) {
           if (this.datatype == "f32") {
             this.#cpuBuffer[i] =
               this.args.initializeCPUBuffer === "randomize"
@@ -97,8 +97,11 @@ export class Buffer {
         if (this.#cpuBuffer == undefined) {
           console.error("Buffer: initializeGPUBuffer requires a CPUBuffer");
         }
-        /* TODO revisit if there's an offset? */
-        this.device.queue.writeBuffer(this.buffer, 0, this.#cpuBuffer);
+        this.device.queue.writeBuffer(
+          this.buffer.buffer,
+          this.buffer.offset ?? 0,
+          this.#cpuBuffer
+        );
       }
       if (this.args.createMappableGPUBuffer) {
         this.#mappableGPUBuffer = this.device.createBuffer({
@@ -121,6 +124,29 @@ export class Buffer {
     }
   }
 
+  async copyGPUToCPU() {
+    // copy buffer into mappable buffer ...
+    const copyEncoder = this.device.createCommandEncoder({
+      label: "encoder: GPU output buffer data -> mappable buffers",
+    });
+    copyEncoder.copyBufferToBuffer(
+      this.buffer.buffer,
+      this.buffer.offset ?? 0,
+      this.#mappableGPUBuffer,
+      0,
+      this.#mappableGPUBuffer.size
+    );
+    const copyCommandBuffer = copyEncoder.finish();
+    this.device.queue.submit([copyCommandBuffer]);
+
+    // ... then back to host
+    await this.#mappableGPUBuffer.mapAsync(GPUMapMode.READ);
+    this.#cpuBuffer = new (datatypeToTypedArray(this.datatype))(
+      this.#mappableGPUBuffer.getMappedRange().slice()
+    );
+    this.#mappableGPUBuffer.unmap();
+  }
+
   set buffer(b) {
     if (b?.buffer) {
       /* this is already a GPUBufferBinding */
@@ -133,6 +159,9 @@ export class Buffer {
   get buffer() {
     return this.#gpuBuffer;
   }
+  get cpuBuffer() {
+    return this.#cpuBuffer;
+  }
   get datatype() {
     return this.args.datatype;
   }
@@ -140,6 +169,9 @@ export class Buffer {
     return (
       this.#gpuBuffer?.size ?? this.#gpuBuffer?.buffer?.size ?? this.args.size
     );
+  }
+  get device() {
+    return this.args.device;
   }
 }
 
