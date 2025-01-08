@@ -119,7 +119,6 @@ export class Buffer {
         "GPU buffer is undefined"
       );
     }
-    console.log("Constructed Buffer named", this.label, this);
   }
 
   set buffer(b) {

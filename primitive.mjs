@@ -85,12 +85,10 @@ export class BasePrimitive {
             this.__buffers[bufferObj.label] = bufferObj;
             break;
           default:
-            console.log("registerBuffer, default, default", bufferObj);
             this.__buffers[bufferObj.label] = new Buffer(bufferObj);
             break;
         }
     }
-    console.log(this.__buffers);
   }
 
   getBuffer(label) {
@@ -310,15 +308,6 @@ export class BasePrimitive {
             );
           }
 
-          console.log(action.bindings[0]);
-          console.log(
-            action.bindings[0].map((element, index) => ({
-              binding: index,
-              resource: this.__buffers[element].buffer,
-            }))
-          );
-          console.log(this.__buffers);
-
           const kernelBindGroup = this.device.createBindGroup({
             label: `bindGroup for ${this.label} kernel`,
             layout: kernelPipeline.getBindGroupLayout(0),
@@ -413,8 +402,6 @@ dispatchGeometry: ${dispatchGeometry}`);
           );
           break;
         case AllocateBuffer:
-          console.log("this", this);
-          console.log("action", action);
           const allocatedBuffer = this.device.createBuffer({
             label: action.label,
             size: action.size,
