@@ -40,7 +40,7 @@ class BaseReduce extends BasePrimitive {
 
   bytesTransferred() {
     return (
-      this.getBuffer("inputBuffer").size + this.getBuffer("inputBuffer").size
+      this.getBuffer("inputBuffer").size + this.getBuffer("outputBuffer").size
     );
   }
 
@@ -337,7 +337,8 @@ export const NoAtomicPKReduceTestSuite = new BaseTestSuite({
   category: "reduce",
   testSuite: "no-atomic persistent-kernel u32 sum reduction",
   trials: 100,
-  params: PKReduceParamsSingleton,
+  params: PKReduceParams,
+  // params: PKReduceParamsSingleton,
   uniqueRuns: ["inputSize", "workgroupCount", "workgroupSize"],
   primitive: NoAtomicPKReduce,
   primitiveConfig: {
