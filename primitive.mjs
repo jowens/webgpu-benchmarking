@@ -59,6 +59,18 @@ export class BasePrimitive {
     this.__buffers = {}; // this is essentially private
   }
 
+  /** registerBuffer associates a name with a buffer and
+   *    stores the buffer in the list of buffers
+   * Modes of operation:
+   * - registerBuffer(String name) means
+   *   "associate the buffer this[name] with name"
+   *   Meant to register named buffers (known to the primitive)
+   * - registerBuffer(Buffer b) means
+   *   "associate the buffer b with b.label"
+   * - registerBuffer(Object o) means
+   *   "associate a new Buffer(o) with o.label"
+   *
+   */
   registerBuffer(bufferObj) {
     switch (typeof bufferObj) {
       case "string":
@@ -68,12 +80,12 @@ export class BasePrimitive {
         });
       default:
         switch (bufferObj.constructor.name) {
-          case "CreateInputBufferWithCPU":
-          case "CreateOutputBufferWithCPU":
+          case "Buffer":
             /* already created the buffer, don't remake it */
             this.__buffers[bufferObj.label] = bufferObj;
             break;
           default:
+            console.log("registerBuffer, default, default", bufferObj);
             this.__buffers[bufferObj.label] = new Buffer(bufferObj);
             break;
         }
@@ -305,6 +317,7 @@ export class BasePrimitive {
               resource: this.__buffers[element].buffer,
             }))
           );
+          console.log(this.__buffers);
 
           const kernelBindGroup = this.device.createBindGroup({
             label: `bindGroup for ${this.label} kernel`,
@@ -400,6 +413,8 @@ dispatchGeometry: ${dispatchGeometry}`);
           );
           break;
         case AllocateBuffer:
+          console.log("this", this);
+          console.log("action", action);
           const allocatedBuffer = this.device.createBuffer({
             label: action.label,
             size: action.size,
