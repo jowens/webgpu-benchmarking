@@ -431,7 +431,7 @@ dispatchGeometry: ${dispatchGeometry}`);
   }
   async getResult() {
     return {
-      gpuTotalTimeNS: this.#timingHelper.getResult(),
+      gpuTotalTimeNS: await this.#timingHelper.getResult(),
       cpuTotalTimeNS: (this.cpuEndTime - this.cpuStartTime) * 1000000.0,
     };
   }
