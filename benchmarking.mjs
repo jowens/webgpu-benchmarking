@@ -1,5 +1,11 @@
-import { combinations, range, fail, delay, download } from "./util.mjs";
-import { TimingHelper } from "./webgpufundamentals-timing.mjs";
+import {
+  combinations,
+  range,
+  fail,
+  delay,
+  download,
+  datatypeToBytes,
+} from "./util.mjs";
 import { Buffer } from "./buffer.mjs";
 
 let Plot, JSDOM;
@@ -112,7 +118,6 @@ async function main(navigator) {
 
   const expts = new Array(); // push new rows (experiments) onto this
   for (const testSuite of testSuites) {
-    console.log(testSuite);
     lastTestSeen = {
       testSuite: testSuite.testSuite,
       category: testSuite.category,
@@ -168,36 +173,29 @@ async function main(navigator) {
         });
         primitive.registerBuffer(testOutputBuffer);
 
+        console.log(testSuite);
+
         // TEST FOR CORRECTNESS
-        if (testSuite.validate) {
+        if (testSuite.validate && primitive.validate) {
           // submit ONE run just for correctness
           await primitive.execute();
-          // and read it back
           await testOutputBuffer.copyGPUToCPU();
-
-          if (primitive.validate) {
-            const errorstr = primitive.validate();
-            if (errorstr == "") {
-              console.info("Validation passed");
-            } else {
-              console.error(`Validation failed: ${errorstr}`);
-            }
+          const errorstr = primitive.validate();
+          if (errorstr == "") {
+            console.info("Validation passed");
           } else {
-            console.warning(
-              `Primitive ${primitive.label} has no validation routine`
-            );
+            console.error(`Validation failed: ${errorstr}`);
           }
         } // end of TEST FOR CORRECTNESS
 
         // TEST FOR PERFORMANCE
         if (testSuite?.trials > 0) {
-          primitive.execute({
+          await primitive.execute({
             trials: testSuite.trials,
             enableCPUTiming: true,
           });
-
           primitive.getResult().then(({ gpuTotalTimeNS, cpuTotalTimeNS }) => {
-            console.log(gpuTotalTimeNS, cpuTotalTimeNS);
+            console.log("getResult", gpuTotalTimeNS, cpuTotalTimeNS);
             const result = {
               testSuite: testSuite.testSuite,
               category: testSuite.category,
@@ -226,8 +224,10 @@ async function main(navigator) {
             result.gputime = gpuTotalTimeNS / testSuite.trials;
             result.cputime = cpuTotalTimeNS / testSuite.trials;
             result.cpugpuDelta = result.cputime - result.gputime;
-            result.bandwidth = result.bytesTransferred / result.gputime;
-            result.bandwidthCPU = result.bytesTransferred / result.cputime;
+            result.inputBytes =
+              primitive.inputSize * datatypeToBytes(primitive.datatype);
+            result.bandwidth = primitive.bytesTransferred() / result.gputime;
+            result.bandwidthCPU = primitive.bytesTransferred() / result.cputime;
             if (primitive.gflops) {
               result.gflops = primitive.gflops(result.gputime);
             }
