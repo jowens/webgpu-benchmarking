@@ -7,7 +7,7 @@ function assert(cond, msg = "") {
   }
 }
 
-class TimingHelper {
+export class TimingHelper {
   #canTimestamp;
   #device;
   #querySet;
@@ -31,9 +31,7 @@ class TimingHelper {
       });
       this.#resolveBuffer = device.createBuffer({
         size: this.#querySet.count * 8,
-        label: `TimingHelper resolve buffer of size ${
-          this.#querySet.count * 8
-        }`,
+        label: `TimingHelper resolve buffer of count ${this.#querySet.count}`,
         usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
       });
     }
@@ -106,7 +104,7 @@ class TimingHelper {
       this.#resultBuffers.pop() ||
       this.#device.createBuffer({
         size: this.#resolveBuffer.size,
-        label: `TimingHelper result buffer of size ${this.#resolveBuffer.size}`,
+        label: `TimingHelper result buffer of count ${this.#querySet.count}`,
         usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
       });
 
@@ -151,5 +149,3 @@ class TimingHelper {
     return durations;
   }
 }
-
-export { TimingHelper };
