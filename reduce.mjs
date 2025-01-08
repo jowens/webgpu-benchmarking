@@ -27,6 +27,7 @@ class BaseReduce extends BasePrimitive {
     this.knownBuffers = ["inputBuffer", "outputBuffer"];
 
     for (const knownBuffer of this.knownBuffers) {
+      /* we passed an existing buffer into the constructor */
       if (knownBuffer in args) {
         this.registerBuffer({ label: knownBuffer, buffer: args[knownBuffer] });
         delete this[knownBuffer]; // let's make sure it's in one place only
