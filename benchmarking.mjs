@@ -1,9 +1,6 @@
 import { combinations, range, fail, delay, download } from "./util.mjs";
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
-import {
-  CreateInputBufferWithCPU,
-  CreateOutputBufferWithCPU,
-} from "./buffer.mjs";
+import { Buffer } from "./buffer.mjs";
 
 let Plot, JSDOM;
 let saveJSON = false;
@@ -149,19 +146,25 @@ async function main(navigator) {
          */
 
         /* these next two buffers have both CPU and GPU buffers within them */
-        const testInputBuffer = new CreateInputBufferWithCPU({
+        const testInputBuffer = new Buffer({
           device,
           datatype: primitive.datatype,
           size: primitive.inputSize,
           label: "inputBuffer",
+          createCPUBuffer: true,
+          initializeCPUBuffer: true,
+          createGPUBuffer: true,
+          initializeGPUBuffer: true,
         });
         primitive.registerBuffer(testInputBuffer);
 
-        const testOutputBuffer = new CreateOutputBufferWithCPU({
+        const testOutputBuffer = new Buffer({
           device,
           datatype: primitive.datatype,
           size: 1,
           label: "outputBuffer",
+          createGPUBuffer: true,
+          createMappableGPUBuffer: true,
         });
         primitive.registerBuffer(testOutputBuffer);
 
@@ -169,44 +172,18 @@ async function main(navigator) {
         if (testSuite.validate) {
           // submit ONE run just for correctness
           await primitive.execute();
-
-          // copy output back to host
-          const copyEncoder = device.createCommandEncoder({
-            label: "encoder: GPU output buffer data -> mappable buffers",
-          });
-          for (let i = 0; i < primitive.numOutputBuffers; i++) {
-            copyEncoder.copyBufferToBuffer(
-              buffers["out"][i].gpuBuffer,
-              0,
-              buffers["out"][i].mappableGPUBuffer,
-              0,
-              buffers["out"][i].mappableGPUBuffer.size
-            );
-          }
-          const copyCommandBuffer = copyEncoder.finish();
-          device.queue.submit([copyCommandBuffer]);
-
-          // Copy results to CPU and validate them
-          for (let i = 0; i < primitive.numOutputBuffers; i++) {
-            await buffers["out"][i].mappableGPUBuffer.mapAsync(GPUMapMode.READ);
-            buffers["out"][i].cpuBuffer = new (buffers["out"][
-              i
-            ].datatypeToTypedArray())(
-              buffers["out"][i].mappableGPUBuffer.getMappedRange().slice()
-            );
-            buffers["out"][i].mappableGPUBuffer.unmap();
-          }
+          // and read it back
+          await testOutputBuffer.copyGPUToCPU();
 
           if (primitive.validate) {
-            /* TODO: this is currently hardcoded to validating (in[0], out[0]) */
-            const errorstr = primitive.validate(buffers);
+            const errorstr = primitive.validate();
             if (errorstr == "") {
               console.info("Validation passed");
             } else {
               console.error(`Validation failed: ${errorstr}`);
             }
           } else {
-            console.error(
+            console.warning(
               `Primitive ${primitive.label} has no validation routine`
             );
           }
