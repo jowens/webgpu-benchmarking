@@ -44,15 +44,17 @@ class BaseReduce extends BasePrimitive {
     );
   }
 
-  validate = (buffersArg) => {
-    const buffers = this.bindingsToTypedArrays(buffersArg);
-    const memsrc = buffers["in"][0];
-    const memdest = buffers["out"][0];
+  validate = (args = {}) => {
+    /** if we pass in buffers, use them, otherwise use the named buffers
+     * stored in the primitive */
+    const memsrc = args.inputBuffer ?? this.getBuffer("inputBuffer").cpuBuffer;
+    const memdest =
+      args.outputBuffer ?? this.getBuffer("outputBuffer").cpuBuffer;
     /* "reduction" is a one-element array, initialized to identity */
     const reduction = new (datatypeToTypedArray(this.datatype))([
       this.binop.identity,
     ]);
-    for (let i = 0; i < buffers["in"][0].length; i++) {
+    for (let i = 0; i < memsrc.length; i++) {
       reduction[0] = this.binop.op(reduction[0], memsrc[i]);
     }
     console.log(
