@@ -166,6 +166,7 @@ export class Buffer {
     return this.args.datatype;
   }
   get size() {
+    /* should be bytes */
     return (
       this.#gpuBuffer?.size ?? this.#gpuBuffer?.buffer?.size ?? this.args.size
     );
