@@ -168,9 +168,9 @@ class SubgroupSumWGTestClass extends SubgroupIDBaseTest {
      * Validation failed: Element 0: expected 2016, instead saw 49136.
      * 2016 = 63 * 32 = sum(0->63); this is correct
      * 49136 = 16 * 3071
-     * Float32Array(64) [32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, buffer: ArrayBuffer(256), byteLength: 256, byteOffset: 0, length: 64, Symbol(Symbol.toStringTag): 'Float32Array']
+     * Float32Array(64) [32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, buffer: ArrayBuffer(256), byteLength: 256, byteOffset: 0, length: 64, Symbol(Symbol.toStringTag): 'Float32Array']
      * benchmarking.mjs:237 Validation failed: Element 0: expected 2016, instead saw 32.
-     * Float32Array(64) [49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, buffer: ArrayBuffer(256), byteLength: 256, byteOffset: 0, length: 64, Symbol(Symbol.toStringTag): 'Float32Array']
+     * Float32Array(64) [49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 49136, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, 1520, buffer: ArrayBuffer(256), byteLength: 256, byteOffset: 0, length: 64, Symbol(Symbol.toStringTag): 'Float32Array']
      */
     this.memsrcSize = this.workgroupCount * this.workgroupSize;
     this.memdestSize = this.memsrcSize;
