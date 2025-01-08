@@ -106,7 +106,10 @@ export async function main(navigator) {
   mappableMemdestBuffer.unmap();
 
   if (primitive.validate) {
-    const errorstr = primitive.validate({ in: memsrcX32, out: memdest });
+    const errorstr = primitive.validate({
+      inputBuffer: memsrcX32,
+      outputBuffer: memdest,
+    });
     if (errorstr == "") {
       console.info("Validation passed");
     } else {
