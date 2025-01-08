@@ -44,6 +44,18 @@ export function datatypeToTypedArray(datatype) {
   return undefined;
 }
 
+export function datatypeToBytes(datatype) {
+  switch (datatype) {
+    case "f32":
+      return Float32Array.BYTES_PER_ELEMENT;
+    case "i32":
+      return Int32Array.BYTES_PER_ELEMENT;
+    case "u32":
+      return Uint32Array.BYTES_PER_ELEMENT;
+  }
+  return undefined;
+}
+
 // https://stackoverflow.com/questions/8896327/jquery-wait-delay-1-second-without-executing-code
 export const delay = (millis) =>
   new Promise((resolve, reject) => {
