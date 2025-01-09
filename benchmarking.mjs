@@ -126,7 +126,6 @@ async function main(navigator) {
     if (testSuite?.primitive?.prototype.compute) {
       const uniqueRuns = new Set(); // if uniqueRuns is defined, don't run dups
       for (const params of combinations(testSuite.params)) {
-        console.log("params", params);
         const primitive = testSuite.getPrimitive({ device, ...params });
 
         if (testSuite.uniqueRuns) {
@@ -135,8 +134,10 @@ async function main(navigator) {
           const key = testSuite.uniqueRuns.map((x) => primitive[x]).join();
           if (uniqueRuns.has(key)) {
             /* already seen it, don't run it */
+            console.log("params (already seen)", params);
             continue;
           } else {
+            console.log("params (running)", params);
             uniqueRuns.add(key);
           }
         }
@@ -184,7 +185,7 @@ async function main(navigator) {
           if (errorstr == "") {
             console.info("Validation passed");
           } else {
-            console.error(`Validation failed: ${errorstr}`);
+            console.error("Validation failed for", params, ":", errorstr);
           }
         } // end of TEST FOR CORRECTNESS
 
@@ -192,10 +193,10 @@ async function main(navigator) {
         if (testSuite?.trials > 0) {
           await primitive.execute({
             trials: testSuite.trials,
+            enableGPUTiming: canTimestamp,
             enableCPUTiming: true,
           });
           primitive.getResult().then(({ gpuTotalTimeNS, cpuTotalTimeNS }) => {
-            console.log("getResult", gpuTotalTimeNS, cpuTotalTimeNS);
             const result = {
               testSuite: testSuite.testSuite,
               category: testSuite.category,
