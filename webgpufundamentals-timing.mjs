@@ -21,20 +21,41 @@ export class TimingHelper {
 
   constructor(device, numKernels = 1) {
     this.#device = device;
-    this.#passNumber = 0;
-    this.#numKernels = numKernels;
     this.#canTimestamp = device.features.has("timestamp-query");
+    this.#numKernels = numKernels;
+    this.reset(numKernels);
+  }
+
+  /** if we want to keep the same TimingHelper but change the number
+   * of kernels, then call destroy() then reset().
+   */
+
+  destroy() {
+    this.#querySet.destroy();
+    this.#resolveBuffer.destroy();
+    while (this.#resultBuffers.length > 0) {
+      const resultBuffer = this.#resultBuffers.pop();
+      resultBuffer.destroy();
+    }
+  }
+
+  reset(numKernels) {
+    this.#passNumber = 0;
     if (this.#canTimestamp) {
-      this.#querySet = device.createQuerySet({
+      this.#querySet = this.#device.createQuerySet({
         type: "timestamp",
         count: numKernels * 2,
       });
-      this.#resolveBuffer = device.createBuffer({
+      this.#resolveBuffer = this.#device.createBuffer({
         size: this.#querySet.count * 8,
         label: `TimingHelper resolve buffer of count ${this.#querySet.count}`,
         usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
       });
     }
+  }
+
+  get numKernels() {
+    return this.#numKernels;
   }
 
   #beginTimestampPass(encoder, fnName, descriptor) {
@@ -134,18 +155,19 @@ export class TimingHelper {
     );
     this.#state = "free";
 
+    /* prepare for next use */
+    this.#passNumber = 0;
+
     const resultBuffer = this.#resultBuffer;
     await resultBuffer.mapAsync(GPUMapMode.READ);
     const times = new BigInt64Array(resultBuffer.getMappedRange());
     /* I need to read about functional programming in JS to make below pretty */
     const durations = [];
-    for (var idx = 0; idx < times.length; idx += 2) {
+    for (let idx = 0; idx < times.length; idx += 2) {
       durations.push(Number(times[idx + 1] - times[idx]));
     }
     resultBuffer.unmap();
     this.#resultBuffers.push(resultBuffer);
-    this.#querySet.destroy();
-    this.#resolveBuffer.destroy();
     return durations;
   }
 }
