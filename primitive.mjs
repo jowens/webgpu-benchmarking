@@ -4,7 +4,7 @@ import { TimingHelper } from "./webgpufundamentals-timing.mjs";
 
 export class BasePrimitive {
   static pipelineLayoutsCache = new Map();
-  #timingHelper;
+  static __timingHelper; // initialized to undefined
 
   constructor(args) {
     // expect that args are:
@@ -12,7 +12,6 @@ export class BasePrimitive {
     //   label: label,
     //   tuning: { param1: val1, param2: val2 }, // TUNABLE params
     //   someConfigurationSetting: thatSetting,
-    //   gputimestamps: true,
     //   uniforms: uniformbuffer0,
     //   inputBuffer0: inputbuffer0,
     //   inputBuffer1: inputbuffer1,
@@ -41,11 +40,6 @@ export class BasePrimitive {
     // now let's walk through all the args
     for (const [field, value] of Object.entries(args)) {
       switch (field) {
-        case "gputimestamps":
-          /* only set this if BOTH it's requested AND it's enabled in the device */
-          this.gputimestamps =
-            this.device.features.has("timestamp-query") && value;
-          break;
         case "device":
           /* do nothing, handled above */
           break;
@@ -78,6 +72,7 @@ export class BasePrimitive {
           label: bufferObj,
           buffer: this[bufferObj],
         });
+        break;
       default:
         switch (bufferObj.constructor.name) {
           case "Buffer":
@@ -154,6 +149,7 @@ export class BasePrimitive {
       case Int32Array:
       case Float32Array:
         cpuBuffer = binding;
+        break;
       default:
         console.error(
           `Primitive:getCPUBufferFromBinding: Unknown datatype for buffer: ${typeof binding}`
@@ -214,20 +210,35 @@ export class BasePrimitive {
 
     /* begin timestamp prep - count kernels, allocate 2 timestamps/kernel */
     let kernelCount = 0; // how many kernels are there total?
-    if (this.gputimestamps) {
+    if (args.enableGPUTiming) {
       for (const action of this.compute()) {
         if (action.constructor == Kernel && action.enabled()) {
           kernelCount++;
         }
       }
+      if (BasePrimitive.__timingHelper) {
+        if (BasePrimitive.__timingHelper.numKernels === kernelCount) {
+          /* do nothing - we can reuse __timingHelper without change */
+        } else {
+          /* keep the same instance, but reset it */
+          /* this ensures timing buffers are destroyed */
+          BasePrimitive.__timingHelper.destroy();
+          BasePrimitive.__timingHelper.reset(kernelCount);
+        }
+      } else {
+        /* there's no timing helper */
+        BasePrimitive.__timingHelper = new TimingHelper(
+          this.device,
+          kernelCount
+        );
+      }
     }
     const encoder = this.device.createCommandEncoder({
       label: `${this.label} primitive encoder`,
     });
-    this.#timingHelper = new TimingHelper(this.device, kernelCount);
     for (const action of this.compute()) {
       switch (action.constructor) {
-        case Kernel:
+        case Kernel: {
           if (!action.enabled()) {
             /* don't run this kernel at all */
             break;
@@ -246,7 +257,6 @@ export class BasePrimitive {
               throw new Error(
                 "Primitive::Kernel: kernel must be a function or a string"
               );
-              break;
           }
           if (action.debugPrintKernel) {
             console.log(kernelString);
@@ -258,7 +268,7 @@ export class BasePrimitive {
           });
 
           // build up bindGroupLayouts and pipelineLayout
-          var pipelineLayout;
+          let pipelineLayout;
           if (action.bufferTypes in BasePrimitive.pipelineLayoutsCache) {
             /* cached, use it */
             pipelineLayout =
@@ -322,8 +332,11 @@ export class BasePrimitive {
             label: `${this.label} compute pass`,
           };
 
-          const kernelPass = this.gputimestamps
-            ? this.#timingHelper.beginComputePass(encoder, kernelDescriptor)
+          const kernelPass = args.enableGPUTiming
+            ? BasePrimitive.__timingHelper.beginComputePass(
+                encoder,
+                kernelDescriptor
+              )
             : encoder.beginComputePass(kernelDescriptor);
 
           kernelPass.setPipeline(kernelPipeline);
@@ -343,7 +356,7 @@ export class BasePrimitive {
             dispatchGeometry = this.getDispatchGeometry();
           }
           /* trials might be >1 so make sure additional runs are idempotent */
-          for (let trial = 0; trial < args.trials ?? 1; trial++) {
+          for (let trial = 0; trial < (args.trials ?? 1); trial++) {
             kernelPass.dispatchWorkgroups(...dispatchGeometry);
           }
 
@@ -357,7 +370,8 @@ maxGSLWorkgroupCount: ${this.maxGSLWorkgroupCount}
 dispatchGeometry: ${dispatchGeometry}`);
           kernelPass.end();
           break;
-        case InitializeMemoryBlock:
+        }
+        case InitializeMemoryBlock: {
           let DatatypeArray;
           switch (action.datatype) {
             case "f32":
@@ -401,7 +415,8 @@ dispatchGeometry: ${dispatchGeometry}`);
             initBlock
           );
           break;
-        case AllocateBuffer:
+        }
+        case AllocateBuffer: {
           const allocatedBuffer = this.device.createBuffer({
             label: action.label,
             size: action.size,
@@ -414,6 +429,7 @@ dispatchGeometry: ${dispatchGeometry}`);
           });
           this.registerBuffer({ label: action.label, buffer: allocatedBuffer });
           break;
+        }
       }
     }
 
@@ -431,7 +447,7 @@ dispatchGeometry: ${dispatchGeometry}`);
   }
   async getResult() {
     return {
-      gpuTotalTimeNS: await this.#timingHelper.getResult(),
+      gpuTotalTimeNS: await BasePrimitive.__timingHelper.getResult(),
       cpuTotalTimeNS: (this.cpuEndTime - this.cpuStartTime) * 1000000.0,
     };
   }
