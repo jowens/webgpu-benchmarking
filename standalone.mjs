@@ -1,10 +1,10 @@
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
 import {
-  BinOpAddU32,
+  /*BinOpAddU32,
   BinOpMinU32,
   BinOpMaxU32,
   BinOpAddF32,
-  BinOpMinF32,
+  BinOpMinF32,*/
   BinOpMaxF32,
 } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
@@ -31,7 +31,7 @@ export async function main(navigator) {
   });
 
   if (!device) {
-    fail("Fatal error: Device does not support WebGPU.");
+    console.error("Fatal error: Device does not support WebGPU.");
   }
   const memsrcSize = 2 ** 20; // items, not bytes
   const datatype = "f32";
