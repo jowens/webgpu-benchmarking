@@ -5,7 +5,6 @@ import {
   InitializeMemoryBlock,
   AllocateBuffer,
 } from "./primitive.mjs";
-import { Buffer } from "./buffer.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import { BinOpAddU32, BinOpMinU32, BinOpMaxU32 } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
