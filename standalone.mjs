@@ -1,4 +1,3 @@
-import { TimingHelper } from "./webgpufundamentals-timing.mjs";
 import {
   /*BinOpAddU32,
   BinOpMinU32,
@@ -13,6 +12,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
   // running in Node
 } else {
   // running in Chrome
+  // eslint-disable-next-line no-unused-vars
   const urlParams = new URL(window.location.href).searchParams;
 }
 
@@ -86,7 +86,7 @@ export async function main(navigator) {
 
   // copy output back to host
   const encoder = device.createCommandEncoder({
-    label: "timed kernel run encoder",
+    label: "copy result CPU->GPU encoder",
   });
   encoder.copyBufferToBuffer(
     memdestBuffer,
