@@ -445,11 +445,10 @@ dispatchGeometry: ${dispatchGeometry}`);
       this.cpuEndTime = performance.now();
     }
   }
-  async getResult() {
-    return {
-      gpuTotalTimeNS: await BasePrimitive.__timingHelper.getResult(),
-      cpuTotalTimeNS: (this.cpuEndTime - this.cpuStartTime) * 1000000.0,
-    };
+  async getTimingResult() {
+    const gpuTotalTimeNS = await BasePrimitive.__timingHelper.getResult();
+    const cpuTotalTimeNS = (this.cpuEndTime - this.cpuStartTime) * 1000000.0;
+    return { gpuTotalTimeNS, cpuTotalTimeNS };
   }
 }
 
