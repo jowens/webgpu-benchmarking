@@ -114,11 +114,9 @@ async function main(navigator) {
   ];
   //const testSuites = [AtomicGlobalU32ReduceTestSuite];
 
-  let lastTestSeen = { testSuite: "", category: "" };
-
   const expts = new Array(); // push new rows (experiments) onto this
   for (const testSuite of testSuites) {
-    lastTestSeen = {
+    const lastTestSeen = {
       testSuite: testSuite.testSuite,
       category: testSuite.category,
     };
@@ -127,20 +125,6 @@ async function main(navigator) {
       const uniqueRuns = new Set(); // if uniqueRuns is defined, don't run dups
       for (const params of combinations(testSuite.params)) {
         const primitive = testSuite.getPrimitive({ device, ...params });
-
-        if (testSuite.uniqueRuns) {
-          /* check if we've done this specific run before */
-          /* fingerprint is a string, since strings can be keys in a Set() */
-          const key = testSuite.uniqueRuns.map((x) => primitive[x]).join();
-          if (uniqueRuns.has(key)) {
-            /* already seen it, don't run it */
-            console.log("params (already seen)", params);
-            continue;
-          } else {
-            console.log("params (running)", params);
-            uniqueRuns.add(key);
-          }
-        }
 
         /** for test purposes, let's initialize some buffers.
          *    Initializing is the responsibility of the test suite.
@@ -158,9 +142,9 @@ async function main(navigator) {
           size: primitive.inputSize,
           label: "inputBuffer",
           createCPUBuffer: true,
-          initializeCPUBuffer: true,
+          initializeCPUBuffer: true /* fill with default data */,
           createGPUBuffer: true,
-          initializeGPUBuffer: true,
+          initializeGPUBuffer: true /* with CPU data */,
         });
         primitive.registerBuffer(testInputBuffer);
 
@@ -189,6 +173,21 @@ async function main(navigator) {
           }
         } // end of TEST FOR CORRECTNESS
 
+        if (testSuite.uniqueRuns) {
+          /* check if we've done this specific run before, and don't rerun if so */
+          /* while it would be nice to put this test earlier, some params are
+           * not set until the primitive is run once, so we'll just do it after
+           * the validation run */
+          /* fingerprint is a string, since strings can be keys in a Set() */
+          const key = testSuite.uniqueRuns.map((x) => primitive[x]).join();
+          if (uniqueRuns.has(key)) {
+            /* already seen it, don't run it */
+            continue;
+          } else {
+            uniqueRuns.add(key);
+          }
+        }
+
         // TEST FOR PERFORMANCE
         if (testSuite?.trials > 0) {
           await primitive.execute({
@@ -196,44 +195,47 @@ async function main(navigator) {
             enableGPUTiming: canTimestamp,
             enableCPUTiming: true,
           });
-          primitive.getResult().then(({ gpuTotalTimeNS, cpuTotalTimeNS }) => {
-            const result = {
-              testSuite: testSuite.testSuite,
-              category: testSuite.category,
-            };
-            if (gpuTotalTimeNS instanceof Array) {
-              // gpuTotalTimeNS might be a list, in which case just add together for now
-              result.gpuTotalTimeNSArray = gpuTotalTimeNS;
-              gpuTotalTimeNS = gpuTotalTimeNS.reduce((x, a) => x + a, 0);
-            }
-            /* copy primitive's fields into result */
-            for (const [field, value] of Object.entries(primitive)) {
-              if (typeof value !== "function") {
-                if (typeof value !== "object") {
-                  result[field] = value;
-                } else {
-                  /* object - if it's got a constructor, use the name */
-                  /* useful for "binop" or other parameters */
-                  if (value?.constructor?.name) {
-                    result[field] = value.constructor.name;
+          primitive
+            .getTimingResult()
+            .then(({ gpuTotalTimeNS, cpuTotalTimeNS }) => {
+              const result = {
+                testSuite: testSuite.testSuite,
+                category: testSuite.category,
+              };
+              if (gpuTotalTimeNS instanceof Array) {
+                // gpuTotalTimeNS might be a list, in which case just add together for now
+                result.gpuTotalTimeNSArray = gpuTotalTimeNS;
+                gpuTotalTimeNS = gpuTotalTimeNS.reduce((x, a) => x + a, 0);
+              }
+              /* copy primitive's fields into result */
+              for (const [field, value] of Object.entries(primitive)) {
+                if (typeof value !== "function") {
+                  if (typeof value !== "object") {
+                    result[field] = value;
+                  } else {
+                    /* object - if it's got a constructor, use the name */
+                    /* useful for "binop" or other parameters */
+                    if (value?.constructor?.name) {
+                      result[field] = value.constructor.name;
+                    }
                   }
                 }
               }
-            }
-            result.date = new Date();
-            result.gpuinfo = adapter.info;
-            result.gputime = gpuTotalTimeNS / testSuite.trials;
-            result.cputime = cpuTotalTimeNS / testSuite.trials;
-            result.cpugpuDelta = result.cputime - result.gputime;
-            result.inputBytes =
-              primitive.inputSize * datatypeToBytes(primitive.datatype);
-            result.bandwidth = primitive.bytesTransferred() / result.gputime;
-            result.bandwidthCPU = primitive.bytesTransferred() / result.cputime;
-            if (primitive.gflops) {
-              result.gflops = primitive.gflops(result.gputime);
-            }
-            expts.push(result);
-          });
+              result.date = new Date();
+              result.gpuinfo = adapter.info;
+              result.gputime = gpuTotalTimeNS / testSuite.trials;
+              result.cputime = cpuTotalTimeNS / testSuite.trials;
+              result.cpugpuDelta = result.cputime - result.gputime;
+              result.inputBytes =
+                primitive.inputSize * datatypeToBytes(primitive.datatype);
+              result.bandwidth = primitive.bytesTransferred() / result.gputime;
+              result.bandwidthCPU =
+                primitive.bytesTransferred() / result.cputime;
+              if (primitive.gflops) {
+                result.gflops = primitive.gflops(result.gputime);
+              }
+              expts.push(result);
+            });
         } // end of TEST FOR PERFORMANCE
       } // end of running all combinations for this testSuite
 
