@@ -209,13 +209,13 @@ async function main(navigator) {
               }
               /* copy primitive's fields into result */
               for (const [field, value] of Object.entries(primitive)) {
-                if (typeof value !== "function") {
+                if (typeof value !== "function" && !Array.isArray(value)) {
                   if (typeof value !== "object") {
                     result[field] = value;
                   } else {
-                    /* object - if it's got a constructor, use the name */
+                    /* object - if it's got a constructor, use a (useful) name */
                     /* useful for "binop" or other parameters */
-                    if (value?.constructor?.name) {
+                    if (value?.constructor?.name !== "Object") {
                       result[field] = value.constructor.name;
                     }
                   }
