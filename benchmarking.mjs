@@ -1,6 +1,5 @@
 import {
   combinations,
-  range,
   fail,
   delay,
   download,
@@ -14,6 +13,7 @@ let saveSVG = false;
 if (typeof process !== "undefined" && process.release.name === "node") {
   // running in Node
   Plot = await import("@observablehq/plot");
+  // eslint-disable-next-line no-unused-vars
   JSDOM = await import("jsdom");
 } else {
   // running in Chrome
@@ -38,29 +38,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 }
 
 // tests
-import {
-  MembwSimpleTestSuite,
-  MembwGSLTestSuite,
-  MembwAdditionalPlotsSuite,
-} from "./membwtest.mjs";
-import { StridedReadTestSuite } from "./stridedreadtest.mjs";
-import { RandomReadTestSuite } from "./randomreadtest.mjs";
-import { MaddTestSuite } from "./maddtest.mjs";
-import {
-  SubgroupIDTestSuite,
-  SubgroupSumSGTestSuite,
-  SubgroupSumWGTestSuite,
-} from "./subgroups.mjs";
-import {
-  AtomicGlobalU32ReduceTestSuite,
-  AtomicGlobalU32ReduceBinOpsTestSuite,
-  NoAtomicPKReduceTestSuite,
-  AtomicGlobalU32SGReduceTestSuite,
-  AtomicGlobalU32WGReduceTestSuite,
-  AtomicGlobalF32WGReduceTestSuite,
-  AtomicGlobalNonAtomicWGF32ReduceTestSuite,
-  AtomicGlobalPrimedNonAtomicWGF32ReduceTestSuite,
-} from "./reduce.mjs";
+import { NoAtomicPKReduceTestSuite } from "./reduce.mjs";
 
 async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -319,6 +297,7 @@ async function main(navigator) {
       const div = document.querySelector("#plot");
       div.append(plotted);
       if (saveSVG) {
+        // eslint-disable-next-line no-undef
         svgExport.downloadSvg(
           div.lastChild,
           `${testSuite.testsuite}-${testSuite.category}`, // chart title: file name of exported image
