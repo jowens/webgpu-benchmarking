@@ -45,7 +45,8 @@ class BaseReduce extends BasePrimitive {
 
   validate = (args = {}) => {
     /** if we pass in buffers, use them, otherwise use the named buffers
-     * stored in the primitive */
+     * that are stored in the primitive */
+    /* assumes that cpuBuffers are populated with useful data */
     const memsrc = args.inputBuffer ?? this.getBuffer("inputBuffer").cpuBuffer;
     const memdest =
       args.outputBuffer ?? this.getBuffer("outputBuffer").cpuBuffer;
@@ -245,6 +246,10 @@ export class NoAtomicPKReduce extends BaseReduce {
 
       ${this.binop.wgslfn}
 
+      fn roundUpDivU32(a : u32, b : u32) -> u32 {
+        return (a + b - 1) / b;
+      }
+
       @compute @workgroup_size(${this.workgroupSize}) fn noAtomicPKReduceIntoPartials(
         @builtin(global_invocation_id) id: vec3u /* 3D thread id in compute shader grid */,
         @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
@@ -253,8 +258,9 @@ export class NoAtomicPKReduce extends BaseReduce {
         @builtin(subgroup_size) sgsz: u32, /* 32 on Apple GPUs */
         @builtin(subgroup_invocation_id) sgid: u32 /* 1D thread index within subgroup */) {
           /* TODO: fix 'assume id.y == 0 always' */
+          /* TODO: what if there are more threads than subgroup_size * subgroup_size? */
           var acc: ${this.datatype} = ${this.binop.identity};
-          var numSubgroups = ${this.workgroupSize} / sgsz;
+          var numSubgroups = roundUpDivU32(${this.workgroupSize}, sgsz);
           for (var i = id.x;
             i < arrayLength(&inBuffer);
             i += nwg.x * ${this.workgroupSize}) {
@@ -326,23 +332,30 @@ const PKReduceParams = {
   workgroupSize: range(5, 8).map((i) => 2 ** i),
 };
 
+const PKReduceParamsBroken = {
+  inputSize: [2 ** 26],
+  maxGSLWorkgroupCount: [2 ** 2],
+  // workgroupSize: range(5, 7).map((i) => 2 ** i),
+  workgroupSize: [2 ** 5, 2 ** 6, 2 ** 7],
+};
+
 const PKReduceParamsSingleton = {
-  inputSize: [2 ** 20],
-  maxGSLWorkgroupCount: [2 ** 5],
+  inputSize: [2 ** 26],
+  maxGSLWorkgroupCount: [2 ** 6],
+  // workgroupSize: range(5, 7).map((i) => 2 ** i),
   workgroupSize: [2 ** 6],
 };
 
 export const NoAtomicPKReduceTestSuite = new BaseTestSuite({
   category: "reduce",
   testSuite: "no-atomic persistent-kernel u32 sum reduction",
-  trials: 100,
+  trials: 10,
   params: PKReduceParams,
-  // params: PKReduceParamsSingleton,
   uniqueRuns: ["inputSize", "workgroupCount", "workgroupSize"],
   primitive: NoAtomicPKReduce,
   primitiveConfig: {
     datatype: "u32",
-    binop: BinOpAddU32,
+    binop: BinOpMaxU32,
     gputimestamps: true,
   },
   plots: [
