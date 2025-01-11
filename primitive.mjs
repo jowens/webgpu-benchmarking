@@ -158,40 +158,18 @@ export class BasePrimitive {
     }
     return cpuBuffer;
   }
-  updateBufferInternals() {
-    /* rebuild any internal structures with respect to buffers */
-  }
-  /**
-   * Ensures output is an object with members "in", "out" where
-   *     each member is an array of TypedArrays
-   * output: { "in": [TypedArray], "out": [TypedArray] }
-   * if input is not in that format, bindingsToTypedArrays converts it
-   * it should convert inputs of:
-   *     { "in": [somethingBufferish], "out": [somethingBufferish] }
-   *     or
-   *     { "in": TypedArray, "out": TypedArray }
-   */
-  bindingsToTypedArrays(bindings) {
-    // https://stackoverflow.com/questions/65824084/how-to-tell-if-an-object-is-a-typed-array
-    const TypedArray = Object.getPrototypeOf(Uint8Array);
-    const bindingsOut = {};
-    for (const type of ["in", "out"]) {
-      if (bindings[type] instanceof TypedArray) {
-        /* already a typed array! */
-        bindingsOut[type] = [bindings[type]];
-      } else {
-        /* array of something we need to convert */
-        bindingsOut[type] = bindings[type].map(this.getCPUBufferFromBinding);
-      }
-    }
-    return bindingsOut;
-  }
   async execute(args = {}) {
     /** loop through each of the actions listed in this.compute(),
      * instantiating whatever WebGPU constructs are necessary to run them
      *
      * TODO: memoize these constructs
      */
+
+    if (args.encoder && args.enableCPUTiming) {
+      console.warn(
+        "Primitive:execute: cannot pass in an encoder AND\nenable CPU timing, CPU timing will be disabled"
+      );
+    }
 
     /* set up defaults */
     if (!("trials" in args)) {
@@ -233,9 +211,12 @@ export class BasePrimitive {
         );
       }
     }
-    const encoder = this.device.createCommandEncoder({
-      label: `${this.label} primitive encoder`,
-    });
+    /* if we passed in an encoder, use that */
+    const encoder =
+      args.encoder ??
+      this.device.createCommandEncoder({
+        label: `${this.label} primitive encoder`,
+      });
     for (const action of this.compute()) {
       switch (action.constructor) {
         case Kernel: {
@@ -433,16 +414,21 @@ dispatchGeometry: ${dispatchGeometry}`);
       }
     }
 
-    /* TODO: Is this the right way to do timing? */
-    const commandBuffer = encoder.finish();
-    if (args?.enableCPUTiming) {
-      await this.device.queue.onSubmittedWorkDone();
-      this.cpuStartTime = performance.now();
-    }
-    this.device.queue.submit([commandBuffer]);
-    if (args?.enableCPUTiming) {
-      await this.device.queue.onSubmittedWorkDone();
-      this.cpuEndTime = performance.now();
+    if (args.encoder) {
+      /* user passed in an encoder, return it, don't submit it */
+      return encoder;
+    } else {
+      /* TODO: Is this the right way to do timing? */
+      const commandBuffer = encoder.finish();
+      if (args?.enableCPUTiming) {
+        await this.device.queue.onSubmittedWorkDone();
+        this.cpuStartTime = performance.now();
+      }
+      this.device.queue.submit([commandBuffer]);
+      if (args?.enableCPUTiming) {
+        await this.device.queue.onSubmittedWorkDone();
+        this.cpuEndTime = performance.now();
+      }
     }
   }
   async getTimingResult() {
