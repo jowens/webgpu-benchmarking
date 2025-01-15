@@ -1,10 +1,12 @@
 import { Buffer } from "./buffer.mjs";
 import { TestInputBuffer, TestOutputBuffer } from "./testbuffer.mjs";
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
+import { wgslFunctions } from "./wgslFunctions.mjs";
 
 export class BasePrimitive {
   static pipelineLayoutsCache = new Map();
   static __timingHelper; // initialized to undefined
+  static fnDeclarations = wgslFunctions;
 
   constructor(args) {
     // expect that args are:
