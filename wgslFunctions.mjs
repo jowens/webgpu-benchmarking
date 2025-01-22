@@ -41,12 +41,15 @@ export const wgslFunctions = {
     return acc;
         };`;
   },
-  workgroupExclusiveScan: (
+  workgroupScan: (
     env,
     bindings = { inputBuffer: "inputBuffer", temp: "temp" }
   ) => {
+    const scanType = env.type;
+    const scanTypeCap = scanType.charAt(0).toUpperCase() + scanType.slice(1);
+    const subgroupScanOp = env.binop[`subgroup${scanTypeCap}ScanOp`];
     return /* wgsl */ `
-    fn workgroupExclusiveScan(id: vec3u,
+    fn workgroup${scanTypeCap}Scan(id: vec3u,
       nwg: vec3u,
       lid: u32,
       sgsz: u32) -> ${env.datatype} {
@@ -71,15 +74,16 @@ export const wgslFunctions = {
     /** acc is only valid for lid < numSubgroups, but we need uniform control flow
      * for the subgroupScanOp */
     var spineScanInput = select(${env.binop.identity}, ${bindings.temp}[lid], lid < numSubgroups);
+    /* no matter what type of scan we have, we use exclusiveScan here */
     var spineScanOutput = ${env.binop.subgroupExclusiveScanOp}(spineScanInput);
     if (lid < sgsz) { /* only activate 0th subgroup */
       ${bindings.temp}[lid] = spineScanOutput;
     }
     workgroupBarrier();
-    /* now go add that spineScan value back to my local scan */
-    var subgroupExclusiveScan = ${env.binop.subgroupExclusiveScanOp}(in);
-    return binop(${bindings.temp}[mySubgroupID], subgroupExclusiveScan);
-    // return ${bindings.temp}[mySubgroupID];
+    /** Now go add that spineScan value back to my local scan. Here's where
+     * we differentiate between exclusive/inclusive. */
+    var subgroupScan = ${subgroupScanOp}(in);
+    return binop(${bindings.temp}[mySubgroupID], subgroupScan);
   };`;
   },
 };
