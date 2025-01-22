@@ -1,4 +1,17 @@
-/* Define binary operations for both GPU and CPU */
+/** Define binary operations for both GPU and CPU
+ * Each class can optionally define:
+ *
+ * identity: the identity value for the operation
+ * op: a JS function that takes two args and returns a value
+ * wgslfn: a string that defines a WGSL function "binop" that takes two args
+ *   and returns a value
+ * wgslatomic: a string that names an atomic function (same function
+ *   as wgslfn)
+ * subgroupReduceOp: a string that names a function that reduces
+ *   across a subgroup
+ * subgroup{Inclusive, Exclusive}ScanOp: a string that names a function that
+ *   {inclusive, exclusive}-scans across a subgroup
+ */
 
 class BinOp {
   constructor(args) {
@@ -11,6 +24,7 @@ class BinOpAdd extends BinOp {
   constructor(args) {
     super(args);
     this.identity = 0;
+    this.op = (a, b) => a + b;
     switch (this.datatype) {
       case "f32":
         break;
@@ -22,8 +36,9 @@ class BinOpAdd extends BinOp {
         break;
     }
     this.wgslfn = `fn binop(a : ${this.datatype}, b : ${this.datatype}) -> ${this.datatype} {return a+b;}`;
-    this.subgroupOp = "subgroupAdd";
-    this.op = (a, b) => a + b;
+    this.subgroupReduceOp = "subgroupAdd";
+    this.subgroupInclusiveScanOp = "subgroupInclusiveAdd";
+    this.subgroupExclusiveScanOp = "subgroupExclusiveAdd";
   }
 }
 
@@ -50,7 +65,7 @@ class BinOpMin extends BinOp {
     this.op = (a, b) => Math.min(a, b);
     this.wgslfn = `fn binop(a : ${this.datatype}, b : ${this.datatype}) -> ${this.datatype} {return min(a,b);}`;
     this.wgslatomic = "atomicMin";
-    this.subgroupOp = "subgroupMin";
+    this.subgroupReduceOp = "subgroupMin";
   }
 }
 
@@ -77,7 +92,7 @@ class BinOpMax extends BinOp {
     this.op = (a, b) => Math.max(a, b);
     this.wgslfn = `fn binop(a : ${this.datatype}, b : ${this.datatype}) -> ${this.datatype} {return max(a,b);}`;
     this.wgslatomic = "atomicMax";
-    this.subgroupOp = "subgroupMax";
+    this.subgroupReduceOp = "subgroupMax";
   }
 }
 
@@ -92,7 +107,7 @@ class BinOpMultiply extends BinOp {
     this.op = (a, b) => a * b;
     this.wgslfn = `fn binop(a : ${this.datatype}, b : ${this.datatype}) -> ${this.datatype} {return a*b;}`;
     this.wgslatomic = "atomicMul";
-    this.subgroupOp = "subgroupMul";
+    this.subgroupReduceOp = "subgroupMul";
   }
 }
 
