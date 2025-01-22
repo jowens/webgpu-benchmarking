@@ -1,9 +1,9 @@
 import {
-  /*BinOpAddU32,
+  BinOpAddU32,
   BinOpMinU32,
   BinOpMaxU32,
   BinOpAddF32,
-  BinOpMinF32,*/
+  BinOpMinF32,
   BinOpMaxF32,
 } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
@@ -18,6 +18,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 
 // import primitive only, no test suite
 import { NoAtomicPKReduce } from "./reduce.mjs";
+import { WGScan } from "./scan.mjs";
 
 export async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -46,11 +47,51 @@ export async function main(navigator) {
         break;
     }
   }
-  const memdestBytes = 4;
+
+  const reducePrimitive = new NoAtomicPKReduce({
+    device,
+    binop: BinOpAddF32,
+    datatype: datatype,
+    gputimestamps: true, //// TODO should work without this
+    // inputBuffer and outputBuffer are Reduce-specific names
+    // inputBuffer: { buffer: memsrcBuffer, offset: 0 },
+    // inputBuffer: memsrcBuffer,
+    // outputBuffer: memdestBuffer,
+  });
+
+  const iscanPrimitive = new WGScan({
+    device,
+    binop: BinOpAddF32,
+    type: "inclusive",
+    datatype: datatype,
+    gputimestamps: true, //// TODO should work without this
+  });
+
+  const escanPrimitive = new WGScan({
+    device,
+    binop: BinOpAddF32,
+    type: "exclusive",
+    datatype: datatype,
+    gputimestamps: true, //// TODO should work without this
+  });
+
+  // const primitive = iscanPrimitive;
+  // const primitive = escanPrimitive;
+  const primitive = reducePrimitive;
+
+  let memdestBytes;
+  switch (primitive.constructor.name) {
+    case "NoAtomicPKReduce":
+      memdestBytes = 4;
+      break;
+    default:
+      memdestBytes = memsrcX32.byteLength;
+      break;
+  }
 
   // allocate/create buffers on the GPU to hold in/out data
   const memsrcBuffer = device.createBuffer({
-    label: "memory source buffer (uint)",
+    label: `memory source buffer (${datatype})`,
     size: memsrcX32.byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
@@ -71,18 +112,10 @@ export async function main(navigator) {
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   });
 
-  const primitive = new NoAtomicPKReduce({
-    device,
-    binop: BinOpMaxF32,
-    datatype: datatype,
-    gputimestamps: true, //// TODO should work without this
-    // inputBuffer and outputBuffer are Reduce-specific names
-    // inputBuffer: { buffer: memsrcBuffer, offset: 0 },
-    // inputBuffer: memsrcBuffer,
+  await primitive.execute({
+    inputBuffer: memsrcBuffer,
     outputBuffer: memdestBuffer,
   });
-
-  await primitive.execute({ inputBuffer: memsrcBuffer });
 
   // copy output back to host
   const encoder = device.createCommandEncoder({
