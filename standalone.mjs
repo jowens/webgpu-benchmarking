@@ -48,6 +48,7 @@ export async function main(navigator) {
     }
   }
 
+  // eslint-disable-next-line no-unused-vars
   const reducePrimitive = new NoAtomicPKReduce({
     device,
     binop: BinOpAddF32,
@@ -59,6 +60,7 @@ export async function main(navigator) {
     // outputBuffer: memdestBuffer,
   });
 
+  // eslint-disable-next-line no-unused-vars
   const iscanPrimitive = new WGScan({
     device,
     binop: BinOpAddF32,
@@ -67,6 +69,7 @@ export async function main(navigator) {
     gputimestamps: true, //// TODO should work without this
   });
 
+  // eslint-disable-next-line no-unused-vars
   const escanPrimitive = new WGScan({
     device,
     binop: BinOpAddF32,
@@ -76,8 +79,8 @@ export async function main(navigator) {
   });
 
   // const primitive = iscanPrimitive;
-  // const primitive = escanPrimitive;
-  const primitive = reducePrimitive;
+  const primitive = escanPrimitive;
+  // const primitive = reducePrimitive;
 
   let memdestBytes;
   switch (primitive.constructor.name) {
