@@ -178,6 +178,8 @@ export class NoAtomicPKReduce extends BaseReduce {
         this.datatype
       }>;
 
+      ${BasePrimitive.fnDeclarations.commonDefinitions}
+
       /* TODO: the "32" in the next line should be workgroupSize / subgroupSize */
       var<workgroup> temp: array<${this.datatype}, 32>; // zero initialized
 
@@ -198,16 +200,10 @@ export class NoAtomicPKReduce extends BaseReduce {
 
       @compute @workgroup_size(${
         this.workgroupSize
-      }) fn noAtomicPKReduceIntoPartials(
-        @builtin(global_invocation_id) id: vec3u /* 3D thread id in compute shader grid */,
-        @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
-        @builtin(workgroup_id) wgid: vec3u /* 3D workgroup id within compute shader grid */,
-        @builtin(local_invocation_index) lid: u32 /* 1D thread index within workgroup */,
-        @builtin(subgroup_size) sgsz: u32, /* 32 on Apple GPUs */
-        @builtin(subgroup_invocation_id) sgid: u32 /* 1D thread index within subgroup */) {
-          var reduction: ${this.datatype} = workgroupReduce(id, nwg, lid, sgsz);
-          if (lid == 0) {
-            outputBuffer[wgid.x] = reduction;
+      }) fn noAtomicPKReduceIntoPartials(builtins : Builtins) {
+          var reduction: ${this.datatype} = workgroupReduce(builtins);
+          if (builtins.lid == 0) {
+            outputBuffer[builtins.wgid.x] = reduction;
           }
         }`;
   };
@@ -252,6 +248,7 @@ const PKReduceParams = {
   workgroupSize: range(5, 8).map((i) => 2 ** i),
 };
 
+// eslint-disable-next-line no-unused-vars
 const PKReduceParamsSingleton = {
   inputSize: [2 ** 20],
   maxGSLWorkgroupCount: [2 ** 5],
