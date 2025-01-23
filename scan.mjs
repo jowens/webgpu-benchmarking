@@ -3,7 +3,7 @@ import {
   BasePrimitive,
   Kernel,
   // InitializeMemoryBlock,
-  // AllocateBuffer,
+  AllocateBuffer,
 } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import { BinOpMaxU32 } from "./binop.mjs";
@@ -164,7 +164,6 @@ const scanWGSizeBinOpPlot = {
 };
 
 export class WGScan extends BaseScan {
-  /* persistent kernel, no atomics */
   constructor(args) {
     super(args);
   }
@@ -203,6 +202,8 @@ export class WGScan extends BaseScan {
         this.datatype
       }>;
 
+      ${BasePrimitive.fnDeclarations.commonDefinitions}
+
       /* TODO: the "32" in the next line should be workgroupSize / subgroupSize */
       var<workgroup> temp: array<${this.datatype}, 32>; // zero initialized
 
@@ -218,12 +219,123 @@ export class WGScan extends BaseScan {
       })}
 
       @compute @workgroup_size(${this.workgroupSize}) fn workgroupScanKernel(
-        @builtin(global_invocation_id) id: vec3u /* 3D thread id in compute shader grid */,
-        @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
-        @builtin(workgroup_id) wgid: vec3u /* 3D workgroup id within compute shader grid */,
-        @builtin(local_invocation_index) lid: u32 /* 1D thread index within workgroup */,
-        @builtin(subgroup_size) sgsz: u32, /* 32 on Apple GPUs */
-        @builtin(subgroup_invocation_id) sgid: u32 /* 1D thread index within subgroup */) {
+         builtins: Builtins) {
+          var scan: ${this.datatype} = workgroup${scanTypeCap}Scan(builtins);
+          outputBuffer[builtins.gid.x] = scan;
+        }`;
+  };
+  compute() {
+    this.finalizeRuntimeParameters();
+    return [
+      new Kernel({
+        kernel: this.scanKernelDefinition,
+        bufferTypes: [["storage", "read-only-storage"]],
+        bindings: [["outputBuffer", "inputBuffer"]],
+        label: "workgroup scan",
+        getDispatchGeometry: () => {
+          /* this is a grid-stride loop, so limit the dispatch */
+          return [1];
+        },
+      }),
+    ];
+  }
+}
+
+export class HierarchicalScan extends BaseScan {
+  constructor(args) {
+    super(args);
+  }
+
+  finalizeRuntimeParameters() {
+    /* Set reasonable defaults for tunable parameters */
+    this.workgroupSize = this.workgroupSize ?? 256;
+
+    /* Compute settings based on tunable parameters */
+    this.workgroupCount = Math.ceil(
+      this.getBuffer("inputBuffer").size / this.workgroupSize
+    );
+    this.numPartials = this.workgroupCount;
+  }
+  reducePerWorkgroupDefinition = () => {
+    return /* wgsl */ `
+    enable subgroups;
+    /* output */
+    @group(0) @binding(0) var<storage, read_write> outputBuffer: array<${
+      this.datatype
+    }>;
+    /* input */
+    @group(0) @binding(1) var<storage, read> inputBuffer: array<${
+      this.datatype
+    }>;
+
+    ${BasePrimitive.fnDeclarations.commonDefinitions}
+
+    /* TODO: the "32" in the next line should be workgroupSize / subgroupSize */
+    var<workgroup> temp: array<${this.datatype}, 32>; // zero initialized
+
+    ${this.binop.wgslfn}
+
+    fn roundUpDivU32(a : u32, b : u32) -> u32 {
+      return (a + b - 1) / b;
+    }
+
+    ${BasePrimitive.fnDeclarations.workgroupReduce(this, {
+      inputBuffer: "inputBuffer",
+      temp: "temp",
+    })}
+
+    @compute @workgroup_size(${this.workgroupSize}) fn workgroupReduceKernel(
+      Builtins builtins
+    ) {
+        var reduce: ${this.datatype} = workgroupReduce(id, nwg, lid, sgsz);
+        if (lid == 0) {
+          outputBuffer[wgid.x] = reduce;
+        }
+      }
+    `;
+  };
+
+  scanKernelDefinition = () => {
+    /** this needs to be an arrow function so "this" is the Primitive
+     *  that declares it
+     */
+
+    /** this definition could be inline when the kernel is specified,
+     * but since we call it twice, we move it here
+     */
+    const scanType = this.type;
+    /* exclusive -> Exclusive, inclusive -> Inclusive */
+    const scanTypeCap = scanType.charAt(0).toUpperCase() + scanType.slice(1);
+    return /* wgsl */ `
+      enable subgroups;
+      /* output */
+      @group(0) @binding(0) var<storage, read_write> outputBuffer: array<${
+        this.datatype
+      }>;
+      /* input */
+      @group(0) @binding(1) var<storage, read> inputBuffer: array<${
+        this.datatype
+      }>;
+
+      ${BasePrimitive.fnDeclarations.commonDefinitions}
+
+      /* TODO: the "32" in the next line should be workgroupSize / subgroupSize */
+      var<workgroup> temp: array<${this.datatype}, 32>; // zero initialized
+
+      ${this.binop.wgslfn}
+
+      fn roundUpDivU32(a : u32, b : u32) -> u32 {
+        return (a + b - 1) / b;
+      }
+
+      ${BasePrimitive.fnDeclarations.workgroupScan(this, {
+        inputBuffer: "inputBuffer",
+        temp: "temp",
+      })}
+
+      @compute @workgroup_size(${this.workgroupSize}) fn workgroupScanKernel(
+        Builtins builtins
+      ) {
           var scan: ${
             this.datatype
           } = workgroup${scanTypeCap}Scan(id, nwg, lid, sgsz);
@@ -233,6 +345,20 @@ export class WGScan extends BaseScan {
   compute() {
     this.finalizeRuntimeParameters();
     return [
+      new AllocateBuffer({
+        label: "partials",
+        size: this.numPartials * 4,
+      }),
+      new Kernel({
+        kernel: this.reducePerWorkgroupDefinition,
+        bufferTypes: [["storage", "read-only-storage"]],
+        bindings: [["outputBuffer", "inputBuffer"]],
+        label: "workgroup scan",
+        getDispatchGeometry: () => {
+          /* this is a grid-stride loop, so limit the dispatch */
+          return [1];
+        },
+      }),
       new Kernel({
         kernel: this.scanKernelDefinition,
         bufferTypes: [["storage", "read-only-storage"]],
