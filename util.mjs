@@ -82,6 +82,8 @@ export function formatWGSL(wgslCode) {
   let formattedLines = [];
   let indentLevel = 0;
 
+  /* TODO: handle comments; reset indentLevel to 0 if it's negative */
+
   lines.forEach((line) => {
     // Remove leading/trailing whitespace
     const trimmedLine = line.trim();

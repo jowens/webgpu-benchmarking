@@ -243,7 +243,10 @@ export class BasePrimitive {
               );
           }
           if (action.logToConsole) {
-            console.log(formatWGSL(kernelString));
+            console.log(
+              action.label ? `/*** ${action.label} ***/\n` : "",
+              formatWGSL(kernelString)
+            );
           }
 
           const computeModule = this.device.createShaderModule({
