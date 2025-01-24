@@ -2,6 +2,7 @@ import { Buffer } from "./buffer.mjs";
 import { TestInputBuffer, TestOutputBuffer } from "./testbuffer.mjs";
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
 import { wgslFunctions } from "./wgslFunctions.mjs";
+import { formatWGSL } from "./util.mjs";
 
 export class BasePrimitive {
   static pipelineLayoutsCache = new Map();
@@ -241,8 +242,8 @@ export class BasePrimitive {
                 "Primitive::Kernel: kernel must be a function or a string"
               );
           }
-          if (action.debugPrintKernel) {
-            console.log(kernelString);
+          if (action.logToConsole) {
+            console.log(formatWGSL(kernelString));
           }
 
           const computeModule = this.device.createShaderModule({

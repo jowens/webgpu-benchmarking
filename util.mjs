@@ -75,3 +75,30 @@ export function download(content, mimeType, filename) {
   a.click(); // Start downloading
   URL.revokeObjectURL(url);
 }
+
+export function formatWGSL(wgslCode) {
+  const lines = wgslCode.split("\n");
+  const indent = "  ";
+  let formattedLines = [];
+  let indentLevel = 0;
+
+  lines.forEach((line) => {
+    // Remove leading/trailing whitespace
+    const trimmedLine = line.trim();
+
+    const braceCount =
+      (trimmedLine.match(/[{([]/g) || []).length -
+      (trimmedLine.match(/[})\]]/g) || []).length;
+
+    if (braceCount > 0) {
+      formattedLines.push(indent.repeat(indentLevel) + trimmedLine);
+      indentLevel += braceCount;
+    } else if (braceCount < 0) {
+      indentLevel += braceCount; /* adding a negative number */
+      formattedLines.push(indent.repeat(indentLevel) + trimmedLine);
+    } else {
+      formattedLines.push(indent.repeat(indentLevel) + trimmedLine);
+    }
+  });
+  return formattedLines.join("\n");
+}

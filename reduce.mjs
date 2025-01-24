@@ -236,7 +236,7 @@ export class NoAtomicPKReduce extends BaseReduce {
           return [1];
         },
         enable: true,
-        debugPrintKernel: false,
+        logToConsole: false,
       }),
     ];
   }
@@ -475,7 +475,7 @@ export class ReduceDLDF extends BaseReduce {
           return [1];
         },
         enable: true,
-        debugPrintKernel: false,
+        logToConsole: false,
       }),
     ];
   }
