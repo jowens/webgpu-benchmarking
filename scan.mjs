@@ -260,7 +260,7 @@ export class HierarchicalScan extends BaseScan {
     return /* wgsl */ `
     enable subgroups;
     /* output */
-    @group(0) @binding(0) var<storage, read_write> outputBuffer: array<${
+    @group(0) @binding(0) var<storage, read_write> partials: array<${
       this.datatype
     }>;
     /* input */
@@ -284,24 +284,20 @@ export class HierarchicalScan extends BaseScan {
       temp: "temp",
     })}
 
-    @compute @workgroup_size(${this.workgroupSize}) fn workgroupReduceKernel(
+    @compute @workgroup_size(${this.workgroupSize}) fn reducePerWorkgroupKernel(
       builtins: Builtins
     ) {
         var reduce: ${this.datatype} = workgroupReduce(builtins);
         if (builtins.lid == 0) {
-          outputBuffer[builtins.wgid.x] = reduce;
+          partials[builtins.wgid.x] = reduce;
         }
       }
     `;
   };
 
-  scanKernelDefinition = () => {
+  scanAndAddPartialsKernelDefinition = () => {
     /** this needs to be an arrow function so "this" is the Primitive
      *  that declares it
-     */
-
-    /** this definition could be inline when the kernel is specified,
-     * but since we call it twice, we move it here
      */
     const scanType = this.type;
     /* exclusive -> Exclusive, inclusive -> Inclusive */
@@ -314,6 +310,9 @@ export class HierarchicalScan extends BaseScan {
       }>;
       /* input */
       @group(0) @binding(1) var<storage, read> inputBuffer: array<${
+        this.datatype
+      }>;
+      @group(0) @binding(2) var<storage, read> partials: array<${
         this.datatype
       }>;
 
@@ -333,7 +332,9 @@ export class HierarchicalScan extends BaseScan {
         temp: "temp",
       })}
 
-      @compute @workgroup_size(${this.workgroupSize}) fn workgroupScanKernel(
+      @compute @workgroup_size(${
+        this.workgroupSize
+      }) fn scanAndAddPartialsKernel(
         builtins: Builtins
       ) {
           var scan: ${this.datatype} = workgroup${scanTypeCap}Scan(builtins);
@@ -350,21 +351,22 @@ export class HierarchicalScan extends BaseScan {
       new Kernel({
         kernel: this.reducePerWorkgroupDefinition,
         bufferTypes: [["storage", "read-only-storage"]],
-        bindings: [["outputBuffer", "inputBuffer"]],
-        label: "workgroup scan",
+        bindings: [["partials", "inputBuffer"]],
+        label: "reduce each workgroup into partials",
         getDispatchGeometry: () => {
           /* this is a grid-stride loop, so limit the dispatch */
-          return [1];
+          return [this.workgroupCount];
         },
       }),
       new Kernel({
-        kernel: this.scanKernelDefinition,
-        bufferTypes: [["storage", "read-only-storage"]],
-        bindings: [["outputBuffer", "inputBuffer"]],
-        label: "workgroup scan",
+        kernel: this.scanAndAddPartialsKernelDefinition,
+        bufferTypes: [["storage", "read-only-storage", "read-only-storage"]],
+        bindings: [["outputBuffer", "inputBuffer", "partials"]],
+        label: "add partials to scan of each workgroup",
+        logToConsole: true,
         getDispatchGeometry: () => {
           /* this is a grid-stride loop, so limit the dispatch */
-          return [1];
+          return [this.workgroupCount];
         },
       }),
     ];
