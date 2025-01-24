@@ -285,11 +285,11 @@ export class HierarchicalScan extends BaseScan {
     })}
 
     @compute @workgroup_size(${this.workgroupSize}) fn workgroupReduceKernel(
-      Builtins builtins
+      builtins: Builtins
     ) {
-        var reduce: ${this.datatype} = workgroupReduce(id, nwg, lid, sgsz);
-        if (lid == 0) {
-          outputBuffer[wgid.x] = reduce;
+        var reduce: ${this.datatype} = workgroupReduce(builtins);
+        if (builtins.lid == 0) {
+          outputBuffer[builtins.wgid.x] = reduce;
         }
       }
     `;
@@ -334,12 +334,10 @@ export class HierarchicalScan extends BaseScan {
       })}
 
       @compute @workgroup_size(${this.workgroupSize}) fn workgroupScanKernel(
-        Builtins builtins
+        builtins: Builtins
       ) {
-          var scan: ${
-            this.datatype
-          } = workgroup${scanTypeCap}Scan(id, nwg, lid, sgsz);
-          outputBuffer[id.x] = scan;
+          var scan: ${this.datatype} = workgroup${scanTypeCap}Scan(builtins);
+          outputBuffer[builtins.gid.x] = scan;
         }`;
   };
   compute() {

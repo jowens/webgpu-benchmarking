@@ -18,7 +18,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 
 // import primitive only, no test suite
 import { NoAtomicPKReduce } from "./reduce.mjs";
-import { WGScan } from "./scan.mjs";
+import { WGScan, HierarchicalScan } from "./scan.mjs";
 
 export async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -70,7 +70,7 @@ export async function main(navigator) {
   });
 
   // eslint-disable-next-line no-unused-vars
-  const escanPrimitive = new WGScan({
+  const escanPrimitive = new HierarchicalScan({
     device,
     binop: BinOpAddF32,
     type: "exclusive",
