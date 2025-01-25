@@ -31,17 +31,21 @@ export const wgslFunctions = {
      * is necessary to take advantage of parallelism). If we read more than
      * one item per thread, it also requires a commutative operator.
      */
-  fn workgroupReduce(builtins: Builtins) -> ${env.datatype} {
+  fn workgroupReduce(
+    input: ptr<storage, array<${env.datatype}>, read>,
+    temp: ptr<workgroup, array<${env.datatype}, 32> >,
+    builtins: Builtins
+  ) -> ${env.datatype} {
     /* TODO: fix 'assume id.y == 0 always' */
     /* TODO: what if there are more threads than subgroup_size * subgroup_size? */
     var acc: ${env.datatype} = ${env.binop.identity};
     var numSubgroups = roundUpDivU32(${env.workgroupSize}, builtins.sgsz);
     /* note: this access pattern is not particularly TLB-friendly */
     for (var i = builtins.gid.x;
-      i < arrayLength(&${bindings.inputBuffer});
+      i < arrayLength(input);
       i += builtins.nwg.x * ${env.workgroupSize}) {
         /* on every iteration, grab wkgpsz items */
-        acc = binop(acc, ${bindings.inputBuffer}[i]);
+        acc = binop(acc, input[i]);
     }
     /* acc contains a partial sum for every thread */
     workgroupBarrier();
