@@ -363,7 +363,7 @@ export class HierarchicalScan extends BaseScan {
         bufferTypes: [["storage", "read-only-storage", "read-only-storage"]],
         bindings: [["outputBuffer", "inputBuffer", "partials"]],
         label: "add partials to scan of each workgroup",
-        logToConsole: true,
+        logKernelCodeToConsole: true,
         getDispatchGeometry: () => {
           /* this is a grid-stride loop, so limit the dispatch */
           return [this.workgroupCount];
