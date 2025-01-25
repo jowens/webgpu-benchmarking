@@ -189,19 +189,16 @@ export class NoAtomicPKReduce extends BaseReduce {
         return (a + b - 1) / b;
       }
 
-      ${BasePrimitive.fnDeclarations.workgroupReduce(this, {
-        inputBuffer: "inputBuffer",
-        temp: "temp",
-      })}
+      ${BasePrimitive.fnDeclarations.workgroupReduce(this)}
 
-      /* this works too b/c defaults: ${BasePrimitive.fnDeclarations.workgroupReduce(
-        this
-      )} */
+      /* this works too b/c defaults: \${BasePrimitive.fnDeclarations.workgroupReduce(this)} */
 
       @compute @workgroup_size(${
         this.workgroupSize
       }) fn noAtomicPKReduceIntoPartials(builtins : Builtins) {
-          var reduction: ${this.datatype} = workgroupReduce(builtins);
+          var reduction: ${
+            this.datatype
+          } = workgroupReduce(&inputBuffer, &temp, builtins);
           if (builtins.lid == 0) {
             outputBuffer[builtins.wgid.x] = reduction;
           }
@@ -236,7 +233,7 @@ export class NoAtomicPKReduce extends BaseReduce {
           return [1];
         },
         enable: true,
-        logToConsole: false,
+        logKernelCodeToConsole: true,
       }),
     ];
   }
@@ -475,7 +472,7 @@ export class ReduceDLDF extends BaseReduce {
           return [1];
         },
         enable: true,
-        logToConsole: false,
+        logKernelCodeToConsole: false,
       }),
     ];
   }

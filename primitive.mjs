@@ -242,7 +242,7 @@ export class BasePrimitive {
                 "Primitive::Kernel: kernel must be a function or a string"
               );
           }
-          if (action.logToConsole) {
+          if (action.logKernelCodeToConsole) {
             console.log(
               action.label ? `/*** ${action.label} ***/\n` : "",
               formatWGSL(kernelString)
