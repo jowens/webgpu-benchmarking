@@ -92,14 +92,34 @@ export function formatWGSL(wgslCode) {
       (trimmedLine.match(/[{([]/g) || []).length -
       (trimmedLine.match(/[})\]]/g) || []).length;
 
+    const pushLeft =
+      /* lines like ") -> f32 {" */
+      braceCount == 0 &&
+      (trimmedLine.startsWith(")") ||
+        trimmedLine.startsWith("]") ||
+        trimmedLine.startsWith("}"))
+        ? -1
+        : 0;
+
+    const midComment =
+      trimmedLine.startsWith("* ") || trimmedLine == "*" || trimmedLine == "*/"
+        ? " "
+        : "";
+
     if (braceCount > 0) {
-      formattedLines.push(indent.repeat(indentLevel) + trimmedLine);
+      formattedLines.push(
+        indent.repeat(indentLevel) + midComment + trimmedLine
+      );
       indentLevel += braceCount;
     } else if (braceCount < 0) {
       indentLevel += braceCount; /* adding a negative number */
-      formattedLines.push(indent.repeat(indentLevel) + trimmedLine);
+      formattedLines.push(
+        indent.repeat(indentLevel) + midComment + trimmedLine
+      );
     } else {
-      formattedLines.push(indent.repeat(indentLevel) + trimmedLine);
+      formattedLines.push(
+        indent.repeat(indentLevel + pushLeft) + midComment + trimmedLine
+      );
     }
   });
   return formattedLines.join("\n");
