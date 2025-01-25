@@ -8,10 +8,7 @@ export const wgslFunctions = {
     @builtin(subgroup_size) sgsz: u32, /* 32 on Apple GPUs */
     @builtin(subgroup_invocation_id) sgid: u32 /* 1D thread index within subgroup */
   }`,
-  workgroupReduce: (
-    env,
-    bindings = { inputBuffer: "inputBuffer", temp: "temp" }
-  ) => {
+  workgroupReduce: (env) => {
     return /* wgsl */ `
     /**
      * Approach: Envision threads in a 2D array within workgroup, where
@@ -55,14 +52,14 @@ export const wgslFunctions = {
     var mySubgroupID = builtins.lid / builtins.sgsz;
     if (subgroupElect()) {
       /* I'm the first element in my subgroup */
-      ${bindings.temp}[mySubgroupID] = acc;
+      temp[mySubgroupID] = acc;
     }
     workgroupBarrier(); /* completely populate wg memory */
     if (builtins.lid < builtins.sgsz) { /* only activate 0th subgroup */
       /* read sums of all other subgroups into acc, in parallel across the subgroup */
       /* acc is only valid for lid < numSubgroups, so ... */
       /* select(f, t, cond) */
-      acc = select(${env.binop.identity}, ${bindings.temp}[builtins.lid], builtins.lid < numSubgroups);
+      acc = select(${env.binop.identity}, temp[builtins.lid], builtins.lid < numSubgroups);
     }
     /* acc is called here for everyone, but it only matters for thread 0 */
     acc = ${env.binop.subgroupReduceOp}(acc);
