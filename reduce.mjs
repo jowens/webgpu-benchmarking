@@ -7,7 +7,7 @@ import {
 } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import { BinOpMaxU32 } from "./binop.mjs";
-import { datatypeToTypedArray } from "./util.mjs";
+import { datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
 
 // exports: TestSuites, Primitives
 
@@ -153,9 +153,9 @@ export class NoAtomicPKReduce extends BaseReduce {
     this.maxGSLWorkgroupCount = this.maxGSLWorkgroupCount ?? 256;
 
     /* Compute settings based on tunable parameters */
-    this.workgroupCount = Math.min(
-      Math.ceil(this.getBuffer("inputBuffer").size / this.workgroupSize),
-      this.maxGSLWorkgroupCount
+    this.workgroupCount = Math.ceil(
+      this.getBuffer("inputBuffer").size /
+        (this.workgroupSize * datatypeToBytes(this.datatype))
     );
     this.numPartials = this.workgroupCount;
   }
@@ -181,7 +181,7 @@ export class NoAtomicPKReduce extends BaseReduce {
       ${BasePrimitive.fnDeclarations.commonDefinitions}
 
       /* TODO: the "32" in the next line should be workgroupSize / subgroupSize */
-      var<workgroup> temp: array<${this.datatype}, 32>; // zero initialized
+      var<workgroup> wgTemp: array<${this.datatype}, 32>; // zero initialized
 
       ${this.binop.wgslfn}
 
@@ -198,7 +198,7 @@ export class NoAtomicPKReduce extends BaseReduce {
       }) fn noAtomicPKReduceIntoPartials(builtins : Builtins) {
           var reduction: ${
             this.datatype
-          } = workgroupReduce(&inputBuffer, &temp, builtins);
+          } = workgroupReduce(&inputBuffer, &wgTemp, builtins);
           if (builtins.lid == 0) {
             outputBuffer[builtins.wgid.x] = reduction;
           }
@@ -312,7 +312,7 @@ export class ReduceDLDF extends BaseReduce {
       @group(0) @binding(1) var<storage, read> inBuffer: array<${this.datatype}>;
 
       /* TODO: the "32" in the next line should be workgroupSize / subgroupSize */
-      var<workgroup> temp: array<${this.datatype}, 32>; // zero initialized
+      var<workgroup> wgTemp: array<${this.datatype}, 32>; // zero initialized
 
       ${this.binop.wgslfn}
 
@@ -345,14 +345,14 @@ export class ReduceDLDF extends BaseReduce {
           var mySubgroupID = lid / sgsz;
           if (subgroupElect()) {
             /* I'm the first element in my subgroup */
-            temp[mySubgroupID] = acc;
+            wgTemp[mySubgroupID] = acc;
           }
           workgroupBarrier(); /* completely populate wg memory */
           if (lid < sgsz) { /* only activate 0th subgroup */
             /* read sums of all other subgroups into acc, in parallel across the subgroup */
             /* acc is only valid for lid < numSubgroups, so ... */
             /* select(f, t, cond) */
-            acc = select(${this.binop.identity}, temp[lid], lid < numSubgroups);
+            acc = select(${this.binop.identity}, wgTemp[lid], lid < numSubgroups);
           }
           /* acc is called here for everyone, but it only matters for thread 0 */
           acc = ${this.binop.subgroupOp}(acc);
