@@ -61,7 +61,7 @@ export async function main(navigator) {
   });
 
   // eslint-disable-next-line no-unused-vars
-  const iscanPrimitive = new WGScan({
+  const iscanPrimitive = new HierarchicalScan({
     device,
     binop: BinOpAddF32,
     type: "inclusive",
@@ -78,8 +78,8 @@ export async function main(navigator) {
     gputimestamps: true, //// TODO should work without this
   });
 
-  // const primitive = iscanPrimitive;
-  const primitive = escanPrimitive;
+  const primitive = iscanPrimitive;
+  // const primitive = escanPrimitive;
   // const primitive = reducePrimitive;
 
   let memdestBytes;
