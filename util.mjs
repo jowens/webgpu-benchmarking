@@ -82,11 +82,13 @@ export function formatWGSL(wgslCode) {
   let formattedLines = [];
   let indentLevel = 0;
 
-  /* TODO: handle comments; reset indentLevel to 0 if it's negative */
-
   lines.forEach((line) => {
-    // Remove leading/trailing whitespace
+    /* Remove leading/trailing whitespace */
     const trimmedLine = line.trim();
+
+    /** could combine multiple blank lines into one, but
+     * that would mess up line numbering, so not doing that
+     */
 
     const braceCount =
       (trimmedLine.match(/[{([]/g) || []).length -
@@ -101,6 +103,7 @@ export function formatWGSL(wgslCode) {
         ? -1
         : 0;
 
+    /* I'm in the middle of a "documentation block" comment */
     const midComment =
       trimmedLine.startsWith("* ") || trimmedLine == "*" || trimmedLine == "*/"
         ? " "
@@ -113,6 +116,9 @@ export function formatWGSL(wgslCode) {
       indentLevel += braceCount;
     } else if (braceCount < 0) {
       indentLevel += braceCount; /* adding a negative number */
+      if (indentLevel < 0) {
+        indentLevel = 0;
+      }
       formattedLines.push(
         indent.repeat(indentLevel) + midComment + trimmedLine
       );
