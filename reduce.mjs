@@ -159,7 +159,7 @@ export class NoAtomicPKReduce extends BaseReduce {
     );
     this.numPartials = this.workgroupCount;
   }
-  reductionKernelDefinition = () => {
+  reductionKernel = () => {
     /** this needs to be an arrow function so "this" is the Primitive
      *  that declares it
      */
@@ -213,7 +213,7 @@ export class NoAtomicPKReduce extends BaseReduce {
       }),
       /* first kernel: per-workgroup persistent-kernel reduce */
       new Kernel({
-        kernel: this.reductionKernelDefinition,
+        kernel: this.reductionKernel,
         bufferTypes: [["storage", "read-only-storage"]],
         bindings: [["partials", "inputBuffer"]],
         label: "noAtomicPKReduce workgroup reduce -> partials",
@@ -224,7 +224,7 @@ export class NoAtomicPKReduce extends BaseReduce {
       }),
       /* second kernel: reduce partials into final output */
       new Kernel({
-        kernel: this.reductionKernelDefinition,
+        kernel: this.reductionKernel,
         bufferTypes: [["storage", "read-only-storage"]],
         bindings: [["outputBuffer", "partials"]],
         label: "noAtomicPKReduce partials->final",
