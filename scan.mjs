@@ -256,7 +256,7 @@ export class HierarchicalScan extends BaseScan {
     );
     this.numPartials = this.workgroupCount;
   }
-  reducePerWorkgroupDefinition = () => {
+  reducePerWorkgroupKernel = () => {
     return /* wgsl */ `
     enable subgroups;
     /* output */
@@ -279,23 +279,22 @@ export class HierarchicalScan extends BaseScan {
       return (a + b - 1) / b;
     }
 
-    ${BasePrimitive.fnDeclarations.workgroupReduce(this, {
-      inputBuffer: "inputBuffer",
-      temp: "temp",
-    })}
+    ${BasePrimitive.fnDeclarations.workgroupReduce(this)}
 
     @compute @workgroup_size(${this.workgroupSize}) fn reducePerWorkgroupKernel(
       builtins: Builtins
     ) {
-        var reduce: ${this.datatype} = workgroupReduce(builtins);
+        var reduction: ${
+          this.datatype
+        } = workgroupReduce(&inputBuffer, &temp, builtins);
         if (builtins.lid == 0) {
-          partials[builtins.wgid.x] = reduce;
+          partials[builtins.wgid.x] = reduction;
         }
       }
     `;
   };
 
-  scanAndAddPartialsKernelDefinition = () => {
+  scanAndAddPartialsKernel = () => {
     /** this needs to be an arrow function so "this" is the Primitive
      *  that declares it
      */
@@ -349,7 +348,7 @@ export class HierarchicalScan extends BaseScan {
         size: this.numPartials * 4,
       }),
       new Kernel({
-        kernel: this.reducePerWorkgroupDefinition,
+        kernel: this.reducePerWorkgroupKernel,
         bufferTypes: [["storage", "read-only-storage"]],
         bindings: [["partials", "inputBuffer"]],
         label: "reduce each workgroup into partials",
@@ -359,7 +358,7 @@ export class HierarchicalScan extends BaseScan {
         },
       }),
       new Kernel({
-        kernel: this.scanAndAddPartialsKernelDefinition,
+        kernel: this.scanAndAddPartialsKernel,
         bufferTypes: [["storage", "read-only-storage", "read-only-storage"]],
         bindings: [["outputBuffer", "inputBuffer", "partials"]],
         label: "add partials to scan of each workgroup",
