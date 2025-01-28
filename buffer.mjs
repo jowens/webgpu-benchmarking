@@ -166,10 +166,14 @@ export class Buffer {
     return this.args.datatype;
   }
   get size() {
-    /* should be bytes */
+    /* returns size in bytes */
     return (
       this.#gpuBuffer?.size ?? this.#gpuBuffer?.buffer?.size ?? this.args.size
     );
+  }
+  get items() {
+    /* returns number of items */
+    return this.size / datatypeToBytes(this.datatype);
   }
   get device() {
     return this.args.device;
