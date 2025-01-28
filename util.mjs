@@ -27,6 +27,14 @@ export function combinations(obj) {
 export const range = (min, max /* [min, max] */) =>
   [...Array(max - min + 1).keys()].map((i) => i + min);
 
+export const arrayProd = (arr) => {
+  if (typeof arr === "number") {
+    return arr;
+  } else {
+    return arr.reduce((a, b) => a * b);
+  }
+};
+
 export function fail(msg) {
   // eslint-disable-next-line no-alert
   alert(msg);
