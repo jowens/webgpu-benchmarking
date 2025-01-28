@@ -39,6 +39,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 
 // tests
 import { NoAtomicPKReduceTestSuite } from "./reduce.mjs";
+import { HierarchicalScanTestSuite } from "./scan.mjs";
 
 async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -84,6 +85,7 @@ async function main(navigator) {
     // AtomicGlobalU32ReduceTestSuite,
     // AtomicGlobalU32ReduceBinOpsTestSuite,
     NoAtomicPKReduceTestSuite,
+    // HierarchicalScanTestSuite,
     //AtomicGlobalU32SGReduceTestSuite,
     //AtomicGlobalU32WGReduceTestSuite,
     //AtomicGlobalF32WGReduceTestSuite,
@@ -129,7 +131,7 @@ async function main(navigator) {
         const testOutputBuffer = new Buffer({
           device,
           datatype: primitive.datatype,
-          size: 1,
+          size: testSuite.category == "scan" ? primitive.inputSize : 1,
           label: "outputBuffer",
           createGPUBuffer: true,
           createMappableGPUBuffer: true,
@@ -206,13 +208,23 @@ async function main(navigator) {
               result.cpugpuDelta = result.cputime - result.gputime;
               result.inputBytes =
                 primitive.inputSize * datatypeToBytes(primitive.datatype);
-              result.bandwidth = primitive.bytesTransferred() / result.gputime;
+              result.bandwidthGPU =
+                primitive.bytesTransferred() / result.gputime;
               result.bandwidthCPU =
                 primitive.bytesTransferred() / result.cputime;
               if (primitive.gflops) {
                 result.gflops = primitive.gflops(result.gputime);
               }
-              expts.push(result);
+              expts.push({
+                ...result,
+                timing: "GPU",
+                bandwidth: result.bandwidthGPU,
+              });
+              expts.push({
+                ...result,
+                timing: "CPU",
+                bandwidth: result.bandwidthCPU,
+              });
             });
         } // end of TEST FOR PERFORMANCE
       } // end of running all combinations for this testSuite
@@ -249,6 +261,7 @@ async function main(navigator) {
           Plot.lineY(filteredExpts, {
             x: plot.x.field,
             y: plot.y.field,
+            ...("fx" in plot && { fx: plot.fx.field }),
             ...("fy" in plot && { fy: plot.fy.field }),
             ...("stroke" in plot && {
               stroke: plot.stroke.field,
@@ -264,6 +277,7 @@ async function main(navigator) {
                 z: plot.stroke.field,
                 text: plot.stroke.field,
               }),
+              ...("fx" in plot && { fx: plot.fx.field }),
               ...("fy" in plot && { fy: plot.fy.field }),
               textAnchor: "start",
               clip: false,
@@ -283,10 +297,13 @@ async function main(navigator) {
         ],
         x: { type: "log", label: plot?.x?.label ?? "XLABEL" },
         y: { type: "log", label: plot?.y?.label ?? "YLABEL" },
+        ...("fx" in plot && {
+          fx: { label: plot.fx.label },
+        }),
         ...("fy" in plot && {
           fy: { label: plot.fy.label },
         }),
-        ...("fy" in plot && { grid: true }),
+        ...(("fx" in plot || "fy" in plot) && { grid: true }),
         color: { type: "ordinal", legend: true },
         title: plot?.title,
         subtitle: plot?.subtitle,
