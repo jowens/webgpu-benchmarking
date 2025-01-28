@@ -39,9 +39,25 @@ export class wgslFunctions {
     return (a + b - 1) / b;
   }`;
   }
+  get computeLinearizedGridParameters() {
+    return /* wgsl */ `
+    /* wgid is a linearized (1d) unique ID per wg;
+     * gid is a linearized (1d) unique ID per thread */
+    var wgid = builtins.wgid.z * builtins.nwg.y * builtins.nwg.x +
+               builtins.wgid.y * builtins.nwg.x +
+               builtins.wgid.x;
+    var numThreadsPerWorkgroup: u32 = ${
+      this.env.numThreadsPerWorkgroup ?? this.env.workgroupSize
+    };
+    var gid: u32 = wgid * numThreadsPerWorkgroup + builtins.lid;
+    var workgroupCount = builtins.nwg.z * builtins.nwg.y * builtins.nwg.x;
+    var totalThreadCount = workgroupCount * numThreadsPerWorkgroup;`;
+  }
   get workgroupReduce() {
     return /* wgsl */ `
     /**
+     * Function: Each workgroup's thread 0 returns the reduction of
+     *     numThreadsPerWorkgroup items from the input array
      * Approach: Envision threads in a 2D array within workgroup, where
      *     the "width" of that array is one subgroup. First reduce
      *     left to right (within a subgroup), then reduce top to bottom
@@ -64,14 +80,14 @@ export class wgslFunctions {
     wgTemp: ptr<workgroup, array<${this.env.datatype}, 32> >,
     builtins: Builtins
   ) -> ${this.env.datatype} {
-    /* TODO: fix 'assume id.y == 0 always' */
+    ${this.env.fnDeclarations.computeLinearizedGridParameters}
     /* TODO: what if there are more threads than subgroup_size * subgroup_size? */
     var acc: ${this.env.datatype} = ${this.env.binop.identity};
     var numSubgroups = roundUpDivU32(${this.env.workgroupSize}, builtins.sgsz);
     /* note: this access pattern is not particularly TLB-friendly */
-    for (var i = builtins.gid.x;
+    for (var i = gid;
       i < arrayLength(input);
-      i += builtins.nwg.x * ${this.env.workgroupSize}) {
+      i += totalThreadCount) {
         /* on every iteration, grab wkgpsz items */
         acc = binop(acc, input[i]);
     }
@@ -121,10 +137,10 @@ export class wgslFunctions {
       partials: ptr<storage, array<${this.env.datatype}>, read>,
       wgTemp: ptr<workgroup, array<${this.env.datatype}, 32> >
     ) -> ${this.env.datatype} {
-      /* TODO: fix 'assume wgid.y == 0 always' */
       /* TODO: what if there are more threads than subgroup_size * subgroup_size? */
+      ${this.env.fnDeclarations.computeLinearizedGridParameters}
       var numSubgroups = roundUpDivU32(${this.env.workgroupSize}, builtins.sgsz);
-      var i = builtins.gid.x;
+      var i = gid;
       var in = select(${this.env.binop.identity}, input[i], i < arrayLength(input));
       workgroupBarrier();
       /* "in" now contains the block of data to scan, padded with the identity */
@@ -149,7 +165,7 @@ export class wgslFunctions {
       var spineScanOutput = ${this.env.binop.subgroupExclusiveScanOp}(spineScanInput);
       /** add reduction of previous workgroups, computed in previous kernel */
       if (builtins.lid < builtins.sgsz) { /* only activate 0th subgroup */
-        wgTemp[builtins.lid] = binop(partials[builtins.wgid.x], spineScanOutput);
+        wgTemp[builtins.lid] = binop(partials[wgid], spineScanOutput);
       }
       workgroupBarrier();
       /** Now go add that spineScan value back to my local scan. Here's where
