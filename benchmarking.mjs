@@ -305,6 +305,7 @@ async function main(navigator) {
         }),
         ...(("fx" in plot || "fy" in plot) && { grid: true }),
         color: { type: "ordinal", legend: true },
+        width: 1280,
         title: plot?.title,
         subtitle: plot?.subtitle,
         caption: plot?.caption,
