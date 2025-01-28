@@ -97,6 +97,7 @@ const ReduceWGSizePlot = {
   x: { field: "inputBytes", label: "Input array size (B)" },
   y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
   stroke: { field: "workgroupSize" },
+  fx: { field: "timing" },
   test_br: "gpuinfo.description",
   caption: "Lines are workgroup size",
 };
@@ -105,6 +106,7 @@ const ReduceWGCountPlot = {
   x: { field: "inputBytes", label: "Input array size (B)" },
   y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
   stroke: { field: "workgroupCount" },
+  fx: { field: "timing" },
   test_br: "gpuinfo.description",
   caption: "Lines are workgroup count",
 };
