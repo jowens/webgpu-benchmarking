@@ -6,7 +6,7 @@ import {
   AllocateBuffer,
 } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
-import { BinOpMaxU32 } from "./binop.mjs";
+import { BinOpAddF32, BinOpMaxU32 } from "./binop.mjs";
 import { datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
 
 // exports: TestSuites, Primitives
@@ -265,31 +265,25 @@ export class HierarchicalScan extends BaseScan {
     return /* wgsl */ `
     enable subgroups;
     /* output */
-    @group(0) @binding(0) var<storage, read_write> partials: array<${
-      this.datatype
-    }>;
+    @group(0) @binding(0) var<storage, read_write> partials: array<${this.datatype}>;
     /* input */
-    @group(0) @binding(1) var<storage, read> inputBuffer: array<${
-      this.datatype
-    }>;
+    @group(0) @binding(1) var<storage, read> inputBuffer: array<${this.datatype}>;
 
-    ${BasePrimitive.fnDeclarations.commonDefinitions}
+    ${this.fnDeclarations.commonDefinitions}
 
     /* TODO: the "32" in the next line should be workgroupSize / subgroupSize */
     var<workgroup> wgTemp: array<${this.datatype}, 32>; // zero initialized
 
     ${this.binop.wgslfn}
 
-    ${BasePrimitive.fnDeclarations.roundUpDivU32}
+    ${this.fnDeclarations.roundUpDivU32}
 
-    ${BasePrimitive.fnDeclarations.workgroupReduce(this)}
+    ${this.fnDeclarations.workgroupReduce}
 
     @compute @workgroup_size(${this.workgroupSize}) fn reducePerWorkgroupKernel(
       builtins: Builtins
     ) {
-        var reduction: ${
-          this.datatype
-        } = workgroupReduce(&inputBuffer, &wgTemp, builtins);
+        var reduction: ${this.datatype} = workgroupReduce(&inputBuffer, &wgTemp, builtins);
         if (builtins.lid == 0) {
           partials[builtins.wgid.x] = reduction;
         }
@@ -301,20 +295,18 @@ export class HierarchicalScan extends BaseScan {
     return /* wgsl */ `
     enable subgroups;
     /* input + output */
-    @group(0) @binding(0) var<storage, read_write> partials: array<${
-      this.datatype
-    }>;
+    @group(0) @binding(0) var<storage, read_write> partials: array<${this.datatype}>;
 
-    ${BasePrimitive.fnDeclarations.commonDefinitions}
+    ${this.fnDeclarations.commonDefinitions}
 
     /* TODO: the "32" in the next line should be workgroupSize / subgroupSize */
     var<workgroup> wgTemp: array<${this.datatype}, 32>; // zero initialized
 
     ${this.binop.wgslfn}
 
-    ${BasePrimitive.fnDeclarations.roundUpDivU32}
+    ${this.fnDeclarations.roundUpDivU32}
 
-    ${BasePrimitive.fnDeclarations.oneWorkgroupExclusiveScan(this)}
+    ${this.fnDeclarations.oneWorkgroupExclusiveScan}
 
     @compute @workgroup_size(${this.workgroupSize}) fn scanOneWorkgroupKernel(
       builtinsUniform: BuiltinsUniform,
@@ -335,38 +327,26 @@ export class HierarchicalScan extends BaseScan {
     return /* wgsl */ `
       enable subgroups;
       /* output */
-      @group(0) @binding(0) var<storage, read_write> outputBuffer: array<${
-        this.datatype
-      }>;
+      @group(0) @binding(0) var<storage, read_write> outputBuffer: array<${this.datatype}>;
       /* input */
-      @group(0) @binding(1) var<storage, read> inputBuffer: array<${
-        this.datatype
-      }>;
-      @group(0) @binding(2) var<storage, read> partials: array<${
-        this.datatype
-      }>;
+      @group(0) @binding(1) var<storage, read> inputBuffer: array<${this.datatype}>;
+      @group(0) @binding(2) var<storage, read> partials: array<${this.datatype}>;
 
-      ${BasePrimitive.fnDeclarations.commonDefinitions}
+      ${this.fnDeclarations.commonDefinitions}
 
       /* TODO: the "32" in the next line should be workgroupSize / subgroupSize */
       var<workgroup> wgTemp: array<${this.datatype}, 32>; // zero initialized
 
       ${this.binop.wgslfn}
 
-      fn roundUpDivU32(a : u32, b : u32) -> u32 {
-        return (a + b - 1) / b;
-      }
+      ${this.fnDeclarations.roundUpDivU32}
 
-      ${BasePrimitive.fnDeclarations.workgroupScan(this)}
+      ${this.fnDeclarations.workgroupScan}
 
-      @compute @workgroup_size(${
-        this.workgroupSize
-      }) fn scanAndAddPartialsKernel(
+      @compute @workgroup_size(${this.workgroupSize}) fn scanAndAddPartialsKernel(
         builtins: Builtins
       ) {
-          var scan: ${
-            this.datatype
-          } = workgroup${scanTypeCap}Scan(builtins, &outputBuffer, &inputBuffer, &partials, &wgTemp);
+          var scan: ${this.datatype} = workgroup${scanTypeCap}Scan(builtins, &outputBuffer, &inputBuffer, &partials, &wgTemp);
           outputBuffer[builtins.gid.x] = scan;
         }`;
   };
@@ -391,7 +371,7 @@ export class HierarchicalScan extends BaseScan {
         bufferTypes: [["storage"]],
         bindings: [["partials"]],
         label: "single-workgroup exclusive scan",
-        logKernelCodeToConsole: true,
+        logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
           return [1];
         },
@@ -401,7 +381,7 @@ export class HierarchicalScan extends BaseScan {
         bufferTypes: [["storage", "read-only-storage", "read-only-storage"]],
         bindings: [["outputBuffer", "inputBuffer", "partials"]],
         label: "add partials to scan of each workgroup",
-        logKernelCodeToConsole: true,
+        logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
           return [this.workgroupCount];
         },
@@ -411,8 +391,7 @@ export class HierarchicalScan extends BaseScan {
 }
 
 const ScanParams = {
-  inputSize: range(8, 26).map((i) => 2 ** i) /* slowest */,
-  maxGSLWorkgroupCount: range(2, 8).map((i) => 2 ** i),
+  inputSize: range(8, 24).map((i) => 2 ** i),
   workgroupSize: range(5, 8).map((i) => 2 ** i),
 };
 
@@ -423,16 +402,16 @@ const ScanParamsSingleton = {
   workgroupSize: [2 ** 7],
 };
 
-export const NoAtomicScanTestSuite = new BaseTestSuite({
+export const HierarchicalScanTestSuite = new BaseTestSuite({
   category: "scan",
-  testSuite: "no-atomic persistent-kernel u32 sum reduction",
+  testSuite: "hierarchical scan",
   trials: 10,
   params: ScanParams,
-  uniqueRuns: ["inputSize", "workgroupCount", "workgroupSize"],
-  primitive: WGScan,
+  uniqueRuns: ["inputSize", "workgroupSize"],
+  primitive: HierarchicalScan,
   primitiveConfig: {
-    datatype: "u32",
-    binop: BinOpMaxU32,
+    datatype: "f32",
+    binop: BinOpAddF32,
     gputimestamps: true,
   },
   plots: [

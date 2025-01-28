@@ -170,35 +170,23 @@ export class NoAtomicPKReduce extends BaseReduce {
     return /* wgsl */ `
       enable subgroups;
       /* output */
-      @group(0) @binding(0) var<storage, read_write> outputBuffer: array<${
-        this.datatype
-      }>;
+      @group(0) @binding(0) var<storage, read_write> outputBuffer: array<${this.datatype}>;
       /* input */
-      @group(0) @binding(1) var<storage, read> inputBuffer: array<${
-        this.datatype
-      }>;
+      @group(0) @binding(1) var<storage, read> inputBuffer: array<${this.datatype}>;
 
-      ${BasePrimitive.fnDeclarations.commonDefinitions}
+      ${this.fnDeclarations.commonDefinitions}
 
       /* TODO: the "32" in the next line should be workgroupSize / subgroupSize */
       var<workgroup> wgTemp: array<${this.datatype}, 32>; // zero initialized
 
       ${this.binop.wgslfn}
 
-      fn roundUpDivU32(a : u32, b : u32) -> u32 {
-        return (a + b - 1) / b;
-      }
+      ${this.fnDeclarations.roundUpDivU32}
 
-      ${BasePrimitive.fnDeclarations.workgroupReduce(this)}
+      ${this.fnDeclarations.workgroupReduce}
 
-      /* this works too b/c defaults: \${BasePrimitive.fnDeclarations.workgroupReduce(this)} */
-
-      @compute @workgroup_size(${
-        this.workgroupSize
-      }) fn noAtomicPKReduceIntoPartials(builtins : Builtins) {
-          var reduction: ${
-            this.datatype
-          } = workgroupReduce(&inputBuffer, &wgTemp, builtins);
+      @compute @workgroup_size(${this.workgroupSize}) fn noAtomicPKReduceIntoPartials(builtins : Builtins) {
+          var reduction: ${this.datatype} = workgroupReduce(&inputBuffer, &wgTemp, builtins);
           if (builtins.lid == 0) {
             outputBuffer[builtins.wgid.x] = reduction;
           }
@@ -233,7 +221,7 @@ export class NoAtomicPKReduce extends BaseReduce {
           return [1];
         },
         enable: true,
-        logKernelCodeToConsole: true,
+        logKernelCodeToConsole: false,
       }),
     ];
   }

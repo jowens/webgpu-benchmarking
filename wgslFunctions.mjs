@@ -9,8 +9,12 @@
  *    declared within the primitive)
  */
 
-export const wgslFunctions = {
-  commonDefinitions: /* wgsl */ `
+export class wgslFunctions {
+  constructor(env) {
+    this.env = env;
+  }
+  get commonDefinitions() {
+    return /* wgsl */ `
   struct Builtins {
     @builtin(global_invocation_id) gid: vec3u /* 3D thread id in compute shader grid */,
     @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
@@ -28,11 +32,14 @@ export const wgslFunctions = {
     @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
     @builtin(workgroup_id) wgid: vec3u /* 3D workgroup id within compute shader grid */,
     @builtin(subgroup_size) sgsz: u32 /* 32 on Apple GPUs */
-  }`,
-  roundUpDivU32: /* wgsl */ `fn roundUpDivU32(a : u32, b : u32) -> u32 {
+  }`;
+  }
+  get roundUpDivU32() {
+    return /* wgsl */ `fn roundUpDivU32(a : u32, b : u32) -> u32 {
     return (a + b - 1) / b;
-  }`,
-  workgroupReduce: (env) => {
+  }`;
+  }
+  get workgroupReduce() {
     return /* wgsl */ `
     /**
      * Approach: Envision threads in a 2D array within workgroup, where
@@ -53,18 +60,18 @@ export const wgslFunctions = {
      * one item per thread, it also requires a commutative operator.
      */
   fn workgroupReduce(
-    input: ptr<storage, array<${env.datatype}>, read>,
-    wgTemp: ptr<workgroup, array<${env.datatype}, 32> >,
+    input: ptr<storage, array<${this.env.datatype}>, read>,
+    wgTemp: ptr<workgroup, array<${this.env.datatype}, 32> >,
     builtins: Builtins
-  ) -> ${env.datatype} {
+  ) -> ${this.env.datatype} {
     /* TODO: fix 'assume id.y == 0 always' */
     /* TODO: what if there are more threads than subgroup_size * subgroup_size? */
-    var acc: ${env.datatype} = ${env.binop.identity};
-    var numSubgroups = roundUpDivU32(${env.workgroupSize}, builtins.sgsz);
+    var acc: ${this.env.datatype} = ${this.env.binop.identity};
+    var numSubgroups = roundUpDivU32(${this.env.workgroupSize}, builtins.sgsz);
     /* note: this access pattern is not particularly TLB-friendly */
     for (var i = builtins.gid.x;
       i < arrayLength(input);
-      i += builtins.nwg.x * ${env.workgroupSize}) {
+      i += builtins.nwg.x * ${this.env.workgroupSize}) {
         /* on every iteration, grab wkgpsz items */
         acc = binop(acc, input[i]);
     }
@@ -72,7 +79,7 @@ export const wgslFunctions = {
     workgroupBarrier();
     /* now we need to reduce acc within our workgroup */
     /* switch to local IDs only. write into wg memory */
-    acc = ${env.binop.subgroupReduceOp}(acc);
+    acc = ${this.env.binop.subgroupReduceOp}(acc);
     var mySubgroupID = builtins.lid / builtins.sgsz;
     if (subgroupElect()) {
       /* I'm the first element in my subgroup */
@@ -83,14 +90,14 @@ export const wgslFunctions = {
       /* read sums of all other subgroups into acc, in parallel across the subgroup */
       /* acc is only valid for lid < numSubgroups, so ... */
       /* select(f, t, cond) */
-      acc = select(${env.binop.identity}, wgTemp[builtins.lid], builtins.lid < numSubgroups);
+      acc = select(${this.env.binop.identity}, wgTemp[builtins.lid], builtins.lid < numSubgroups);
     }
     /* acc is called here for everyone, but it only matters for thread 0 */
-    acc = ${env.binop.subgroupReduceOp}(acc);
+    acc = ${this.env.binop.subgroupReduceOp}(acc);
     return acc;
         };`;
-  },
-  workgroupScan: (env) => {
+  }
+  get workgroupScan() {
     /**
      * Supports both inclusive and exclusive scan.
      * Arguments:
@@ -104,26 +111,26 @@ export const wgslFunctions = {
      * - "type" (exclusive or inclusive)
      * - "binop" that, in turn, declares a subgroup{Type}ScanOp
      */
-    const scanType = env.type;
+    const scanType = this.env.type;
     const scanTypeCap = scanType.charAt(0).toUpperCase() + scanType.slice(1);
-    const subgroupScanOp = env.binop[`subgroup${scanTypeCap}ScanOp`];
+    const subgroupScanOp = this.env.binop[`subgroup${scanTypeCap}ScanOp`];
     return /* wgsl */ `
     fn workgroup${scanTypeCap}Scan(builtins: Builtins,
-      output: ptr<storage, array<${env.datatype}>, read_write>,
-      input: ptr<storage, array<${env.datatype}>, read>,
-      partials: ptr<storage, array<${env.datatype}>, read>,
-      wgTemp: ptr<workgroup, array<${env.datatype}, 32> >
-    ) -> ${env.datatype} {
+      output: ptr<storage, array<${this.env.datatype}>, read_write>,
+      input: ptr<storage, array<${this.env.datatype}>, read>,
+      partials: ptr<storage, array<${this.env.datatype}>, read>,
+      wgTemp: ptr<workgroup, array<${this.env.datatype}, 32> >
+    ) -> ${this.env.datatype} {
       /* TODO: fix 'assume wgid.y == 0 always' */
       /* TODO: what if there are more threads than subgroup_size * subgroup_size? */
-      var numSubgroups = roundUpDivU32(${env.workgroupSize}, builtins.sgsz);
+      var numSubgroups = roundUpDivU32(${this.env.workgroupSize}, builtins.sgsz);
       var i = builtins.gid.x;
-      var in = select(${env.binop.identity}, input[i], i < arrayLength(input));
+      var in = select(${this.env.binop.identity}, input[i], i < arrayLength(input));
       workgroupBarrier();
       /* "in" now contains the block of data to scan, padded with the identity */
       /* (1) reduce "in" within our workgroup */
       /* switch to local IDs only. write into wg memory */
-      var sgReduction = ${env.binop.subgroupReduceOp}(in);
+      var sgReduction = ${this.env.binop.subgroupReduceOp}(in);
       var mySubgroupID = builtins.lid / builtins.sgsz;
       if (subgroupElect()) {
         /* I'm the first element in my subgroup */
@@ -135,11 +142,11 @@ export const wgslFunctions = {
       /** acc is only valid for lid < numSubgroups, but we need uniform control flow
        * for the subgroupScanOp. So the select and subgroup scan are wasted work for
        * all but subgroup == 0. */
-      var spineScanInput = select(${env.binop.identity},
+      var spineScanInput = select(${this.env.binop.identity},
                                   wgTemp[builtins.lid],
                                   builtins.lid < numSubgroups);
       /* no matter what type of scan we have, we use exclusiveScan here */
-      var spineScanOutput = ${env.binop.subgroupExclusiveScanOp}(spineScanInput);
+      var spineScanOutput = ${this.env.binop.subgroupExclusiveScanOp}(spineScanInput);
       /** add reduction of previous workgroups, computed in previous kernel */
       if (builtins.lid < builtins.sgsz) { /* only activate 0th subgroup */
         wgTemp[builtins.lid] = binop(partials[builtins.wgid.x], spineScanOutput);
@@ -150,8 +157,8 @@ export const wgslFunctions = {
       var subgroupScan = ${subgroupScanOp}(in);
       return binop(wgTemp[mySubgroupID], subgroupScan);
     };`;
-  },
-  oneWorkgroupExclusiveScan: (env) => {
+  }
+  get oneWorkgroupExclusiveScan() {
     /**
      * Arguments:
      * - inputoutput: Input/output array in global storage memory (in place)
@@ -166,9 +173,9 @@ export const wgslFunctions = {
     return /* wgsl */ `
     fn oneWorkgroupExclusiveScan(builtinsUniform: BuiltinsUniform,
       builtinsNonuniform: BuiltinsNonuniform,
-      inputoutput: ptr<storage, array<${env.datatype}>, read_write>,
+      inputoutput: ptr<storage, array<${this.env.datatype}>, read_write>,
     ) {
-      var acc : ${env.datatype} = ${env.binop.identity};
+      var acc : ${this.env.datatype} = ${this.env.binop.identity};
       /* making this work under uniform control flow is tricky */
       /* big idea: convert any control dependence to data dependence (i) */
       var ibase : u32 = 0;
@@ -176,12 +183,12 @@ export const wgslFunctions = {
       while (ibase < arrayLength(inputoutput)) {
         /* work still left to be done */
         var i = ibase + builtinsNonuniform.lid;
-        var in = select(${env.binop.identity},
+        var in = select(${this.env.binop.identity},
                         inputoutput[i],
                         (i < arrayLength(inputoutput)) && sg0);
 
-        var sgEScan = ${env.binop.subgroupExclusiveScanOp}(in);
-        var sgReduction = ${env.binop.subgroupReduceOp}(in);
+        var sgEScan = ${this.env.binop.subgroupExclusiveScanOp}(in);
+        var sgReduction = ${this.env.binop.subgroupReduceOp}(in);
         if (sg0) {
           inputoutput[i] = binop(acc, sgEScan);
           acc = binop(acc, sgReduction);
@@ -191,5 +198,5 @@ export const wgslFunctions = {
       }
       return;
     };`;
-  },
-};
+  }
+}

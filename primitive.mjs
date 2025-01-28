@@ -7,7 +7,6 @@ import { formatWGSL } from "./util.mjs";
 export class BasePrimitive {
   static pipelineLayoutsCache = new Map();
   static __timingHelper; // initialized to undefined
-  static fnDeclarations = wgslFunctions;
 
   constructor(args) {
     // expect that args are:
@@ -54,6 +53,7 @@ export class BasePrimitive {
     }
 
     this.__buffers = {}; // this is essentially private
+    this.fnDeclarations = new wgslFunctions(this);
   }
 
   /** registerBuffer associates a name with a buffer and
@@ -242,7 +242,7 @@ export class BasePrimitive {
                 "Primitive::Kernel: kernel must be a function or a string"
               );
           }
-          if (action.logKernelCodeToConsole) {
+          if (action?.logKernelCodeToConsole) {
             console.log(
               action.label ? `/*** ${action.label} ***/\n` : "",
               formatWGSL(kernelString)
