@@ -164,9 +164,11 @@ export class wgslFunctions {
      * - inputoutput: Input/output array in global storage memory (in place)
      * Returns:
      *   Nothing
+     * Restrictions:
+     *   Call this with one workgroup.
      * Operation: Scans workgroup, writes back, one subgroup at a time, serially
      *   Ignores any threads that aren't part of the 0th workgroup
-     *   Not efficent
+     *   Not efficent. Not even close to being efficient.
      * Requires declaration of:
      * - "binop" that, in turn, declares a subgroupExclusiveScanOp
      */
