@@ -153,9 +153,9 @@ export class NoAtomicPKReduce extends BaseReduce {
     this.maxGSLWorkgroupCount = this.maxGSLWorkgroupCount ?? 256;
 
     /* Compute settings based on tunable parameters */
-    this.workgroupCount = Math.ceil(
-      this.getBuffer("inputBuffer").size /
-        (this.workgroupSize * datatypeToBytes(this.datatype))
+    this.workgroupCount = Math.min(
+      Math.ceil(this.getBuffer("inputBuffer").items / this.workgroupSize),
+      this.maxGSLWorkgroupCount
     );
     this.numPartials = this.workgroupCount;
   }
@@ -174,23 +174,21 @@ export class NoAtomicPKReduce extends BaseReduce {
       /* input */
       @group(0) @binding(1) var<storage, read> inputBuffer: array<${this.datatype}>;
 
-      ${this.fnDeclarations.commonDefinitions}
-
       /* TODO: the "32" in the next line should be workgroupSize / subgroupSize */
       var<workgroup> wgTemp: array<${this.datatype}, 32>; // zero initialized
 
-      ${this.binop.wgslfn}
-
+      ${this.fnDeclarations.commonDefinitions}
       ${this.fnDeclarations.roundUpDivU32}
-
+      ${this.binop.wgslfn}
       ${this.fnDeclarations.workgroupReduce}
 
-      @compute @workgroup_size(${this.workgroupSize}) fn noAtomicPKReduceIntoPartials(builtins : Builtins) {
-          var reduction: ${this.datatype} = workgroupReduce(&inputBuffer, &wgTemp, builtins);
-          if (builtins.lid == 0) {
-            outputBuffer[builtins.wgid.x] = reduction;
-          }
-        }`;
+      @compute @workgroup_size(${this.workgroupSize})
+      fn noAtomicPKReduceIntoPartials(builtins : Builtins) {
+        var reduction: ${this.datatype} = workgroupReduce(&inputBuffer, &wgTemp, builtins);
+        if (builtins.lid == 0) {
+          outputBuffer[builtins.wgid.x] = reduction;
+        }
+      }`;
   };
   compute() {
     this.finalizeRuntimeParameters();
