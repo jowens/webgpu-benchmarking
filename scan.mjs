@@ -6,7 +6,7 @@ import {
   AllocateBuffer,
 } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
-import { BinOpAddF32, BinOpAddU32 } from "./binop.mjs";
+import { BinOpAddF32 } from "./binop.mjs";
 import { datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
 
 // exports: TestSuites, Primitives
@@ -389,13 +389,13 @@ export class HierarchicalScan extends BaseScan {
 }
 
 const ScanParams = {
-  inputSize: range(8, 24).map((i) => 2 ** i),
+  inputLength: range(8, 24).map((i) => 2 ** i),
   workgroupSize: range(5, 8).map((i) => 2 ** i),
 };
 
 // eslint-disable-next-line no-unused-vars
 const ScanParamsSingleton = {
-  inputSize: [2 ** 7],
+  inputLength: [2 ** 7],
   maxGSLWorkgroupCount: [2 ** 7],
   workgroupSize: [2 ** 7],
 };
@@ -405,11 +405,11 @@ export const HierarchicalScanTestSuite = new BaseTestSuite({
   testSuite: "hierarchical scan",
   trials: 10,
   params: ScanParams,
-  uniqueRuns: ["inputSize", "workgroupSize"],
+  uniqueRuns: ["inputLength", "workgroupSize"],
   primitive: HierarchicalScan,
   primitiveConfig: {
-    datatype: "u32",
-    binop: BinOpAddU32,
+    datatype: "f32",
+    binop: BinOpAddF32,
     gputimestamps: true,
   },
   plots: [
