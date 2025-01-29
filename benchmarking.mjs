@@ -119,10 +119,11 @@ async function main(navigator) {
         const testInputBuffer = new Buffer({
           device,
           datatype: primitive.datatype,
-          size: primitive.inputSize,
+          length: primitive.inputLength,
           label: "inputBuffer",
           createCPUBuffer: true,
-          initializeCPUBuffer: true /* fill with default data */,
+          // initializeCPUBuffer: true /* fill with default data */,
+          initializeCPUBuffer: "randomize" /* fill with default data */,
           createGPUBuffer: true,
           initializeGPUBuffer: true /* with CPU data */,
         });
@@ -131,7 +132,7 @@ async function main(navigator) {
         const testOutputBuffer = new Buffer({
           device,
           datatype: primitive.datatype,
-          size: testSuite.category == "scan" ? primitive.inputSize : 1,
+          length: testSuite.category == "scan" ? primitive.inputLength : 1,
           label: "outputBuffer",
           createGPUBuffer: true,
           createMappableGPUBuffer: true,
@@ -207,7 +208,7 @@ async function main(navigator) {
               result.cputime = cpuTotalTimeNS / testSuite.trials;
               result.cpugpuDelta = result.cputime - result.gputime;
               result.inputBytes =
-                primitive.inputSize * datatypeToBytes(primitive.datatype);
+                primitive.inputLength * datatypeToBytes(primitive.datatype);
               result.bandwidthGPU =
                 primitive.bytesTransferred() / result.gputime;
               result.bandwidthCPU =
