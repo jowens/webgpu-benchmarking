@@ -34,10 +34,10 @@ export async function main(navigator) {
   if (!device) {
     console.error("Fatal error: Device does not support WebGPU.");
   }
-  const memsrcSize = 2 ** 20; // items, not bytes
+  const memsrcLength = 2 ** 20; // items, not bytes
   const datatype = "f32";
-  const memsrcX32 = new (datatypeToTypedArray(datatype))(memsrcSize);
-  for (let i = 0; i < memsrcSize; i++) {
+  const memsrcX32 = new (datatypeToTypedArray(datatype))(memsrcLength);
+  for (let i = 0; i < memsrcLength; i++) {
     switch (datatype) {
       case "u32":
         memsrcX32[i] = i == 0 ? 11 : memsrcX32[i - 1] + 1; // trying to get u32s
@@ -78,9 +78,9 @@ export async function main(navigator) {
     gputimestamps: true, //// TODO should work without this
   });
 
-  const primitive = iscanPrimitive;
+  // const primitive = iscanPrimitive;
   // const primitive = escanPrimitive;
-  // const primitive = reducePrimitive;
+  const primitive = reducePrimitive;
 
   let memdestBytes;
   switch (primitive.constructor.name) {
