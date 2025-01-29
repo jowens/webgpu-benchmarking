@@ -10,6 +10,11 @@ import { datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
  * - #gpuBuffer (GPUBufferBinding)
  * - #cpuBuffer (optional)
  *
+ * In general with buffers we try to use:
+ * - _size_ to indicate a byte count
+ * - _length_ to indicate an element count
+ *
+ * TODO remove next line when fixed
  * size: number of elements (not number of bytes)
  *
  * TODO: initialize call could take different strings to
@@ -22,17 +27,26 @@ export class Buffer {
   #cpuBuffer;
   constructor(args) {
     this.args = { ...args };
-    /* generally expect args to contain datatype and size */
+    /* generally expect args to contain datatype and size or length */
 
     this.label =
       args.label ?? `Buffer (datatype: ${this.datatype}; size: ${this.size})`;
 
+    if (args.datatype) {
+      this.datatype = args.datatype;
+    }
+
     /* we can optionally create (and optionally initialize) a CPUBuffer too */
     /* we do this first in case we need to initialize the GPUBuffer */
     if (this.args.createCPUBuffer) {
-      if (!("size" in args)) {
+      if (!("size" in args) && !("length" in args)) {
         console.error(
-          `Buffer: if createCPUBuffer is true, must also specify size`
+          "Buffer: if createCPUBuffer is true, must also specify size or length"
+        );
+      }
+      if ("size" in args && "length" in args) {
+        console.error(
+          "Buffer: please only specify one of size (bytes) or length (elements)"
         );
       }
       if (!("datatype" in args)) {
@@ -40,12 +54,10 @@ export class Buffer {
           `Buffer: if createCPUBuffer is true, must also specify datatype`
         );
       }
-      this.#cpuBuffer = new (datatypeToTypedArray(this.datatype))(
-        this.args.size
-      );
+      this.#cpuBuffer = new (datatypeToTypedArray(this.datatype))(this.length);
       if (this.args.initializeCPUBuffer) {
         // since we're input, fill the buffer with useful data
-        for (let i = 0; i < this.args.size; i++) {
+        for (let i = 0; i < this.length; i++) {
           if (this.datatype == "f32") {
             this.#cpuBuffer[i] =
               this.args.initializeCPUBuffer === "randomize"
@@ -69,9 +81,14 @@ export class Buffer {
       if (!("device" in this.args)) {
         console.error("Buffer: must specify device if createGPUBuffer is true");
       }
-      if (!("size" in this.args)) {
+      if (!("size" in args) && !("length" in args)) {
         console.error(
-          `Buffer: if createGPUBuffer is true, must also specify size`
+          "Buffer: if createGPUBuffer is true, must also specify size or length"
+        );
+      }
+      if ("size" in args && "length" in args) {
+        console.error(
+          "Buffer: please only specify one of size (bytes) or length (elements)"
         );
       }
       if (!("datatype" in this.args)) {
@@ -81,7 +98,7 @@ export class Buffer {
       }
       this.buffer = this.device.createBuffer({
         label: this.label,
-        size: this.args.size * datatypeToBytes(this.args.datatype),
+        size: this.size,
         /** Output-only buffers may not need COPY_DST but we might
          * initialize them with a buffer copy, so be safe and set it
          *
@@ -162,88 +179,25 @@ export class Buffer {
   get cpuBuffer() {
     return this.#cpuBuffer;
   }
-  get datatype() {
-    return this.args.datatype;
-  }
+  /* worried about an infinite loop in the below */
   get size() {
     /* returns size in bytes */
     return (
-      this.#gpuBuffer?.size ?? this.#gpuBuffer?.buffer?.size ?? this.args.size
+      this.#gpuBuffer?.size ??
+      this.#gpuBuffer?.buffer?.size ??
+      this.args?.size ??
+      this.args?.length * datatypeToBytes(this.datatype)
     );
   }
-  get items() {
+  get length() {
     /* returns number of items */
-    return this.size / datatypeToBytes(this.datatype);
+    if (this.size) {
+      return this.size / datatypeToBytes(this.datatype);
+    } else {
+      return this.args.length;
+    }
   }
   get device() {
     return this.args.device;
-  }
-}
-
-class BufferWithCPU extends Buffer {
-  /* this class uses this.cpuBuffer */
-  constructor(args) {
-    /** don't pass "size" to parent constructor, the gpuBuffer constructor
-     * has no notion of that, an arg of size is only used for the CPU buffer
-     */
-
-    if (!("label" in args)) {
-      console.error(
-        "A CreateXBuffer must be initialized with a label, likely one of the knownBuffers associated with the primitive"
-      );
-    }
-    const { size, ...argsNotSize } = args;
-    super(argsNotSize);
-    this.cpuBuffer = new (datatypeToTypedArray(this.datatype))(size);
-  }
-}
-
-export class CreateInputBufferWithCPU extends BufferWithCPU {
-  constructor(args) {
-    super(args);
-
-    // since we're input, fill the buffer with useful data
-    for (let i = 0; i < args.size; i++) {
-      if (this.datatype == "f32") {
-        this.cpuBuffer[i] = args?.randomizeInput
-          ? Math.random() * 2.0 - 1.0
-          : i & (2 ** 22 - 1);
-        // Rand: [-1,1]; non-rand: roughly, range of 32b significand
-      } else if (this.datatype == "u32") {
-        this.cpuBuffer[i] = i == 0 ? 0 : this.cpuBuffer[i - 1] + 1; // trying to get u32s
-      }
-      // otherwise, initialize nothing
-    }
-    this.gpuBuffer = this.device.createBuffer({
-      label: this.label,
-      size: this.cpuBuffer.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    this.device.queue.writeBuffer(this.gpuBuffer, 0, this.cpuBuffer);
-  }
-}
-
-export class CreateOutputBufferWithCPU extends BufferWithCPU {
-  constructor(args) {
-    super(args);
-    this.gpuBuffer = this.device.createBuffer({
-      label: this.label,
-      size: this.cpuBuffer.byteLength,
-      /** Output-only buffers may not need COPY_DST but we might
-       * initialize them with a buffer copy, so be safe and set it
-       *
-       * This might be a performance issue if COPY_DST costs something
-       */
-      usage:
-        GPUBufferUsage.STORAGE |
-        GPUBufferUsage.COPY_SRC |
-        GPUBufferUsage.COPY_DST,
-    });
-
-    this.mappableGPUBuffer = this.device.createBuffer({
-      label: "mappable memory destination buffer",
-      size: this.cpuBuffer.byteLength,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    });
   }
 }
