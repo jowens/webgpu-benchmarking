@@ -6,7 +6,7 @@ import {
   AllocateBuffer,
 } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
-import { BinOpAddF32 } from "./binop.mjs";
+import { BinOpAddF32, BinOpAddU32 } from "./binop.mjs";
 import { datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
 
 // exports: TestSuites, Primitives
@@ -29,6 +29,12 @@ class BaseScan extends BasePrimitive {
           `${this.constructor.name}: ${required} is a required parameter.`
         );
       }
+    }
+
+    if (this.datatype != this.binop.datatype) {
+      throw new Error(
+        `${this.constructor.name}: datatype (${this.datatype}) is incompatible with binop datatype (${this.binop.datatype}).`
+      );
     }
 
     this.knownBuffers = ["inputBuffer", "outputBuffer"];
@@ -408,8 +414,8 @@ export const HierarchicalScanTestSuite = new BaseTestSuite({
   uniqueRuns: ["inputLength", "workgroupSize"],
   primitive: HierarchicalScan,
   primitiveConfig: {
-    datatype: "f32",
-    binop: BinOpAddF32,
+    datatype: "u32",
+    binop: BinOpAddU32,
     gputimestamps: true,
   },
   plots: [
