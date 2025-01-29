@@ -84,8 +84,8 @@ async function main(navigator) {
   const testSuites = [
     // AtomicGlobalU32ReduceTestSuite,
     // AtomicGlobalU32ReduceBinOpsTestSuite,
-    NoAtomicPKReduceTestSuite,
-    // HierarchicalScanTestSuite,
+    // NoAtomicPKReduceTestSuite,
+    HierarchicalScanTestSuite,
     //AtomicGlobalU32SGReduceTestSuite,
     //AtomicGlobalU32WGReduceTestSuite,
     //AtomicGlobalF32WGReduceTestSuite,
@@ -209,10 +209,8 @@ async function main(navigator) {
               result.cpugpuDelta = result.cputime - result.gputime;
               result.inputBytes =
                 primitive.inputLength * datatypeToBytes(primitive.datatype);
-              result.bandwidthGPU =
-                primitive.bytesTransferred() / result.gputime;
-              result.bandwidthCPU =
-                primitive.bytesTransferred() / result.cputime;
+              result.bandwidthGPU = primitive.bytesTransferred / result.gputime;
+              result.bandwidthCPU = primitive.bytesTransferred / result.cputime;
               if (primitive.gflops) {
                 result.gflops = primitive.gflops(result.gputime);
               }

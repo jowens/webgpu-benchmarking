@@ -123,6 +123,12 @@ export class BasePrimitive {
     }
     return dispatchGeometry;
   }
+  get bytesTransferred() {
+    /* call this from a subclass instead */
+    throw new Error(
+      "Cannot call bytesTransferred() from abstract class BasePrimitive."
+    );
+  }
   getGPUBufferFromBinding(binding) {
     /**
      * Input is some sort of buffer object. Currently recognized:

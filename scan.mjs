@@ -51,7 +51,7 @@ class BaseScan extends BasePrimitive {
     this.getDispatchGeometry = this.getSimpleDispatchGeometry;
   }
 
-  bytesTransferred() {
+  get bytesTransferred() {
     return (
       this.getBuffer("inputBuffer").size + this.getBuffer("outputBuffer").size
     );
