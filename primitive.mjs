@@ -67,6 +67,13 @@ export class BasePrimitive {
    * - registerBuffer(Object o) means
    *   "associate a new Buffer(o) with o.label"
    *
+   * Additionally: If the resulting buffer has no datatype,
+   *   set it to the datatype of the primitive
+   * Rationale: We can pass a raw GPUBuffer that only knows
+   *   its byte length as an input buffer, but we need to
+   *   compute kernel parameters (e.g., number of workgroups)
+   *   based the number of inputs in that buffer, so we need
+   *   to know its datatype
    */
   registerBuffer(bufferObj) {
     switch (typeof bufferObj) {
@@ -74,6 +81,8 @@ export class BasePrimitive {
         this.__buffers[bufferObj] = new Buffer({
           label: bufferObj,
           buffer: this[bufferObj],
+          // this probably needs datatype: but I won't add that
+          // until I know it's useful
         });
         break;
       default:
@@ -84,6 +93,9 @@ export class BasePrimitive {
             break;
           default:
             this.__buffers[bufferObj.label] = new Buffer(bufferObj);
+            if (this.__buffers[bufferObj.label]?.datatype == undefined) {
+              this.__buffers[bufferObj.label].datatype = this.datatype;
+            }
             break;
         }
     }
@@ -406,7 +418,8 @@ dispatchGeometry: ${dispatchGeometry}`);
         case AllocateBuffer: {
           const allocatedBuffer = this.device.createBuffer({
             label: action.label,
-            size: action.size,
+            ...(action.size && { size: action.size }),
+            ...(action.length && { length: action.length }),
             usage:
               action.usage ??
               /* default: read AND write */
