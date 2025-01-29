@@ -156,10 +156,10 @@ export class NoAtomicPKReduce extends BaseReduce {
 
     /* Compute settings based on tunable parameters */
     this.workgroupCount = Math.min(
-      Math.ceil(this.getBuffer("inputBuffer").items / this.workgroupSize),
+      Math.ceil(this.getBuffer("inputBuffer").length / this.workgroupSize),
       this.maxGSLWorkgroupCount
     );
-    this.numPartials = this.workgroupCount;
+    this.partialsLength = this.workgroupCount;
   }
   reductionKernel = () => {
     /** this needs to be an arrow function so "this" is the Primitive
@@ -197,7 +197,7 @@ export class NoAtomicPKReduce extends BaseReduce {
     return [
       new AllocateBuffer({
         label: "partials",
-        size: this.numPartials * 4,
+        size: this.partialsLength * datatypeToBytes(this.datatype),
       }),
       /* first kernel: per-workgroup persistent-kernel reduce */
       new Kernel({
@@ -228,14 +228,14 @@ export class NoAtomicPKReduce extends BaseReduce {
 }
 
 const PKReduceParams = {
-  inputSize: range(8, 26).map((i) => 2 ** i) /* slowest */,
+  inputLength: range(8, 26).map((i) => 2 ** i) /* slowest */,
   maxGSLWorkgroupCount: range(2, 8).map((i) => 2 ** i),
   workgroupSize: range(5, 8).map((i) => 2 ** i),
 };
 
 // eslint-disable-next-line no-unused-vars
 const PKReduceParamsSingleton = {
-  inputSize: [2 ** 20],
+  inputLength: [2 ** 20],
   maxGSLWorkgroupCount: [2 ** 5],
   workgroupSize: [2 ** 7],
 };
@@ -245,7 +245,7 @@ export const NoAtomicPKReduceTestSuite = new BaseTestSuite({
   testSuite: "no-atomic persistent-kernel u32 sum reduction",
   trials: 10,
   params: PKReduceParams,
-  uniqueRuns: ["inputSize", "workgroupCount", "workgroupSize"],
+  uniqueRuns: ["inputLength", "workgroupCount", "workgroupSize"],
   primitive: NoAtomicPKReduce,
   primitiveConfig: {
     datatype: "u32",
@@ -282,7 +282,7 @@ export class ReduceDLDF extends BaseReduce {
       Math.ceil(this.getBuffer("inputBuffer").size / this.workgroupSize),
       this.maxGSLWorkgroupCount
     );
-    this.numPartials = this.workgroupCount;
+    this.partialsLength = this.workgroupCount;
   }
   reductionKernelDefinition = () => {
     /** this needs to be an arrow function so "this" is the Primitive
@@ -436,7 +436,7 @@ export class ReduceDLDF extends BaseReduce {
     return [
       new AllocateBuffer({
         label: "partials",
-        size: this.numPartials * 4,
+        size: this.partialsLength * datatypeToBytes(this.datatype),
       }),
       /* first kernel: per-workgroup persistent-kernel reduce */
       new Kernel({
