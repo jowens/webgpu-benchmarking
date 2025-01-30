@@ -367,7 +367,7 @@ export const DLDFScanPlot = {
   y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
   fx: { field: "timing" },
   test_br: "gpuinfo.description",
-  caption: "Lines are workgroup size",
+  caption: "Left: CPU timing (performance.now), right: GPU timing (timestamps)",
 };
 
 export const DLDFScanTestSuite = new BaseTestSuite({
