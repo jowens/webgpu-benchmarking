@@ -377,6 +377,7 @@ dispatchGeometry: ${dispatchGeometry}`);
           break;
         }
         case InitializeMemoryBlock: {
+          /* TODO: Rewrite this as a kernel, delete get{GPU,CPU}BufferFromBinding */
           let DatatypeArray;
           switch (action.datatype) {
             case "f32":
@@ -471,8 +472,11 @@ export class Kernel {
       this.kernel = args;
     } else {
       /* more complicated objects */
-      /* one field should be "kernel" */
-      if (!args.kernel || typeof args.kernel !== "function") {
+      /* one field should be "kernel", and it better be a function or string */
+      if (
+        !args.kernel ||
+        (typeof args.kernel !== "function" && typeof args.kernel !== "string")
+      ) {
         throw new Error(
           "Kernel::constructor: Requires a 'kernel' field that is a function that returns the kernel string"
         );
