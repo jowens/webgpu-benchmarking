@@ -362,17 +362,18 @@ const DLDFScanParams = {
   inputLength: range(8, 24).map((i) => 2 ** i),
 };
 
-// eslint-disable-next-line no-unused-vars
-const ScanParamsSingleton = {
-  inputLength: [2 ** 7],
-  maxGSLWorkgroupCount: [2 ** 7],
-  workgroupSize: [2 ** 7],
+export const DLDFScanPlot = {
+  x: { field: "inputBytes", label: "Input array size (B)" },
+  y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+  fx: { field: "timing" },
+  test_br: "gpuinfo.description",
+  caption: "Lines are workgroup size",
 };
 
 export const DLDFScanTestSuite = new BaseTestSuite({
   category: "scan",
   testSuite: "DLDF scan",
-  trials: 10,
+  trials: 1,
   params: DLDFScanParams,
   uniqueRuns: ["inputLength", "workgroupSize"],
   primitive: DLDFScan,
@@ -382,8 +383,5 @@ export const DLDFScanTestSuite = new BaseTestSuite({
     binop: BinOpAddU32,
     gputimestamps: true,
   },
-  plots: [
-    { ...scanWGSizePlot, ...{ fy: { field: "workgroupSize" } } },
-    { ...scanWGCountPlot, ...{ fy: { field: "workgroupCount" } } },
-  ],
+  plots: [DLDFScanPlot],
 });
