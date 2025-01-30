@@ -11,7 +11,7 @@ import { datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
 
 // exports: TestSuites, Primitives
 
-class BaseScan extends BasePrimitive {
+export class BaseScan extends BasePrimitive {
   constructor(args) {
     super(args);
 
@@ -129,7 +129,7 @@ class BaseScan extends BasePrimitive {
   };
 }
 
-const scanWGSizePlot = {
+export const scanWGSizePlot = {
   x: { field: "inputBytes", label: "Input array size (B)" },
   y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
   fx: { field: "timing" },
@@ -138,7 +138,7 @@ const scanWGSizePlot = {
   caption: "Lines are workgroup size",
 };
 
-const scanWGCountPlot = {
+export const scanWGCountPlot = {
   x: { field: "inputBytes", label: "Input array size (B)" },
   y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
   fx: { field: "timing" },
