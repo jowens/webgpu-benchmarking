@@ -40,6 +40,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 // tests
 import { NoAtomicPKReduceTestSuite } from "./reduce.mjs";
 import { HierarchicalScanTestSuite } from "./scan.mjs";
+import { DLDFScanTestSuite } from "./scandldf.mjs";
 
 async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -85,7 +86,8 @@ async function main(navigator) {
     // AtomicGlobalU32ReduceTestSuite,
     // AtomicGlobalU32ReduceBinOpsTestSuite,
     // NoAtomicPKReduceTestSuite,
-    HierarchicalScanTestSuite,
+    // HierarchicalScanTestSuite,
+    DLDFScanTestSuite,
     //AtomicGlobalU32SGReduceTestSuite,
     //AtomicGlobalU32WGReduceTestSuite,
     //AtomicGlobalF32WGReduceTestSuite,

@@ -19,6 +19,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 // import primitive only, no test suite
 import { NoAtomicPKReduce } from "./reduce.mjs";
 import { WGScan, HierarchicalScan } from "./scan.mjs";
+import { DLDFScan } from "./scandldf.mjs";
 
 export async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -35,7 +36,7 @@ export async function main(navigator) {
     console.error("Fatal error: Device does not support WebGPU.");
   }
   const memsrcLength = 2 ** 20; // items, not bytes
-  const datatype = "f32";
+  const datatype = "u32";
   const memsrcX32 = new (datatypeToTypedArray(datatype))(memsrcLength);
   for (let i = 0; i < memsrcLength; i++) {
     switch (datatype) {
@@ -63,7 +64,7 @@ export async function main(navigator) {
   // eslint-disable-next-line no-unused-vars
   const iscanPrimitive = new HierarchicalScan({
     device,
-    binop: BinOpAddF32,
+    binop: BinOpAddU32,
     type: "inclusive",
     datatype: datatype,
     gputimestamps: true, //// TODO should work without this
@@ -72,15 +73,25 @@ export async function main(navigator) {
   // eslint-disable-next-line no-unused-vars
   const escanPrimitive = new HierarchicalScan({
     device,
-    binop: BinOpAddF32,
+    binop: BinOpAddU32,
     type: "exclusive",
+    datatype: datatype,
+    gputimestamps: true, //// TODO should work without this
+  });
+
+  // eslint-disable-next-line no-unused-vars
+  const dldfscanPrimitive = new DLDFScan({
+    device,
+    binop: BinOpAddU32,
+    type: "inclusive",
     datatype: datatype,
     gputimestamps: true, //// TODO should work without this
   });
 
   // const primitive = iscanPrimitive;
   // const primitive = escanPrimitive;
-  const primitive = reducePrimitive;
+  // const primitive = reducePrimitive;
+  const primitive = dldfscanPrimitive;
 
   let memdestBytes;
   switch (primitive.constructor.name) {
