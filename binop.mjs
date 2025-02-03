@@ -20,7 +20,7 @@ class BinOp {
   }
 }
 
-class BinOpAdd extends BinOp {
+export class BinOpAdd extends BinOp {
   constructor(args) {
     super(args);
     this.identity = 0;
