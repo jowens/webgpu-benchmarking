@@ -5,6 +5,7 @@ import {
   BinOpAddF32,
   BinOpMinF32,
   BinOpMaxF32,
+  BinOpAdd,
 } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
 
@@ -36,7 +37,7 @@ export async function main(navigator) {
     console.error("Fatal error: Device does not support WebGPU.");
   }
   const memsrcLength = 2 ** 20; // items, not bytes
-  const datatype = "u32";
+  const datatype = "f32";
   const memsrcX32 = new (datatypeToTypedArray(datatype))(memsrcLength);
   for (let i = 0; i < memsrcLength; i++) {
     switch (datatype) {
@@ -52,7 +53,7 @@ export async function main(navigator) {
   // eslint-disable-next-line no-unused-vars
   const reducePrimitive = new NoAtomicPKReduce({
     device,
-    binop: BinOpAddF32,
+    binop: new BinOpAdd({ datatype }),
     datatype: datatype,
     gputimestamps: true, //// TODO should work without this
     // inputBuffer and outputBuffer are Reduce-specific names
@@ -64,7 +65,7 @@ export async function main(navigator) {
   // eslint-disable-next-line no-unused-vars
   const iscanPrimitive = new HierarchicalScan({
     device,
-    binop: BinOpAddU32,
+    binop: new BinOpAdd({ datatype }),
     type: "inclusive",
     datatype: datatype,
     gputimestamps: true, //// TODO should work without this
@@ -73,7 +74,7 @@ export async function main(navigator) {
   // eslint-disable-next-line no-unused-vars
   const escanPrimitive = new HierarchicalScan({
     device,
-    binop: BinOpAddU32,
+    binop: new BinOpAdd({ datatype }),
     type: "exclusive",
     datatype: datatype,
     gputimestamps: true, //// TODO should work without this
@@ -82,7 +83,7 @@ export async function main(navigator) {
   // eslint-disable-next-line no-unused-vars
   const dldfscanPrimitive = new DLDFScan({
     device,
-    binop: BinOpAddU32,
+    binop: new BinOpAdd({ datatype }),
     type: "inclusive",
     datatype: datatype,
     gputimestamps: true, //// TODO should work without this
