@@ -46,7 +46,7 @@ export const BinOpAddU32 = new BinOpAdd({ datatype: "u32" });
 export const BinOpAddF32 = new BinOpAdd({ datatype: "f32" });
 export const BinOpAddI32 = new BinOpAdd({ datatype: "i32" });
 
-class BinOpMin extends BinOp {
+export class BinOpMin extends BinOp {
   constructor(args) {
     super(args);
     /* identity depends on datatype */
@@ -73,7 +73,7 @@ export const BinOpMinU32 = new BinOpMin({ datatype: "u32" });
 export const BinOpMinF32 = new BinOpMin({ datatype: "f32" });
 export const BinOpMinI32 = new BinOpMin({ datatype: "i32" });
 
-class BinOpMax extends BinOp {
+export class BinOpMax extends BinOp {
   constructor(args) {
     super(args);
     /* identity depends on datatype */
@@ -82,7 +82,7 @@ class BinOpMax extends BinOp {
         this.identity = -3.402823466385288e38; // -FLT_MAX
         break;
       case "i32":
-        this.identity = 0xf0000000;
+        this.identity = 0x80000000;
         break;
       case "u32": // fall-through OK
       default:
@@ -100,7 +100,7 @@ export const BinOpMaxU32 = new BinOpMax({ datatype: "u32" });
 export const BinOpMaxF32 = new BinOpMax({ datatype: "f32" });
 export const BinOpMaxI32 = new BinOpMax({ datatype: "i32" });
 
-class BinOpMultiply extends BinOp {
+export class BinOpMultiply extends BinOp {
   constructor(args) {
     super(args);
     this.identity = 1;
