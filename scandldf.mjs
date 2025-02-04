@@ -408,9 +408,9 @@ const DLDFScanParamsSingleton = {
 export const DLDFScanPlot = {
   x: { field: "inputBytes", label: "Input array size (B)" },
   y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
-  fx: { field: "timing" },
+  stroke: { field: "timing" },
   test_br: "gpuinfo.description",
-  caption: "Left: CPU timing (performance.now), right: GPU timing (timestamps)",
+  caption: "CPU timing (performance.now), GPU timing (timestamps)",
 };
 
 export const DLDFScanTestSuite = new BaseTestSuite({
