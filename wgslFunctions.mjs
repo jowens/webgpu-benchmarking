@@ -53,6 +53,20 @@ export class wgslFunctions {
     var workgroupCount = builtins.nwg.z * builtins.nwg.y * builtins.nwg.x;
     var totalThreadCount = workgroupCount * numThreadsPerWorkgroup;`;
   }
+  get vec4Functions() {
+    /* various functions that operate on vec4s */
+    return /* wgsl */ `
+    fn vec4InclusiveScan(in: vec4<${this.env.datatype}>) ->
+      vec4<${this.env.datatype}> {
+      /* vec4Scan(in == [a,b,c,d]) = [in.x, in.x+in.y, in.x+in.y+in.z, in.x+in.y+in.z+in.w] */
+      var out: vec4<${this.env.datatype}> = in;
+      out.y = binop(out.x, out.y);
+      out.z = binop(out.y, out.z);
+      out.w = binop(out.z, out.w);
+      return out;
+    }
+    `;
+  }
   get workgroupReduce() {
     return /* wgsl */ `
     /**
