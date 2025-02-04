@@ -36,10 +36,10 @@ export async function main(navigator) {
   if (!device) {
     console.error("Fatal error: Device does not support WebGPU.");
   }
-  const memsrcCount = 2 ** 20; // items, not bytes
+  const inputCount = 2 ** 20; // items, not bytes
   const datatype = "f32";
-  const memsrcX32 = new (datatypeToTypedArray(datatype))(memsrcCount);
-  for (let i = 0; i < memsrcCount; i++) {
+  const memsrcX32 = new (datatypeToTypedArray(datatype))(inputCount);
+  for (let i = 0; i < inputCount; i++) {
     switch (datatype) {
       case "u32":
         memsrcX32[i] = i == 0 ? 11 : memsrcX32[i - 1] + 1; // trying to get u32s
