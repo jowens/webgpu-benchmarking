@@ -31,17 +31,22 @@ var<storage, read_write> scan_bump: atomic<u32>;
 
 @group(0) @binding(3)
 var<storage, read_write> spine: array<array<atomic<u32>, 2>>;
+/** The reason why we don't use a struct is because we want to
+ * be able to dynamically index into each member of the split
+ * representation, and WGSL doesn't let you do that with a struct.
+ * So instead, we make the spine an array of arrays of size 2.
+ * */
 
 @group(0) @binding(4)
 var<storage, read_write> misc: array<u32>;
 
-const BLOCK_DIM = 256u;
+const BLOCK_DIM: u32 = ${this.workgroupSize};
 const SPLIT_MEMBERS = 2u;
 const MIN_SUBGROUP_SIZE = 4u;
 const MAX_PARTIALS_SIZE = BLOCK_DIM / MIN_SUBGROUP_SIZE * 2u; //Double for conflict avoidance
 
-const VEC4_SPT = 4u;
-const VEC_TILE_SIZE = BLOCK_DIM * VEC4_SPT;
+const VEC4_SPT = 4u; /* each thread handles VEC4_SPT vec4s */
+const VEC_TILE_SIZE = BLOCK_DIM * VEC4_SPT; /* how many vec4s in the tile */
 
 const FLAG_NOT_READY = 0u;
 const FLAG_READY = 0x40000000u;
@@ -97,6 +102,7 @@ fn main(
   @builtin(subgroup_invocation_id) laneid: u32,
   @builtin(subgroup_size) lane_count: u32) {
 
+  // sid is subgroup ID, "which subgroup am I within this workgroup"
   let sid = threadid.x / lane_count; //Caution 1D workgoup ONLY! Ok, but technically not in HLSL spec
 
   //acquire partition index, set the lock
@@ -105,13 +111,14 @@ fn main(
     wg_control = LOCKED;
   }
   let tile_id = workgroupUniformLoad(&wg_broadcast_tile_id);
+  // s_offset: within this workgroup, at what index do I start loading?
   let s_offset = laneid + sid * lane_count * VEC4_SPT;
 
   var t_scan = array<vec4<${this.datatype}>, VEC4_SPT>();
   {
     var i = s_offset + tile_id * VEC_TILE_SIZE;
-    if (tile_id < ${this.work_tiles} - 1u) {
-      for(var k = 0u; k < VEC4_SPT; k += 1u) {
+    if (tile_id < ${this.work_tiles} - 1u) { // not the last tile
+      for (var k = 0u; k < VEC4_SPT; k += 1u) {
         t_scan[k] = inputBuffer[i];
         t_scan[k].y += t_scan[k].x;
         t_scan[k].z += t_scan[k].y;
@@ -120,8 +127,8 @@ fn main(
       }
     }
 
-    if (tile_id == ${this.work_tiles} - 1u) {
-      for(var k = 0u; k < VEC4_SPT; k += 1u) {
+    if (tile_id == ${this.work_tiles} - 1u) { // the last tile
+      for (var k = 0u; k < VEC4_SPT; k += 1u) {
         if (i < ${this.vec_size}) {
           t_scan[k] = inputBuffer[i];
           t_scan[k].y += t_scan[k].x;
@@ -150,7 +157,7 @@ fn main(
 
   //Non-divergent subgroup agnostic inclusive scan across subgroup partial reductions
   let lane_log = u32(countTrailingZeros(lane_count));
-  let local_spine = BLOCK_DIM >> lane_log;
+  let local_spine: u32 = BLOCK_DIM >> lane_log;
   let aligned_size = 1u << ((u32(countTrailingZeros(local_spine)) + lane_log - 1u) / lane_log * lane_log);
   {
     var offset = 0u;
@@ -320,16 +327,17 @@ fn main(
   }
 
   {
+    /* all writeback to output array is below */
     var i = s_offset + tile_id * VEC_TILE_SIZE;
     let prev = wg_broadcast_prev_red + select(0, wg_partials[sid - 1u], sid != 0u); //wg_broadcast_tile_id is 0 for tile_id 0
-    if (tile_id < ${this.work_tiles} - 1u) {
+    if (tile_id < ${this.work_tiles} - 1u) { // not the last tile
       for(var k = 0u; k < VEC4_SPT; k += 1u) {
         outputBuffer[i] = t_scan[k] + prev;
         i += lane_count;
       }
     }
 
-    if (tile_id == ${this.work_tiles} - 1u) {
+    if (tile_id == ${this.work_tiles} - 1u) { // this is the last tile
       for(var k = 0u; k < VEC4_SPT; k += 1u) {
         if (i < ${this.vec_size}) {
           outputBuffer[i] = t_scan[k] + prev;
@@ -345,11 +353,11 @@ fn main(
     this.MISC_SIZE = 5; // Max scratch memory we use to track various stats
     this.PART_SIZE = 4096; // MUST match the partition size specified in shaders.
     this.MAX_READBACK_SIZE = 8192; // Max size of our readback buffer
-    const inputSize = this.getBuffer("inputBuffer").size;
-    this.workgroupCount = Math.ceil(
-      this.getBuffer("inputBuffer").size / this.PART_SIZE
-    );
-    this.vec_size = Math.ceil(inputSize / 4);
+    this.workgroupSize = 256;
+    const inputSize = this.getBuffer("inputBuffer").size; // bytes
+    const inputCount = inputSize / 4; /* 4 is size of datatype */
+    this.workgroupCount = Math.ceil(inputCount / this.PART_SIZE);
+    this.vec_size = Math.ceil(inputCount / 4); /* 4 is sizeof vec4 */
     this.work_tiles = this.workgroupCount;
     this.scanBumpSize = datatypeToBytes(this.datatype);
     // 4 words per element
@@ -390,7 +398,7 @@ fn main(
 }
 
 const DLDFScanParams = {
-  inputLength: range(8, 24).map((i) => 2 ** i),
+  inputLength: range(8, 28).map((i) => 2 ** i),
 };
 
 const DLDFScanParamsSingleton = {
