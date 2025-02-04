@@ -8,6 +8,16 @@ import { BaseScan, scanWGSizePlot, scanWGCountPlot } from "./scan.mjs";
 export class DLDFScan extends BaseScan {
   constructor(args) {
     super(args);
+
+    /* this scan implementation has an additional buffer beyond BaseScan */
+    /* Possibly: BaseScan should just list this buffer, even if it's not used */
+    this.additionalKnownBuffers = ["scanParameters"];
+    for (const knownBuffer of this.additionalKnownBuffers) {
+      /* we passed an existing buffer into the constructor */
+      if (knownBuffer in args) {
+        this.knownBuffers.push(knownBuffer);
+      }
+    }
   }
 
   scandldfWGSL = () => {
@@ -27,9 +37,12 @@ var<storage, read> inputBuffer: array<vec4<${this.datatype}>>;
 var<storage, read_write> outputBuffer: array<vec4<${this.datatype}>>;
 
 @group(0) @binding(2)
-var<storage, read_write> scan_bump: atomic<u32>;
+var<uniform> scanParameters: ScanParameters;
 
 @group(0) @binding(3)
+var<storage, read_write> scan_bump: atomic<u32>;
+
+@group(0) @binding(4)
 var<storage, read_write> spine: array<array<atomic<u32>, 2>>;
 /** The reason why we don't use a struct is because we want to
  * be able to dynamically index into each member of the split
@@ -117,7 +130,7 @@ fn main(
   var t_scan = array<vec4<${this.datatype}>, VEC4_SPT>();
   {
     var i = s_offset + tile_id * VEC_TILE_SIZE;
-    if (tile_id < ${this.work_tiles} - 1u) { // not the last tile
+    if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
       for (var k = 0u; k < VEC4_SPT; k += 1u) {
         t_scan[k] = inputBuffer[i];
         t_scan[k].y += t_scan[k].x;
@@ -127,9 +140,9 @@ fn main(
       }
     }
 
-    if (tile_id == ${this.work_tiles} - 1u) { // the last tile
+    if (tile_id == scanParameters.work_tiles - 1u) { // the last tile
       for (var k = 0u; k < VEC4_SPT; k += 1u) {
-        if (i < ${this.vec_size}) {
+        if (i < scanParameters.vec_size) {
           t_scan[k] = inputBuffer[i];
           t_scan[k].y += t_scan[k].x;
           t_scan[k].z += t_scan[k].y;
@@ -330,16 +343,16 @@ fn main(
     /* all writeback to output array is below */
     var i = s_offset + tile_id * VEC_TILE_SIZE;
     let prev = wg_broadcast_prev_red + select(0, wg_partials[sid - 1u], sid != 0u); //wg_broadcast_tile_id is 0 for tile_id 0
-    if (tile_id < ${this.work_tiles} - 1u) { // not the last tile
+    if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
       for(var k = 0u; k < VEC4_SPT; k += 1u) {
         outputBuffer[i] = t_scan[k] + prev;
         i += lane_count;
       }
     }
 
-    if (tile_id == ${this.work_tiles} - 1u) { // this is the last tile
+    if (tile_id == scanParameters.work_tiles - 1u) { // this is the last tile
       for(var k = 0u; k < VEC4_SPT; k += 1u) {
-        if (i < ${this.vec_size}) {
+        if (i < scanParameters.vec_size) {
           outputBuffer[i] = t_scan[k] + prev;
         }
         i += lane_count;
@@ -363,10 +376,22 @@ fn main(
     // 4 words per element
     this.spineSize = 4 * this.workgroupCount * datatypeToBytes(this.datatype);
     this.miscSize = 5 * datatypeToBytes(this.datatype);
+
+    // scanParameters is: size: u32, vec_size: u32, work_tiles: u32
+    this.scanParameters = new Uint32Array([
+      inputCount, // this isn't used currently
+      Math.ceil(inputCount / 4),
+      Math.ceil(inputCount / this.PART_SIZE),
+    ]);
   }
   compute() {
     this.finalizeRuntimeParameters();
     return [
+      new AllocateBuffer({
+        label: "scanParameters",
+        size: this.scanParameters.byteLength,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      }),
       new AllocateBuffer({
         label: "scanBump",
         size: this.scanBumpSize,
@@ -382,10 +407,24 @@ fn main(
       new Kernel({
         kernel: this.scandldfWGSL,
         bufferTypes: [
-          ["read-only-storage", "storage", "storage", "storage", "storage"],
+          [
+            "read-only-storage",
+            "storage",
+            "uniform",
+            "storage",
+            "storage",
+            "storage",
+          ],
         ],
         bindings: [
-          ["inputBuffer", "outputBuffer", "scanBump", "spine", "misc"],
+          [
+            "inputBuffer",
+            "outputBuffer",
+            "scanParameters",
+            "scanBump",
+            "spine",
+            "misc",
+          ],
         ],
         label: "Thomas Smith's scan with decoupled lookback/decoupled fallback",
         logKernelCodeToConsole: false,
