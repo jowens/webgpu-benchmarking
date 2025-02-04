@@ -1,7 +1,7 @@
 import { range, arrayProd } from "./util.mjs";
 import { Kernel, AllocateBuffer } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
-import { BinOpAddF32, BinOpAddU32 } from "./binop.mjs";
+import { BinOpAddF32, BinOpAddU32, BinOpMaxU32 } from "./binop.mjs";
 import { datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
 import { BaseScan, scanWGSizePlot, scanWGCountPlot } from "./scan.mjs";
 
@@ -109,6 +109,9 @@ fn split(x: ${this.datatype}, tid: u32) -> u32 {
   return (bitcast<u32>(x) >> (tid * 16u)) & VALUE_MASK;
 }
 
+${this.binop.wgslfn}
+${this.fnDeclarations.vec4Functions}
+
 @compute @workgroup_size(BLOCK_DIM, 1, 1)
 fn main(
   @builtin(local_invocation_id) threadid: vec3<u32>,
@@ -116,9 +119,9 @@ fn main(
   @builtin(subgroup_size) lane_count: u32) {
 
   // sid is subgroup ID, "which subgroup am I within this workgroup"
-  let sid = threadid.x / lane_count; //Caution 1D workgoup ONLY! Ok, but technically not in HLSL spec
+  let sid = threadid.x / lane_count; // Caution 1D workgroup ONLY! Ok, but technically not in HLSL spec
 
-  //acquire partition index, set the lock
+  // acquire partition index, set the lock
   if (threadid.x == 0u) {
     wg_broadcast_tile_id = atomicAdd(&scan_bump, 1u);
     wg_control = LOCKED;
@@ -132,10 +135,7 @@ fn main(
     var i = s_offset + tile_id * VEC_TILE_SIZE;
     if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
       for (var k = 0u; k < VEC4_SPT; k += 1u) {
-        t_scan[k] = inputBuffer[i];
-        t_scan[k].y += t_scan[k].x;
-        t_scan[k].z += t_scan[k].y;
-        t_scan[k].w += t_scan[k].z;
+        t_scan[k] = vec4InclusiveScan(inputBuffer[i]);
         i += lane_count;
       }
     }
@@ -143,10 +143,7 @@ fn main(
     if (tile_id == scanParameters.work_tiles - 1u) { // the last tile
       for (var k = 0u; k < VEC4_SPT; k += 1u) {
         if (i < scanParameters.vec_size) {
-          t_scan[k] = inputBuffer[i];
-          t_scan[k].y += t_scan[k].x;
-          t_scan[k].z += t_scan[k].y;
-          t_scan[k].w += t_scan[k].z;
+          t_scan[k] = vec4InclusiveScan(inputBuffer[i]);
         }
         i += lane_count;
       }
@@ -156,8 +153,10 @@ fn main(
     let lane_mask = lane_count - 1u;
     let circular_shift = (laneid + lane_mask) & lane_mask;
     for(var k = 0u; k < VEC4_SPT; k += 1u) {
-      let t = subgroupShuffle(subgroupInclusiveAdd(select(prev, 0 /* identity? */, laneid != 0u) + t_scan[k].w),
-                  circular_shift);
+      let t = subgroupShuffle(
+                subgroupInclusiveAdd(select(prev, ${this.binop.identity}, laneid != 0u) + t_scan[k].w),
+                circular_shift
+              );
       t_scan[k] += select(prev, t, laneid != 0u);
       prev = t;
     }
@@ -179,7 +178,7 @@ fn main(
     for(var j = lane_count; j <= aligned_size; j <<= lane_log) {
       let step = local_spine >> offset;
       let pred = threadid.x < step;
-      let t = subgroupInclusiveAdd(select(0 /* identity? */, wg_partials[threadid.x + top_offset], pred));
+      let t = subgroupInclusiveAdd(select(${this.binop.identity}, wg_partials[threadid.x + top_offset], pred));
       if (pred) {
         wg_partials[threadid.x + top_offset] = t;
         if (lane_pred) {
@@ -209,7 +208,7 @@ fn main(
 
   //lookback, single subgroup
   if (tile_id != 0u) {
-    var prev_red: ${this.datatype} = 0; /* identity? */
+    var prev_red: ${this.datatype} = ${this.binop.identity};
     var lookback_id = tile_id - 1u;
     var control_flag = workgroupUniformLoad(&wg_control);
     while (control_flag == LOCKED) {
@@ -279,8 +278,8 @@ fn main(
         }
         workgroupBarrier();
 
-        //Non-divergent subgroup agnostic reduction across subgroup partial reductions
-        var f_red: ${this.datatype} = 0;
+        // Non-divergent subgroup agnostic reduction across subgroup partial reductions
+        var f_red: ${this.datatype} = ${this.binop.identity};
         {
           var offset = 0u;
           var top_offset = 0u;
@@ -450,9 +449,9 @@ export const DLDFScanTestSuite = new BaseTestSuite({
   uniqueRuns: ["inputLength", "workgroupSize"],
   primitive: DLDFScan,
   primitiveConfig: {
-    datatype: "f32",
+    datatype: "u32",
     type: "inclusive",
-    binop: BinOpAddF32,
+    binop: BinOpMaxU32,
     gputimestamps: true,
   },
   plots: [DLDFScanPlot],
