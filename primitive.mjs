@@ -113,6 +113,11 @@ export class BasePrimitive {
   }
   getSimpleDispatchGeometry() {
     // todo this is too simple
+    if (this.workgroupCount === undefined) {
+      throw new Error(
+        "Primitive:getSimpleDispatchGeometry(): Must specify this.workgroupCount."
+      );
+    }
     let dispatchGeometry = [this.workgroupCount, 1];
     while (
       dispatchGeometry[0] > this.device.limits.maxComputeWorkgroupsPerDimension
