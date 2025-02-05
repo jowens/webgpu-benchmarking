@@ -9,6 +9,8 @@
  *    declared within the primitive)
  */
 
+import { BinOpAdd } from "./binop.mjs";
+
 export class wgslFunctions {
   constructor(env) {
     this.env = env;
@@ -53,8 +55,7 @@ export class wgslFunctions {
     var workgroupCount = builtins.nwg.z * builtins.nwg.y * builtins.nwg.x;
     var totalThreadCount = workgroupCount * numThreadsPerWorkgroup;`;
   }
-  get vec4Functions() {
-    /* various functions that operate on vec4s */
+  get vec4InclusiveScan() {
     return /* wgsl */ `
     fn vec4InclusiveScan(in: vec4<${this.env.datatype}>) ->
       vec4<${this.env.datatype}> {
@@ -64,6 +65,33 @@ export class wgslFunctions {
       out.z = binop(out.y, out.z);
       out.w = binop(out.z, out.w);
       return out;
+    }`;
+  }
+  get vec4Reduce() {
+    if (this.env.binop instanceof BinOpAdd) {
+      return /* wgsl */ `
+      fn vec4Reduce(in: vec4<${this.env.datatype}>) -> ${this.env.datatype} {
+        return dot(in, vec4<${this.env.datatype}>(1, 1, 1, 1));
+      }
+      `;
+    } else {
+      return /* wgsl */ `
+      fn vec4Reduce(in: vec4<${this.env.datatype}>) -> ${this.env.datatype} {
+        return binop(binop(binop(in.x, in.y), in.z), in.w);
+      }`;
+    }
+  }
+  get vec4ScalarOpV4() {
+    /* if binop is +, this still seems just as efficient, unless there's a vec4 +, I guess? */
+    return /* wgsl */ `
+    fn vec4ScalarOpV4(scalar: ${this.env.datatype}, vector: vec4<${this.env.datatype}>) ->
+    vec4<${this.env.datatype}> {
+      var out: vec4<${this.env.datatype}>;
+      out.x = binop(scalar, vector.x);
+      out.y = binop(scalar, vector.y);
+      out.z = binop(scalar, vector.z);
+      out.w = binop(scalar, vector.w);
+      return out;
     }
     `;
   }
@@ -72,6 +100,7 @@ export class wgslFunctions {
      *   https://github.com/b0nes164/GPUSorting/blob/main/GPUSortingCUDA/Utils.cuh
      */
     if (this.env.binop.subgroupInclusiveScanOp) {
+      /* use the builtin subgroupInclusiveScanOp */
       return /* wgsl */ `
       fn subgroupInclusiveOpScan(in: ${this.env.datatype}, laneID: u32, laneCount: u32) ->
         ${this.env.datatype} {
@@ -79,6 +108,7 @@ export class wgslFunctions {
       }
       `;
     } else {
+      /* emulate subgroupInclusiveScanOp with subgroupShuffleUp */
       return /* wgsl */ `
       /* for (int i = 1; i <= 16; i <<= 1) { // 16 = LANE_COUNT >> 1
        *   const uint32_t t = __shfl_up_sync(0xffffffff, val, i, 32);
@@ -98,6 +128,14 @@ export class wgslFunctions {
       }
     `;
     }
+  }
+  get subgroupReduce() {
+    /* this will fail if subgroupReduceOp isn't defined; TODO is write it */
+    return /* wgsl */ `
+    fn subgroupReduce(in: ${this.env.datatype}) -> ${this.env.datatype} {
+      return ${this.env.binop.subgroupReduceOp}(in);
+    }
+    `;
   }
   get workgroupReduce() {
     return /* wgsl */ `
