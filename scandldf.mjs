@@ -179,7 +179,7 @@ fn main(
     for(var j = lane_count; j <= aligned_size; j <<= lane_log) {
       let step = local_spine >> offset;
       let pred = threadid.x < step;
-      let t = subgroupInclusiveAdd(select(${this.binop.identity}, wg_partials[threadid.x + top_offset], pred));
+      let t = subgroupInclusiveOpScan(select(${this.binop.identity}, wg_partials[threadid.x + top_offset], pred), laneid, lane_count);
       if (pred) {
         wg_partials[threadid.x + top_offset] = t;
         if (lane_pred) {
