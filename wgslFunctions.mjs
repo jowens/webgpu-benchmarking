@@ -67,6 +67,38 @@ export class wgslFunctions {
     }
     `;
   }
+  get subgroupInclusiveOpScan() {
+    /* helpful reference from Thomas Smith:
+     *   https://github.com/b0nes164/GPUSorting/blob/main/GPUSortingCUDA/Utils.cuh
+     */
+    if (this.env.binop.subgroupInclusiveScanOp) {
+      return /* wgsl */ `
+      fn subgroupInclusiveOpScan(in: ${this.env.datatype}, laneID: u32, laneCount: u32) ->
+        ${this.env.datatype} {
+        return ${this.env.binop.subgroupInclusiveScanOp}(in);
+      }
+      `;
+    } else {
+      return /* wgsl */ `
+      /* for (int i = 1; i <= 16; i <<= 1) { // 16 = LANE_COUNT >> 1
+       *   const uint32_t t = __shfl_up_sync(0xffffffff, val, i, 32);
+       *   if (getLaneId() >= i) val += t;
+       * }
+       * return val;
+       */
+      fn subgroupInclusiveOpScan(in: ${this.env.datatype}, laneID: u32, laneCount: u32) ->
+        ${this.env.datatype} {
+        var i: u32;
+        var val = in;
+        for (i = 1; i <= (laneCount >> 1); i <<= 1) {
+          let t: ${this.env.datatype} = subgroupShuffleUp(val, i);
+          val = binop(select(${this.env.binop.identity}, t, laneID >= i), val);
+        }
+        return val;
+      }
+    `;
+    }
+  }
   get workgroupReduce() {
     return /* wgsl */ `
     /**
