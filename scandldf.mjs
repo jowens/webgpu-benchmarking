@@ -111,6 +111,7 @@ fn split(x: ${this.datatype}, tid: u32) -> u32 {
 
 ${this.binop.wgslfn}
 ${this.fnDeclarations.vec4Functions}
+${this.fnDeclarations.subgroupInclusiveOpScan}
 
 @compute @workgroup_size(BLOCK_DIM, 1, 1)
 fn main(
@@ -149,12 +150,12 @@ fn main(
       }
     }
 
-    var prev: ${this.datatype} = 0; // needs to be identity
+    var prev: ${this.datatype} = ${this.binop.identity};
     let lane_mask = lane_count - 1u;
     let circular_shift = (laneid + lane_mask) & lane_mask;
     for(var k = 0u; k < VEC4_SPT; k += 1u) {
       let t = subgroupShuffle(
-                subgroupInclusiveAdd(select(prev, ${this.binop.identity}, laneid != 0u) + t_scan[k].w),
+                subgroupInclusiveOpScan(select(prev, ${this.binop.identity}, laneid != 0u) + t_scan[k].w, laneid, lane_count),
                 circular_shift
               );
       t_scan[k] += select(prev, t, laneid != 0u);
