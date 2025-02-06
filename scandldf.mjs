@@ -25,6 +25,7 @@ struct ScanParameters
   size: u32,
   vec_size: u32,
   work_tiles: u32,
+  simulate_mask: u32,
 };
 
 @group(0) @binding(0)
@@ -228,7 +229,8 @@ fn main(
   workgroupBarrier();
 
   /* Post my local reduction to the spine; now visible to the whole device */
-  if (threadid.x < SPLIT_MEMBERS) {
+  /* */
+  if (threadid.x < SPLIT_MEMBERS /* && (tile_id & params.simulate_mask) != 0u */) {
     let t = split(wg_partials[local_spine - 1u], threadid.x) | select(FLAG_READY, FLAG_INCLUSIVE, tile_id == 0u);
     atomicStore(&spine[tile_id][threadid.x], t);
   }
@@ -417,6 +419,7 @@ fn main(
       inputCount, // this isn't used in the shader currently
       this.vec_size,
       this.workgroupCount,
+      this.simulate_mask,
     ]);
   }
   compute() {
