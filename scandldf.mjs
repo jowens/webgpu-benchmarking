@@ -11,12 +11,9 @@ export class DLDFScan extends BaseScan {
 
     /* this scan implementation has an additional buffer beyond BaseScan */
     /* Possibly: BaseScan should just list this buffer, even if it's not used */
-    this.additionalKnownBuffers = ["scanParameters"];
+    this.additionalKnownBuffers = ["scanParameters", "debugBuffer"];
     for (const knownBuffer of this.additionalKnownBuffers) {
-      /* we passed an existing buffer into the constructor */
-      if (knownBuffer in args) {
-        this.knownBuffers.push(knownBuffer);
-      }
+      this.knownBuffers.push(knownBuffer);
     }
   }
 
@@ -44,19 +41,23 @@ var<storage, read_write> scan_bump: atomic<u32>;
 
 @group(0) @binding(4)
 var<storage, read_write> spine: array<array<atomic<u32>, 2>>;
-/** The reason why we don't use a struct is because we want to
- * be able to dynamically index into each member of the split
- * representation, and WGSL doesn't let you do that with a struct.
- * So instead, we make the spine an array of arrays of size 2.
- * */
+/** The reason why we don't use a struct is because a WGSL vector cannot accept
+ * atomic types, nor can you make an atomic vector. You CAN dynamically index
+ * into vectors.
+ */
 
-@group(0) @binding(4)
+@group(0) @binding(5)
 var<storage, read_write> misc: array<u32>;
+
+@group(0) @binding(6)
+var<storage, read_write> debugBuffer: array<vec4<${this.datatype}>>;
+
+
 
 const BLOCK_DIM: u32 = ${this.workgroupSize};
 const SPLIT_MEMBERS = 2u;
 const MIN_SUBGROUP_SIZE = 4u;
-const MAX_PARTIALS_SIZE = BLOCK_DIM / MIN_SUBGROUP_SIZE * 2u; //Double for conflict avoidance
+const MAX_PARTIALS_SIZE = 2u * BLOCK_DIM / MIN_SUBGROUP_SIZE; //Double for conflict avoidance
 
 const VEC4_SPT = 4u; /* each thread handles VEC4_SPT vec4s */
 const VEC_TILE_SIZE = BLOCK_DIM * VEC4_SPT; /* how many vec4s in the tile */
@@ -66,7 +67,7 @@ const FLAG_READY = 0x40000000u;
 const FLAG_INCLUSIVE = 0x80000000u;
 const FLAG_MASK = 0xC0000000u;
 const VALUE_MASK = 0xffffu;
-const ALL_READY = 3u;
+const ALL_READY = 3u; // this is (1 << SPLIT_MEMBERS) - 1
 
 const MAX_SPIN_COUNT = 4u;
 const LOCKED = 1u;
@@ -91,10 +92,9 @@ fn unsafeBallot(pred: bool) -> u32 {
 }
 
 /* I have "mine", a piece (u32) of a data element.
- * I need to recombine it with the piece(s) from other threads.
+ * I need to recombine it with the piece(s) from other threads ("theirs").
  * Currently this is hardcoded for 2 pieces
- * This is the inverse of the below "split" function
- */
+ * This is the inverse of the below "split" function */
 fn join(mine: u32, tid: u32) -> ${this.datatype} {
   let xor = tid ^ 1;
   let theirs = unsafeShuffle(mine, xor);
@@ -110,8 +110,11 @@ fn split(x: ${this.datatype}, tid: u32) -> u32 {
 }
 
 ${this.binop.wgslfn}
-${this.fnDeclarations.vec4Functions}
+${this.fnDeclarations.vec4InclusiveScan}
+${this.fnDeclarations.vec4Reduce}
+${this.fnDeclarations.vec4ScalarOpV4}
 ${this.fnDeclarations.subgroupInclusiveOpScan}
+${this.fnDeclarations.subgroupReduce}
 
 @compute @workgroup_size(BLOCK_DIM, 1, 1)
 fn main(
@@ -122,9 +125,12 @@ fn main(
   // sid is subgroup ID, "which subgroup am I within this workgroup"
   let sid = threadid.x / lane_count; // Caution 1D workgroup ONLY! Ok, but technically not in HLSL spec
 
-  // acquire partition index, set the lock
+  // acquire partition index, initialize previous reduction var, set the lock
   if (threadid.x == 0u) {
     wg_broadcast_tile_id = atomicAdd(&scan_bump, 1u);
+    /* this next initialization is important for block 0 because that block never
+     * enters lookback and thus this broadcast value is never otherwise set */
+    wg_broadcast_prev_red = ${this.binop.identity};
     wg_control = LOCKED;
   }
   let tile_id = workgroupUniformLoad(&wg_broadcast_tile_id);
@@ -133,6 +139,12 @@ fn main(
 
   var t_scan = array<vec4<${this.datatype}>, VEC4_SPT>();
   {
+    /* This block reduces VEC4_SPT vec4s per thread across a subgroup. This is
+     *     subgroup_size * vec4 * VEC4_SPT items. Each t_scan[k] stripe is
+     *     subgroup_size * vec4 items.
+     * (1) Per thread: Fill t_scan with inclusive 4-wide scans of input vec4s
+     *     Note thread i reads items i, i+lane_count, i+2*lane_count, etc.
+     */
     var i = s_offset + tile_id * VEC_TILE_SIZE;
     if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
       for (var k = 0u; k < VEC4_SPT; k += 1u) {
@@ -149,26 +161,44 @@ fn main(
         i += lane_count;
       }
     }
+    /* t_scan[k].w contains reduction of its vec4 */
+
+    /* (2) Per subgroup: Scan across entire subgroup
+     */
 
     var prev: ${this.datatype} = ${this.binop.identity};
     let lane_mask = lane_count - 1u;
     let circular_shift = (laneid + lane_mask) & lane_mask;
-    for(var k = 0u; k < VEC4_SPT; k += 1u) {
-      let t = subgroupShuffle(
-                subgroupInclusiveOpScan(select(prev, ${this.binop.identity}, laneid != 0u) + t_scan[k].w, laneid, lane_count),
-                circular_shift
-              );
-      t_scan[k] += select(prev, t, laneid != 0u);
+    /* circular_shift: source is preceding thread in my subgroup, wrapping for thread 0 */
+    for (var k = 0u; k < VEC4_SPT; k += 1u) {
+      /* (a) scan across reduction of each vec4, feeding in input element "prev" */
+      let subgroupScan =
+        subgroupInclusiveOpScan(binop(select(prev,
+                                             ${this.binop.identity},
+                                             laneid != 0u),
+                                      t_scan[k].w /* reduction of my vec4 */ ),
+                                laneid,
+                                lane_count);
+      /* (b) shuffle the scan result from thread x to thread x+1, wrapping */
+      let t = subgroupShuffle(subgroupScan, circular_shift);
+      /* (c) apply that scan to our current thread's vec4. t_scan[k] now contains
+       *     inclusive scan of all elements in this subgroup. */
+      t_scan[k] = vec4ScalarOpV4(select(prev, t, laneid != 0u), t_scan[k]);
+      /* (d) save the reduction of the entire subgroup into t for next k */
       prev = t;
     }
 
     if (laneid == 0u) {
       wg_partials[sid] = prev;
     }
+    /* Outputs of this code block:
+     * - wg_partials[sid] (subgroup reduction of vec4 per thread)
+     * - t_scan[0:VEC4_SPT] (scan of vec4 across subgroup)
+     */
   }
   workgroupBarrier();
 
-  //Non-divergent subgroup agnostic inclusive scan across subgroup partial reductions
+  // Non-divergent subgroup agnostic inclusive scan across subgroup partial reductions
   let lane_log = u32(countTrailingZeros(lane_count));
   let local_spine: u32 = BLOCK_DIM >> lane_log;
   let aligned_size = 1u << ((u32(countTrailingZeros(local_spine)) + lane_log - 1u) / lane_log * lane_log);
@@ -192,7 +222,7 @@ fn main(
         let rshift = j >> lane_log;
         let index = threadid.x + rshift;
         if (index < local_spine && (index & (j - 1u)) >= rshift) {
-          wg_partials[index] += wg_partials[(index >> offset) + top_offset - 1u];
+          wg_partials[index] = binop(wg_partials[(index >> offset) + top_offset - 1u], wg_partials[index]);
         }
       }
       top_offset += step;
@@ -201,14 +231,15 @@ fn main(
   }
   workgroupBarrier();
 
-  //Device broadcast
+  /* Post my local reduction to the spine; now visible to the whole device */
   if (threadid.x < SPLIT_MEMBERS) {
     let t = split(wg_partials[local_spine - 1u], threadid.x) | select(FLAG_READY, FLAG_INCLUSIVE, tile_id == 0u);
     atomicStore(&spine[tile_id][threadid.x], t);
   }
 
-  //lookback, single subgroup
+  /* Begin lookback. Only a single subgroup per workgroup does lookback. */
   if (tile_id != 0u) {
+    var i = s_offset + tile_id * VEC_TILE_SIZE; //////
     var prev_red: ${this.datatype} = ${this.binop.identity};
     var lookback_id = tile_id - 1u;
     var control_flag = workgroupUniformLoad(&wg_control);
@@ -216,79 +247,102 @@ fn main(
       if (threadid.x < lane_count) { /* activate only subgroup 0 */
         var spin_count = 0u;
         while (spin_count < MAX_SPIN_COUNT) {
-          /* fetch the value from the lookback into SPLIT_MEMBERS threads */
-          var flag_payload = select(0u, atomicLoad(&spine[lookback_id][threadid.x]), threadid.x < SPLIT_MEMBERS);
-          /* is there useful data there across all participating threads? "useful" means either a local reduction
-           * (READY) or an inclusive one (INCLUSIVE) */
+          /* fetch the value from tile lookback_id into SPLIT_MEMBERS threads */
+          var flag_payload: u32 = select(0u,
+                                         atomicLoad(&spine[lookback_id][threadid.x]),
+                                         threadid.x < SPLIT_MEMBERS);
+          /* is there useful data there across all participating threads?
+           * "useful" means either a local reduction (READY) or an inclusive one (INCLUSIVE) */
           if (unsafeBallot((flag_payload & FLAG_MASK) > FLAG_NOT_READY) == ALL_READY) {
-            /* Yes, useful information. Is it INCLUSIVE? */
-            var incl_bal = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE);
-            if (incl_bal != 0u) {
-              // Did we find any inclusive? Alright, the rest are guaranteed to be on their way, lets just wait.
-              // This can also block :^)
-              while (incl_bal != ALL_READY) {
-                flag_payload = select(0u, atomicLoad(&spine[lookback_id][threadid.x]), threadid.x < SPLIT_MEMBERS);
-                incl_bal = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE);
+            /* Yes, useful data! Is it INCLUSIVE? */
+            var seenInclusive = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE);
+            if (seenInclusive != 0u) {
+              /* is at least one of the lookback words inclusive? If so, the rest
+               * are on their way, let's just wait. */
+              /* "This can also block :^)"" ---TS */
+              /* This rests on the assumption that the execution width of the load == store.
+               * If for whatever reason, this is not true, it risks deadlock without FPG. */
+              while (seenInclusive != ALL_READY) {
+                /* keep fetching until all participating threads are INCLUSIVE */
+                flag_payload = select(0u,
+                                      atomicLoad(&spine[lookback_id][threadid.x]),
+                                      threadid.x < SPLIT_MEMBERS);
+                seenInclusive = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE);
               }
-              prev_red += join(flag_payload & VALUE_MASK, threadid.x);
+              /* flag_payload now contains an inclusive value from lookback_id, put it
+               * back together & merge it into prev_red */
+              debugBuffer[i].x = prev_red; // wrong, too large  ///////
+              prev_red = binop(join(flag_payload & VALUE_MASK, threadid.x), prev_red);
+              debugBuffer[i].y = prev_red; // wrong, too large  ///////
+              debugBuffer[i].z = join(flag_payload & VALUE_MASK, threadid.x); // wrong, too large  ///////
+              /* merge that value with my local reduction and store it to the spine */
               if (threadid.x < SPLIT_MEMBERS) {
-                /* this + needs to be binop */
-                let t = split(prev_red + wg_partials[local_spine - 1u], threadid.x) | FLAG_INCLUSIVE;
+                let t = split(binop(prev_red, wg_partials[local_spine - 1u]),
+                              threadid.x) |
+                        FLAG_INCLUSIVE;
                 atomicStore(&spine[tile_id][threadid.x], t);
               }
+              /* lookback complete. reduction of all previous tiles is in prev_red. */
               if (threadid.x == 0u) {
                 wg_control = UNLOCKED;
-                wg_broadcast_prev_red = prev_red;
+                wg_broadcast_prev_red = prev_red; ////! THIS ONE IS OCCASIONALLY WRONG
               }
               break;
             } else {
               /* Useful, but only READY, not INCLUSIVE.
                * Accumulate the value and go back another tile. */
-              prev_red += join(flag_payload & VALUE_MASK, threadid.x);
+              prev_red = binop(join(flag_payload & VALUE_MASK, threadid.x), prev_red);
+              debugBuffer[i].w = 1;
               spin_count = 0u;
               lookback_id -= 1u;
             }
           } else {
             spin_count += 1u;
           }
-        }
+        } /* end while spin_count */
 
         if (threadid.x == 0 && spin_count == MAX_SPIN_COUNT) {
           wg_broadcast_tile_id = lookback_id;
         }
-      }
+      } /* end activate subgroup 0 */
 
-      //Fallback if still locked
-      control_flag = workgroupUniformLoad(&wg_control);
+      /* We are in one of two states here:
+       * (1) We completed lookback, in which case control_flag is UNLOCKED.
+       *     wg_broadcast_prev_red has the reduction of all previous tiles.
+       *     We skip the next code block.
+       * (2) We exceeded the spin count, in which case we have to fall back.
+       *     control_flag will be LOCKED. wg_broadcast_tile_id has the
+       *     stalled tile. We enter the next code block.
+       */
+      control_flag = workgroupUniformLoad(&wg_control); // this is also a workgroup barrier
       if (control_flag == LOCKED) {
+        /* begin fallback */
         let fallback_id = wg_broadcast_tile_id;
         {
-          var t_red: ${this.datatype} = 0;
+          var t_red: ${this.datatype} = ${this.binop.identity};
           var i = s_offset + fallback_id * VEC_TILE_SIZE;
-          for(var k = 0u; k < VEC4_SPT; k += 1u) {
-            /* TODO: this will be replaced by binop */
-            /* for now, treat 1 as multiplicative identity for f32/i32 */
-            t_red += dot(inputBuffer[i], vec4<${this.datatype}>(1, 1, 1, 1));
+          for (var k = 0u; k < VEC4_SPT; k += 1u) {
+            t_red = binop(t_red, vec4Reduce(inputBuffer[i])); /* reduce the 4 members of inputBuffer[i] */
             i += lane_count;
           }
 
-          let s_red = subgroupAdd(t_red);
+          let s_red = subgroupReduce(t_red);
           if (laneid == 0u) {
             wg_fallback[sid] = s_red;
           }
         }
         workgroupBarrier();
 
-        // Non-divergent subgroup agnostic reduction across subgroup partial reductions
+        // Non-divergent subgroup agnostic reduction across subgroup partial reductions (wg_fallback)
         var f_red: ${this.datatype} = ${this.binop.identity};
         {
           var offset = 0u;
           var top_offset = 0u;
           let lane_pred = laneid == lane_count - 1u;
-          for(var j = lane_count; j <= aligned_size; j <<= lane_log) {
+          for (var j = lane_count; j <= aligned_size; j <<= lane_log) {
             let step = local_spine >> offset;
             let pred = threadid.x < step;
-            f_red = subgroupAdd(select(0, wg_fallback[threadid.x + top_offset], pred));
+            f_red = subgroupReduce(select(${this.binop.identity}, wg_fallback[threadid.x + top_offset], pred));
             if (pred && lane_pred) {
               wg_fallback[sid + step + top_offset] = f_red;
             }
@@ -298,22 +352,22 @@ fn main(
           }
         }
 
-        if (threadid.x < lane_count) {
+        if (threadid.x < lane_count) { /* activate only subgroup 0 */
           let f_split = split(f_red, threadid.x) | select(FLAG_READY, FLAG_INCLUSIVE, fallback_id == 0u);
-          var f_payload = 0u;
+          var f_payload: u32 = 0u;
           if (threadid.x < SPLIT_MEMBERS) {
             f_payload = atomicMax(&spine[fallback_id][threadid.x], f_split);
           }
           let incl_found = unsafeBallot((f_payload & FLAG_MASK) == FLAG_INCLUSIVE) == ALL_READY;
           if (incl_found) {
-            prev_red += join(f_payload & VALUE_MASK, threadid.x);
+            prev_red = binop(join(f_payload & VALUE_MASK, threadid.x), prev_red);
           } else {
-            prev_red += f_red;
+            prev_red = binop(f_red, prev_red);
           }
 
           if (fallback_id == 0u || incl_found) {
             if (threadid.x < SPLIT_MEMBERS) {
-              let t = split(prev_red + wg_partials[local_spine - 1u], threadid.x) | FLAG_INCLUSIVE;
+              let t = split(binop(prev_red, wg_partials[local_spine - 1u]), threadid.x) | FLAG_INCLUSIVE;
               atomicStore(&spine[tile_id][threadid.x], t);
             }
             if (threadid.x == 0u) {
@@ -325,17 +379,17 @@ fn main(
           }
         }
         control_flag = workgroupUniformLoad(&wg_control);
-      }
-    }
+      } /* end fallback */
+    } /* end control flag still locked */
   }
 
   {
     /* all writeback to output array is below */
     var i = s_offset + tile_id * VEC_TILE_SIZE;
-    let prev = wg_broadcast_prev_red + select(0, wg_partials[sid - 1u], sid != 0u); //wg_broadcast_tile_id is 0 for tile_id 0
+    let prev = binop(wg_broadcast_prev_red, select(${this.binop.identity}, wg_partials[sid - 1u], sid != 0u)); //wg_broadcast_tile_id is 0 for tile_id 0
     if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
       for(var k = 0u; k < VEC4_SPT; k += 1u) {
-        outputBuffer[i] = t_scan[k] + prev;
+        outputBuffer[i] = vec4ScalarOpV4(prev, t_scan[k]);
         i += lane_count;
       }
     }
@@ -343,7 +397,7 @@ fn main(
     if (tile_id == scanParameters.work_tiles - 1u) { // this is the last tile
       for(var k = 0u; k < VEC4_SPT; k += 1u) {
         if (i < scanParameters.vec_size) {
-          outputBuffer[i] = t_scan[k] + prev;
+          outputBuffer[i] = vec4ScalarOpV4(prev, t_scan[k]);
         }
         i += lane_count;
       }
@@ -363,15 +417,15 @@ fn main(
     this.vec_size = Math.ceil(inputCount / 4); /* 4 is sizeof vec4 */
     this.work_tiles = this.workgroupCount;
     this.scanBumpSize = datatypeToBytes(this.datatype);
-    // 4 words per element
+    // one vec4 per workgroup in spine
     this.spineSize = 4 * this.workgroupCount * datatypeToBytes(this.datatype);
     this.miscSize = 5 * datatypeToBytes(this.datatype);
 
     // scanParameters is: size: u32, vec_size: u32, work_tiles: u32
     this.scanParameters = new Uint32Array([
-      inputCount, // this isn't used currently
-      Math.ceil(inputCount / 4),
-      Math.ceil(inputCount / this.PART_SIZE),
+      inputCount, // this isn't used in the shader currently
+      this.vec_size,
+      this.workgroupCount,
     ]);
   }
   compute() {
@@ -381,6 +435,7 @@ fn main(
         label: "scanParameters",
         size: this.scanParameters.byteLength,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        populateWith: this.scanParameters,
       }),
       new AllocateBuffer({
         label: "scanBump",
@@ -404,6 +459,7 @@ fn main(
             "storage",
             "storage",
             "storage",
+            "storage",
           ],
         ],
         bindings: [
@@ -414,6 +470,7 @@ fn main(
             "scanBump",
             "spine",
             "misc",
+            "debugBuffer",
           ],
         ],
         label: "Thomas Smith's scan with decoupled lookback/decoupled fallback",
