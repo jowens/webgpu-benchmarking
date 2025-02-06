@@ -59,11 +59,11 @@ export class wgslFunctions {
     return /* wgsl */ `
     fn vec4InclusiveScan(in: vec4<${this.env.datatype}>) ->
       vec4<${this.env.datatype}> {
-      /* vec4Scan(in == [a,b,c,d]) = [in.x, in.x+in.y, in.x+in.y+in.z, in.x+in.y+in.z+in.w] */
+      /* vec4Scan(in) = [in.x, in.x+in.y, in.x+in.y+in.z, in.x+in.y+in.z+in.w] */
       var out: vec4<${this.env.datatype}> = in;
-      out.y = binop(out.x, out.y);
-      out.z = binop(out.y, out.z);
-      out.w = binop(out.z, out.w);
+      out.y = binop(in.x,  in.y);
+      out.z = binop(out.y, in.z);
+      out.w = binop(out.z, in.w);
       return out;
     }`;
   }
