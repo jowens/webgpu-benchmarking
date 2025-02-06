@@ -108,7 +108,7 @@ export class BaseScan extends BasePrimitive {
           if (cpu == 0) {
             return gpu == 0; // don't divide by zero
           } else {
-            return Math.abs(cpu - gpu) / cpu < 0.001;
+            return Math.abs((cpu - gpu) / cpu) < 0.001;
           }
         default:
           return cpu == gpu;
@@ -121,7 +121,11 @@ export class BaseScan extends BasePrimitive {
         break;
       }
       if (!validates(referenceOutput[i], memdest[i], this.datatype)) {
-        returnString += `Element ${i}: expected ${referenceOutput[i]}, instead saw ${memdest[i]}.\n`;
+        returnString += `Element ${i}: expected ${referenceOutput[i]}, instead saw ${memdest[i]}.`;
+        if (args.debugBuffer) {
+          returnString += ` debug[${i}] = ${args.debugBuffer[i]}.`;
+        }
+        returnString += "\n";
         allowedErrors--;
       }
     }
