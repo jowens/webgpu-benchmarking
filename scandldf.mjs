@@ -11,7 +11,7 @@ export class DLDFScan extends BaseScan {
 
     /* this scan implementation has an additional buffer beyond BaseScan */
     /* Possibly: BaseScan should just list this buffer, even if it's not used */
-    this.additionalKnownBuffers = ["scanParameters", "debugBuffer"];
+    this.additionalKnownBuffers = ["scanParameters"];
     for (const knownBuffer of this.additionalKnownBuffers) {
       this.knownBuffers.push(knownBuffer);
     }
@@ -48,10 +48,6 @@ var<storage, read_write> spine: array<array<atomic<u32>, 2>>;
 
 @group(0) @binding(5)
 var<storage, read_write> misc: array<u32>;
-
-@group(0) @binding(6)
-var<storage, read_write> debugBuffer: array<vec4<${this.datatype}>>;
-
 
 
 const BLOCK_DIM: u32 = ${this.workgroupSize};
@@ -239,7 +235,6 @@ fn main(
 
   /* Begin lookback. Only a single subgroup per workgroup does lookback. */
   if (tile_id != 0u) {
-    var i = s_offset + tile_id * VEC_TILE_SIZE; //////
     var prev_red: ${this.datatype} = ${this.binop.identity};
     var lookback_id = tile_id - 1u;
     var control_flag = workgroupUniformLoad(&wg_control);
@@ -271,10 +266,7 @@ fn main(
               }
               /* flag_payload now contains an inclusive value from lookback_id, put it
                * back together & merge it into prev_red */
-              debugBuffer[i].x = prev_red; // wrong, too large  ///////
               prev_red = binop(join(flag_payload & VALUE_MASK, threadid.x), prev_red);
-              debugBuffer[i].y = prev_red; // wrong, too large  ///////
-              debugBuffer[i].z = join(flag_payload & VALUE_MASK, threadid.x); // wrong, too large  ///////
               /* merge that value with my local reduction and store it to the spine */
               if (threadid.x < SPLIT_MEMBERS) {
                 let t = split(binop(prev_red, wg_partials[local_spine - 1u]),
@@ -285,14 +277,13 @@ fn main(
               /* lookback complete. reduction of all previous tiles is in prev_red. */
               if (threadid.x == 0u) {
                 wg_control = UNLOCKED;
-                wg_broadcast_prev_red = prev_red; ////! THIS ONE IS OCCASIONALLY WRONG
+                wg_broadcast_prev_red = prev_red;
               }
               break;
             } else {
               /* Useful, but only READY, not INCLUSIVE.
                * Accumulate the value and go back another tile. */
               prev_red = binop(join(flag_payload & VALUE_MASK, threadid.x), prev_red);
-              debugBuffer[i].w = 1;
               spin_count = 0u;
               lookback_id -= 1u;
             }
@@ -459,7 +450,6 @@ fn main(
             "storage",
             "storage",
             "storage",
-            "storage",
           ],
         ],
         bindings: [
@@ -470,7 +460,6 @@ fn main(
             "scanBump",
             "spine",
             "misc",
-            "debugBuffer",
           ],
         ],
         label: "Thomas Smith's scan with decoupled lookback/decoupled fallback",
