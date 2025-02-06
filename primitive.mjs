@@ -439,6 +439,13 @@ dispatchGeometry: ${dispatchGeometry}`);
                 GPUBufferUsage.COPY_SRC |
                 GPUBufferUsage.COPY_DST,
           });
+          if (action.populateWith) {
+            this.device.queue.writeBuffer(
+              allocatedBuffer,
+              0,
+              action.populateWith
+            );
+          }
           this.registerBuffer({ label: action.label, buffer: allocatedBuffer });
           break;
         }
