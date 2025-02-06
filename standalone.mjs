@@ -6,6 +6,8 @@ import {
   BinOpMinF32,
   BinOpMaxF32,
   BinOpAdd,
+  BinOpMin,
+  BinOpMax,
 } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
 
@@ -37,7 +39,7 @@ export async function main(navigator) {
     console.error("Fatal error: Device does not support WebGPU.");
   }
   const inputCount = 2 ** 20; // items, not bytes
-  const datatype = "f32";
+  const datatype = "u32";
   const memsrcX32 = new (datatypeToTypedArray(datatype))(inputCount);
   for (let i = 0; i < inputCount; i++) {
     switch (datatype) {
@@ -45,10 +47,11 @@ export async function main(navigator) {
         memsrcX32[i] = i == 0 ? 11 : memsrcX32[i - 1] + 1; // trying to get u32s
         break;
       case "f32":
-        memsrcX32[i] = i + 42;
+        memsrcX32[i] = i & 0x10 ? i - 42 : i + 42;
         break;
     }
   }
+  console.log("in", memsrcX32);
 
   // eslint-disable-next-line no-unused-vars
   const reducePrimitive = new NoAtomicPKReduce({
@@ -83,7 +86,7 @@ export async function main(navigator) {
   // eslint-disable-next-line no-unused-vars
   const dldfscanPrimitive = new DLDFScan({
     device,
-    binop: new BinOpAdd({ datatype }),
+    binop: new BinOpMin({ datatype }),
     type: "inclusive",
     datatype: datatype,
     gputimestamps: true, //// TODO should work without this
@@ -127,9 +130,25 @@ export async function main(navigator) {
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   });
 
+  const memdestDebugBuffer = device.createBuffer({
+    label: "memory destination debug buffer",
+    size: memdestBytes,
+    usage:
+      GPUBufferUsage.STORAGE |
+      GPUBufferUsage.COPY_SRC |
+      GPUBufferUsage.COPY_DST /* COPY_DST necessary for initialization */,
+  });
+
+  const mappableMemdestDebugBuffer = device.createBuffer({
+    label: "mappable memory debug destination buffer",
+    size: memdestBytes,
+    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+  });
+
   await primitive.execute({
     inputBuffer: memsrcBuffer,
     outputBuffer: memdestBuffer,
+    debugBuffer: memdestDebugBuffer,
   });
 
   // copy output back to host
@@ -143,6 +162,13 @@ export async function main(navigator) {
     0,
     mappableMemdestBuffer.size
   );
+  encoder.copyBufferToBuffer(
+    memdestDebugBuffer,
+    0,
+    mappableMemdestDebugBuffer,
+    0,
+    mappableMemdestDebugBuffer.size
+  );
   const commandBuffer = encoder.finish();
   device.queue.submit([commandBuffer]);
 
@@ -153,15 +179,24 @@ export async function main(navigator) {
   );
   mappableMemdestBuffer.unmap();
 
+  await mappableMemdestDebugBuffer.mapAsync(GPUMapMode.READ);
+  const memdebug = new (datatypeToTypedArray(datatype))(
+    mappableMemdestDebugBuffer.getMappedRange().slice()
+  );
+  mappableMemdestDebugBuffer.unmap();
+
+  console.log("memdebug", memdebug);
+
   if (primitive.validate) {
     const errorstr = primitive.validate({
       inputBuffer: memsrcX32,
       outputBuffer: memdest,
+      debugBuffer: memdebug,
     });
     if (errorstr == "") {
       console.info("Validation passed");
     } else {
-      console.error(`Validation failed: ${errorstr}`);
+      console.error(`Validation failed:\n${errorstr}`);
     }
   }
   // currently no timing computation, that's fine
