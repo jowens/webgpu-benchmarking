@@ -54,7 +54,7 @@ var<storage, read_write> misc: array<u32>;
 const BLOCK_DIM: u32 = ${this.workgroupSize};
 const SPLIT_MEMBERS = 2u;
 const MIN_SUBGROUP_SIZE = 4u;
-const MAX_PARTIALS_SIZE = 2u * BLOCK_DIM / MIN_SUBGROUP_SIZE; //Double for conflict avoidance
+const MAX_PARTIALS_SIZE = 2u * BLOCK_DIM / MIN_SUBGROUP_SIZE; // 2 per subgroup (double for conflict avoidance)
 
 const VEC4_SPT = 4u; /* each thread handles VEC4_SPT vec4s */
 const VEC_TILE_SIZE = BLOCK_DIM * VEC4_SPT; /* how many vec4s in the tile */
@@ -95,7 +95,9 @@ fn unsafeBallot(pred: bool) -> u32 {
 fn join(mine: u32, tid: u32) -> ${this.datatype} {
   let xor = tid ^ 1;
   let theirs = unsafeShuffle(mine, xor);
-  return bitcast<${this.datatype}>((mine << (16u * tid)) | (theirs << (16u * xor)));
+  return bitcast<${
+    this.datatype
+  }>((mine << (16u * tid)) | (theirs << (16u * xor)));
 }
 
 /* I need to store x, which is a data element of type $datatype.
@@ -108,8 +110,9 @@ fn split(x: ${this.datatype}, tid: u32) -> u32 {
 
 ${this.binop.wgslfn}
 ${this.fnDeclarations.vec4InclusiveScan}
+${this.fnDeclarations.vec4InclusiveToExclusive}
 ${this.fnDeclarations.vec4Reduce}
-${this.fnDeclarations.vec4ScalarOpV4}
+${this.fnDeclarations.vec4ScalarBinopV4}
 ${this.fnDeclarations.subgroupInclusiveOpScan}
 ${this.fnDeclarations.subgroupReduce}
 
@@ -176,13 +179,30 @@ fn main(
                                       t_scan[k].w /* reduction of my vec4 */ ),
                                 laneid,
                                 lane_count);
-      /* (b) shuffle the scan result from thread x to thread x+1, wrapping */
+      /* (b) shuffle the scan result from thread x to thread x+1, wrapping
+       * this does two things:
+       *    (i) for laneid > 0, it communicates the reduction of all prior elements
+       *        (from previous lanes) in this subgroup
+       *   (ii) for laneid == 0, it contains the reduction of *all* lanes, which
+       *        then gets passed into the next scan
+       */
       let t = subgroupShuffle(subgroupScan, circular_shift);
-      /* (c) apply that scan to our current thread's vec4. t_scan[k] now contains
-       *     inclusive scan of all elements in this subgroup. */
-      t_scan[k] = vec4ScalarOpV4(select(prev, t, laneid != 0u), t_scan[k]);
+      /* (c) apply that scan to our current thread's vec4. Recall that our current
+       *     thread's vec4 in t_scan contains the inclusive scan of the vec4.
+       *     If we want an inclusive scan overall, great, we don't have to do anything.
+       *     If we instead want an exclusive scan per vec4, we just recompute it
+       *     from the inclusive scan per vec4 here.
+       *     After this operation, t_scan[k] now contains an {exclusive, inclusive}
+       *     scan of all elements in this subgroup.
+       */
+      ${
+        this.type == "exclusive"
+          ? "t_scan[k] = vec4InclusiveToExclusive(t_scan[k]);"
+          : ""
+      }
+      t_scan[k] = vec4ScalarBinopV4(select(prev, t, laneid != 0u), t_scan[k]);
       /* (d) save the reduction of the entire subgroup into t for next k */
-      prev = t;
+      prev = t; /* note: only valid for laneid == 0 */
     }
 
     if (laneid == 0u) {
@@ -206,7 +226,9 @@ fn main(
     for(var j = lane_count; j <= aligned_size; j <<= lane_log) {
       let step = local_spine >> offset;
       let pred = threadid.x < step;
-      let t = subgroupInclusiveOpScan(select(${this.binop.identity}, wg_partials[threadid.x + top_offset], pred), laneid, lane_count);
+      let t = subgroupInclusiveOpScan(select(${
+        this.binop.identity
+      }, wg_partials[threadid.x + top_offset], pred), laneid, lane_count);
       if (pred) {
         wg_partials[threadid.x + top_offset] = t;
         if (lane_pred) {
@@ -226,10 +248,13 @@ fn main(
       offset += lane_log;
     }
   }
+  /* output of this code block: populated wg_partials */
+  /* local_spine is the number of subgroups in my workgroup */
+  /* wg_partials[sid] contains reduction of subgroups [0, sid] */
+  /* wg_partials[local_spine - 1u] contains reduction of my entire tile */
   workgroupBarrier();
 
   /* Post my local reduction to the spine; now visible to the whole device */
-  /* */
   if (threadid.x < SPLIT_MEMBERS /* && (tile_id & params.simulate_mask) != 0u */) {
     let t = split(wg_partials[local_spine - 1u], threadid.x) | select(FLAG_READY, FLAG_INCLUSIVE, tile_id == 0u);
     atomicStore(&spine[tile_id][threadid.x], t);
@@ -335,7 +360,9 @@ fn main(
           for (var j = lane_count; j <= aligned_size; j <<= lane_log) {
             let step = local_spine >> offset;
             let pred = threadid.x < step;
-            f_red = subgroupReduce(select(${this.binop.identity}, wg_fallback[threadid.x + top_offset], pred));
+            f_red = subgroupReduce(select(${
+              this.binop.identity
+            }, wg_fallback[threadid.x + top_offset], pred));
             if (pred && lane_pred) {
               wg_fallback[sid + step + top_offset] = f_red;
             }
@@ -379,10 +406,12 @@ fn main(
   {
     /* all writeback to output array is below */
     var i = s_offset + tile_id * VEC_TILE_SIZE;
-    let prev = binop(wg_broadcast_prev_red, select(${this.binop.identity}, wg_partials[sid - 1u], sid != 0u)); //wg_broadcast_tile_id is 0 for tile_id 0
+    let prev = binop(wg_broadcast_prev_red, select(${
+      this.binop.identity
+    }, wg_partials[sid - 1u], sid != 0u)); //wg_broadcast_tile_id is 0 for tile_id 0
     if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
       for(var k = 0u; k < VEC4_SPT; k += 1u) {
-        outputBuffer[i] = vec4ScalarOpV4(prev, t_scan[k]);
+        outputBuffer[i] = vec4ScalarBinopV4(prev, t_scan[k]);
         i += lane_count;
       }
     }
@@ -390,7 +419,7 @@ fn main(
     if (tile_id == scanParameters.work_tiles - 1u) { // this is the last tile
       for(var k = 0u; k < VEC4_SPT; k += 1u) {
         if (i < scanParameters.vec_size) {
-          outputBuffer[i] = vec4ScalarOpV4(prev, t_scan[k]);
+          outputBuffer[i] = vec4ScalarBinopV4(prev, t_scan[k]);
         }
         i += lane_count;
       }

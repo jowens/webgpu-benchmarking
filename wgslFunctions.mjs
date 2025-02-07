@@ -67,7 +67,34 @@ export class wgslFunctions {
       return out;
     }`;
   }
+  get vec4ExclusiveScan() {
+    return /* wgsl */ `
+    fn vec4ExclusiveScan(in: vec4<${this.env.datatype}>) ->
+      vec4<${this.env.datatype}> {
+      /* vec4Scan(in) = [in.x, in.x+in.y, in.x+in.y+in.z, in.x+in.y+in.z+in.w] */
+      var out: vec4<${this.env.datatype}>;
+      out.x = ${this.env.binop.identity};
+      out.y = in.x;
+      out.z = binop(in.x,  in.y);
+      out.w = binop(out.z, in.z);
+      return out;
+    }`;
+  }
+  get vec4InclusiveToExclusive() {
+    return /* wgsl */ `
+    fn vec4InclusiveToExclusive(in: vec4<${this.env.datatype}>) ->
+      vec4<${this.env.datatype}> {
+      var out: vec4<${this.env.datatype}>;
+      out.w = in.z;
+      out.z = in.y;
+      out.y = in.x;
+      out.x = ${this.env.binop.identity};
+      return out;
+    }`;
+  }
   get vec4Reduce() {
+    // TODO: Don't special-case this. Worried about polyfilling dot with
+    // int arguments, that it'll potentially do four multiplies
     if (this.env.binop instanceof BinOpAdd) {
       return /* wgsl */ `
       fn vec4Reduce(in: vec4<${this.env.datatype}>) -> ${this.env.datatype} {
@@ -81,10 +108,11 @@ export class wgslFunctions {
       }`;
     }
   }
-  get vec4ScalarOpV4() {
+  get vec4ScalarBinopV4() {
     /* if binop is +, this still seems just as efficient, unless there's a vec4 +, I guess? */
+    // TODO: "WGSL has mixed vector-scalar arithmetic operators, so it's probably best to use those if you can."
     return /* wgsl */ `
-    fn vec4ScalarOpV4(scalar: ${this.env.datatype}, vector: vec4<${this.env.datatype}>) ->
+    fn vec4ScalarBinopV4(scalar: ${this.env.datatype}, vector: vec4<${this.env.datatype}>) ->
     vec4<${this.env.datatype}> {
       var out: vec4<${this.env.datatype}>;
       out.x = binop(scalar, vector.x);
