@@ -18,7 +18,7 @@ export class DLDFScan extends BaseScan {
   }
 
   scandldfWGSL = () => {
-    return /* wgsl */ `
+    let kernel = /* wgsl */ `
 enable subgroups;
 struct ScanParameters
 {
@@ -32,7 +32,17 @@ struct ScanParameters
 var<storage, read> inputBuffer: array<vec4<${this.datatype}>>;
 
 @group(0) @binding(1)
-var<storage, read_write> outputBuffer: array<vec4<${this.datatype}>>;
+/* for scan output: array<vec4<${this.datatype}>>;
+ * for reduce output: ${this.datatype};
+ */
+var<storage, read_write> outputBuffer:
+${
+  this.type == "exclusive" || this.type == "inclusive"
+    ? "array<vec4<"
+    : "array<"
+}${this.datatype}${
+      this.type == "exclusive" || this.type == "inclusive" ? ">>" : ">"
+    };
 
 @group(0) @binding(2)
 var<uniform> scanParameters: ScanParameters;
@@ -194,13 +204,18 @@ fn main(
        *     from the inclusive scan per vec4 here.
        *     After this operation, t_scan[k] now contains an {exclusive, inclusive}
        *     scan of all elements in this subgroup.
+       *     If we're only computing reduction, we don't have to update t_scan at all.
        */
       ${
         this.type == "exclusive"
           ? "t_scan[k] = vec4InclusiveToExclusive(t_scan[k]);"
           : ""
       }
-      t_scan[k] = vec4ScalarBinopV4(select(prev, t, laneid != 0u), t_scan[k]);
+      ${
+        this.type == "exclusive" || this.type == "inclusive"
+          ? "t_scan[k] = vec4ScalarBinopV4(select(prev, t, laneid != 0u), t_scan[k]);"
+          : ""
+      }
       /* (d) save the reduction of the entire subgroup into t for next k */
       prev = t; /* note: only valid for laneid == 0 */
     }
@@ -401,31 +416,39 @@ fn main(
         control_flag = workgroupUniformLoad(&wg_control);
       } /* end fallback */
     } /* end control flag still locked */
-  }
+  }`;
 
-  {
-    /* all writeback to output array is below */
-    var i = s_offset + tile_id * VEC_TILE_SIZE;
-    let prev = binop(wg_broadcast_prev_red, select(${
-      this.binop.identity
-    }, wg_partials[sid - 1u], sid != 0u)); //wg_broadcast_tile_id is 0 for tile_id 0
-    if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
-      for(var k = 0u; k < VEC4_SPT; k += 1u) {
-        outputBuffer[i] = vec4ScalarBinopV4(prev, t_scan[k]);
-        i += lane_count;
-      }
-    }
-
-    if (tile_id == scanParameters.work_tiles - 1u) { // this is the last tile
-      for(var k = 0u; k < VEC4_SPT; k += 1u) {
-        if (i < scanParameters.vec_size) {
-          outputBuffer[i] = vec4ScalarBinopV4(prev, t_scan[k]);
+    if (this.type == "exclusive" || this.type == "inclusive") {
+      kernel += /* wgsl */ `
+        var i = s_offset + tile_id * VEC_TILE_SIZE;
+        let prev = binop(wg_broadcast_prev_red, select(${this.binop.identity}, wg_partials[sid - 1u], sid != 0u)); //wg_broadcast_tile_id is 0 for tile_id 0
+        if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
+          for(var k = 0u; k < VEC4_SPT; k += 1u) {
+            outputBuffer[i] = vec4ScalarBinopV4(prev, t_scan[k]);
+            i += lane_count;
+          }
         }
-        i += lane_count;
+
+        if (tile_id == scanParameters.work_tiles - 1u) { // this is the last tile
+          for(var k = 0u; k < VEC4_SPT; k += 1u) {
+            if (i < scanParameters.vec_size) {
+              outputBuffer[i] = vec4ScalarBinopV4(prev, t_scan[k]);
+            }
+            i += lane_count;
+          }
+        }
+    `;
+    } else if (this.type == "reduce") {
+      kernel += /* wgsl */ `
+      if (tile_id == scanParameters.work_tiles - 1u) { // this is the last tile
+        if (threadid.x == 0u) {
+          outputBuffer[0] = binop(wg_broadcast_prev_red, wg_partials[local_spine - 1u]);
+        }
       }
+      `;
     }
-  }
-}`;
+    kernel += "\n}";
+    return kernel;
   };
 
   finalizeRuntimeParameters() {
@@ -530,6 +553,22 @@ export const DLDFScanTestSuite = new BaseTestSuite({
   primitiveConfig: {
     datatype: "u32",
     type: "inclusive",
+    binop: BinOpMaxU32,
+    gputimestamps: true,
+  },
+  plots: [DLDFScanPlot],
+});
+
+export const DLDFReduceTestSuite = new BaseTestSuite({
+  category: "reduce",
+  testSuite: "DLDF reduce",
+  trials: 1,
+  params: DLDFScanParams,
+  uniqueRuns: ["inputLength", "workgroupSize"],
+  primitive: DLDFScan,
+  primitiveConfig: {
+    datatype: "u32",
+    type: "reduce",
     binop: BinOpMaxU32,
     gputimestamps: true,
   },
