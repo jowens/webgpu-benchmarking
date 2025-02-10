@@ -17,9 +17,13 @@ export class BaseScan extends BasePrimitive {
 
     // default scan is exclusive
     this.type = args.type ?? "exclusive";
-    if (this.type != "inclusive" && this.type != "exclusive") {
+    if (
+      this.type != "inclusive" &&
+      this.type != "exclusive" &&
+      this.type != "reduce"
+    ) {
       throw new Error(
-        `${this.constructor.name}: scan type (currently ${this.type}) must be inclusive or exclusive`
+        `${this.constructor.name}: scan type (currently ${this.type}) must be {inclusive, exclusive, reduce}.`
       );
     }
 
@@ -78,6 +82,12 @@ export class BaseScan extends BasePrimitive {
         case "inclusive":
           referenceOutput[i] = this.binop.op(
             i == 0 ? this.binop.identity : referenceOutput[i - 1],
+            memsrc[i]
+          );
+          break;
+        case "reduce":
+          referenceOutput[0] = this.binop.op(
+            i == 0 ? this.binop.identity : referenceOutput[0],
             memsrc[i]
           );
           break;
