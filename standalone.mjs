@@ -86,8 +86,8 @@ export async function main(navigator) {
   // eslint-disable-next-line no-unused-vars
   const dldfscanPrimitive = new DLDFScan({
     device,
-    binop: new BinOpMin({ datatype }),
-    type: "inclusive",
+    binop: new BinOpAdd({ datatype }),
+    type: "reduce",
     datatype: datatype,
     gputimestamps: true, //// TODO should work without this
   });
@@ -103,7 +103,14 @@ export async function main(navigator) {
       memdestBytes = 4;
       break;
     default:
-      memdestBytes = memsrcX32.byteLength;
+      if (
+        primitive.constructor.name == "DLDFScan" &&
+        primitive.type == "reduce"
+      ) {
+        memdestBytes = 4;
+      } else {
+        memdestBytes = memsrcX32.byteLength;
+      }
       break;
   }
 
