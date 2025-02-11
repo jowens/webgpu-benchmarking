@@ -1,7 +1,12 @@
 import { range, arrayProd } from "./util.mjs";
 import { Kernel, AllocateBuffer } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
-import { BinOpAddF32, BinOpAddU32, BinOpMaxU32 } from "./binop.mjs";
+import {
+  BinOpAddF32,
+  BinOpAddU32,
+  BinOpMaxU32,
+  BinOpMinF32,
+} from "./binop.mjs";
 import { datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
 import { BaseScan, scanWGSizePlot, scanWGCountPlot } from "./scan.mjs";
 
@@ -33,7 +38,7 @@ var<storage, read> inputBuffer: array<vec4<${this.datatype}>>;
 
 @group(0) @binding(1)
 /* for scan output: array<vec4<${this.datatype}>>;
- * for reduce output: ${this.datatype};
+ * for reduce output: array<${this.datatype}>;
  */
 var<storage, read_write> outputBuffer:
 ${
@@ -146,10 +151,12 @@ fn main(
   let tile_id = workgroupUniformLoad(&wg_broadcast_tile_id);
   // s_offset: within this workgroup, at what index do I start loading?
   let s_offset = laneid + sid * lane_count * VEC4_SPT;
-
+`;
+    if (this.type == "exclusive" || this.type == "inclusive") {
+      kernel += /* wgsl */ `
   var t_scan = array<vec4<${this.datatype}>, VEC4_SPT>();
   {
-    /* This block reduces VEC4_SPT vec4s per thread across a subgroup. This is
+    /* This code block reduces VEC4_SPT vec4s per thread across a subgroup. This is
      *     subgroup_size * vec4 * VEC4_SPT items. Each t_scan[k] stripe is
      *     subgroup_size * vec4 items.
      * (1) Per thread: Fill t_scan with inclusive 4-wide scans of input vec4s
@@ -226,24 +233,58 @@ fn main(
     /* Outputs of this code block:
      * - wg_partials[sid] (subgroup reduction of vec4 per thread)
      * - t_scan[0:VEC4_SPT] (scan of vec4 across subgroup)
+     *   (t_scan is not used if we are only reducing)
      */
-  }
-  workgroupBarrier();
+  }`;
+    }
 
-  // Non-divergent subgroup agnostic inclusive scan across subgroup partial reductions
-  let lane_log = u32(countTrailingZeros(lane_count));
-  let local_spine: u32 = BLOCK_DIM >> lane_log;
+    if (this.type == "reduce") {
+      /* reduce is much much simpler. Reduce across each thread's vector (vec4Reduce),
+       * then across the subgroup (subgroupReduce), then serially across the VEC4_SPT
+       * vectors within the subgroup; put result in wg_partials[subgroupID].  */
+      kernel += /* wgsl */ `
+  {
+    var subgroupReduction: ${this.datatype} = ${this.binop.identity};
+    var i = s_offset + tile_id * VEC_TILE_SIZE;
+    if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
+      for (var k = 0u; k < VEC4_SPT; k += 1u) {
+        subgroupReduction = binop(subgroupReduction,
+                                  subgroupReduce(vec4Reduce(inputBuffer[i])));
+        i += lane_count;
+      }
+    }
+
+    if (tile_id == scanParameters.work_tiles - 1u) { // the last tile
+      for (var k = 0u; k < VEC4_SPT; k += 1u) {
+        subgroupReduction = binop(subgroupReduction,
+                                  subgroupReduce(select(${this.binop.identity},
+                                                        vec4Reduce(inputBuffer[i]),
+                                                        i < scanParameters.vec_size)));
+        i += lane_count;
+      }
+    }
+    if (laneid == 0u) {
+      wg_partials[sid] = subgroupReduction;
+    }
+  }
+  `;
+    }
+    kernel += /* wgsl */ `
+    workgroupBarrier();
+
+  /* Non-divergent subgroup agnostic inclusive scan across subgroup partial reductions */
+  let lane_log = u32(countTrailingZeros(lane_count)); /* log_2(lane_count) */
+  let local_spine: u32 = BLOCK_DIM >> lane_log; /* BLOCK_DIM / subgroup size; how
+                                                 * many partial reductions in this tile? */
   let aligned_size = 1u << ((u32(countTrailingZeros(local_spine)) + lane_log - 1u) / lane_log * lane_log);
   {
     var offset = 0u;
     var top_offset = 0u;
     let lane_pred = laneid == lane_count - 1u;
-    for(var j = lane_count; j <= aligned_size; j <<= lane_log) {
+    for (var j = lane_count; j <= aligned_size; j <<= lane_log) {
       let step = local_spine >> offset;
       let pred = threadid.x < step;
-      let t = subgroupInclusiveOpScan(select(${
-        this.binop.identity
-      }, wg_partials[threadid.x + top_offset], pred), laneid, lane_count);
+      let t = subgroupInclusiveOpScan(select(${this.binop.identity}, wg_partials[threadid.x + top_offset], pred), laneid, lane_count);
       if (pred) {
         wg_partials[threadid.x + top_offset] = t;
         if (lane_pred) {
@@ -263,10 +304,14 @@ fn main(
       offset += lane_log;
     }
   }
-  /* output of this code block: populated wg_partials */
-  /* local_spine is the number of subgroups in my workgroup */
-  /* wg_partials[sid] contains reduction of subgroups [0, sid] */
-  /* wg_partials[local_spine - 1u] contains reduction of my entire tile */
+  /** output of this code block: populated wg_partials
+   * local_spine is the number of subgroups in my workgroup
+   * wg_partials[sid] contains reduction of subgroups [0, sid]
+   * - if we're reducing, we don't care about this
+   * wg_partials[local_spine - 1u] contains reduction of my entire tile
+   * - scan and reduction both care about this
+   */
+
   workgroupBarrier();
 
   /* Post my local reduction to the spine; now visible to the whole device */
@@ -375,9 +420,7 @@ fn main(
           for (var j = lane_count; j <= aligned_size; j <<= lane_log) {
             let step = local_spine >> offset;
             let pred = threadid.x < step;
-            f_red = subgroupReduce(select(${
-              this.binop.identity
-            }, wg_fallback[threadid.x + top_offset], pred));
+            f_red = subgroupReduce(select(${this.binop.identity}, wg_fallback[threadid.x + top_offset], pred));
             if (pred && lane_pred) {
               wg_fallback[sid + step + top_offset] = f_red;
             }
@@ -419,9 +462,19 @@ fn main(
   }`;
 
     if (this.type == "exclusive" || this.type == "inclusive") {
+      /* For scan computations:
+       * At this point, t_scan[k] holds a per-subgroup scan.
+       * This code block adds the [reduction of all prior blocks +
+       * all prior subgroups within this block == prev] within
+       * the block, serially over t_scan, and then writes them back to
+       * the output
+       */
       kernel += /* wgsl */ `
         var i = s_offset + tile_id * VEC_TILE_SIZE;
-        let prev = binop(wg_broadcast_prev_red, select(${this.binop.identity}, wg_partials[sid - 1u], sid != 0u)); //wg_broadcast_tile_id is 0 for tile_id 0
+        let prev = binop(wg_broadcast_prev_red,
+                         select(${this.binop.identity},
+                                wg_partials[sid - 1u],
+                                sid != 0u)); //wg_broadcast_tile_id is 0 for tile_id 0
         if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
           for(var k = 0u; k < VEC4_SPT; k += 1u) {
             outputBuffer[i] = vec4ScalarBinopV4(prev, t_scan[k]);
@@ -436,16 +489,18 @@ fn main(
             }
             i += lane_count;
           }
-        }
-    `;
+        }`;
     } else if (this.type == "reduce") {
+      /** For reduction computations:
+       * Much simpler. Only thread 0 of the last tile must add the reduction
+       * of all previous tiles to its tile reduction and write that to the output.
+       */
       kernel += /* wgsl */ `
-      if (tile_id == scanParameters.work_tiles - 1u) { // this is the last tile
-        if (threadid.x == 0u) {
-          outputBuffer[0] = binop(wg_broadcast_prev_red, wg_partials[local_spine - 1u]);
-        }
-      }
-      `;
+        if (tile_id == scanParameters.work_tiles - 1u) { // this is the last tile
+          if (threadid.x == 0u) {
+            outputBuffer[0] = binop(wg_broadcast_prev_red, wg_partials[local_spine - 1u]);
+          }
+        }`;
     }
     kernel += "\n}";
     return kernel;
@@ -517,7 +572,7 @@ fn main(
             "misc",
           ],
         ],
-        label: "Thomas Smith's scan with decoupled lookback/decoupled fallback",
+        label: `Thomas Smith's scan (${this.type}) with decoupled lookback/decoupled fallback`,
         logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
           return this.getSimpleDispatchGeometry();
@@ -567,9 +622,9 @@ export const DLDFReduceTestSuite = new BaseTestSuite({
   uniqueRuns: ["inputLength", "workgroupSize"],
   primitive: DLDFScan,
   primitiveConfig: {
-    datatype: "u32",
+    datatype: "f32",
     type: "reduce",
-    binop: BinOpMaxU32,
+    binop: BinOpAddF32,
     gputimestamps: true,
   },
   plots: [DLDFScanPlot],
