@@ -1,7 +1,10 @@
 import { Buffer } from "./buffer.mjs";
 import { TestInputBuffer, TestOutputBuffer } from "./testbuffer.mjs";
 import { TimingHelper } from "./webgpufundamentals-timing.mjs";
-import { wgslFunctions } from "./wgslFunctions.mjs";
+import {
+  wgslFunctions,
+  wgslFunctionsWithoutSubgroupSupport,
+} from "./wgslFunctions.mjs";
 import { formatWGSL } from "./util.mjs";
 
 export class BasePrimitive {
@@ -53,7 +56,12 @@ export class BasePrimitive {
     }
 
     this.__buffers = {}; // this is essentially private
-    this.fnDeclarations = new wgslFunctions(this);
+    const hasSubgroups = this.device.features.has("subgroups");
+    if (hasSubgroups) {
+      this.fnDeclarations = new wgslFunctions(this);
+    } else {
+      this.fnDeclarations = new wgslFunctionsWithoutSubgroupSupport(this);
+    }
   }
 
   /** registerBuffer associates a name with a buffer and

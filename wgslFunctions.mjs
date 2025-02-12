@@ -9,6 +9,25 @@
  *    declared within the primitive)
  */
 
+/** wgslFunctions requires subgroups
+ *  wgslFunctionsWithoutSubgroupSupport does not
+ *
+ * For writers of kernels who are not writing their own functions:
+ * - Declare subgroups with ${this.fnDeclarations.enableSubgroupsIfAppropriate}
+ * - The Primitive class picks the right library to include
+ *
+ * For writers of functions:
+ * - If a function doesn't require subgroups, put it in wgslFunctions
+ * - If it does, write the subgroup version in wgslFunctions
+ *   and the non-subgroup version in wgslFunctionsWithoutSubgroupSupport;
+ *   the latter will override the former (this is done in the Primitive class)
+ *
+ * General philosophy is to design kernels around an expectation that
+ * subgroups are present and optimize kernel organization strategies for
+ * that case; a non-subgroup-enabled function that provides fallback must
+ * be correct but may not be optimized.
+ */
+
 import { BinOpAdd } from "./binop.mjs";
 
 export class wgslFunctions {
@@ -35,6 +54,9 @@ export class wgslFunctions {
     @builtin(workgroup_id) wgid: vec3u /* 3D workgroup id within compute shader grid */,
     @builtin(subgroup_size) sgsz: u32 /* 32 on Apple GPUs */
   }`;
+  }
+  get enableSubgroupsIfAppropriate() {
+    return "enable subgroups;\n";
   }
   get roundUpDivU32() {
     return /* wgsl */ `fn roundUpDivU32(a : u32, b : u32) -> u32 {
@@ -328,5 +350,25 @@ export class wgslFunctions {
       }
       return;
     };`;
+  }
+}
+
+/** Philosophy of subgroup fallbacks:
+ * - Emulate subgroup operations via workgroup memory
+ * - This requires workgroup barriers since we can make no assumptions
+ *   about SIMD width / lockstep execution
+ * - Given that we HAVE to have workgroup barriers, might as well support
+ *   large workgroups
+ * - So assume that the emulated subgroup size == workgroup size (1 subgroup
+ *   per workgroup)
+ * - Implementations are generally O(n log n) (Hillis-Steele / Kogge-Stone)
+ */
+
+export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
+  constructor(env) {
+    super(env);
+  }
+  get enableSubgroupsIfAppropriate() {
+    return "";
   }
 }

@@ -24,7 +24,9 @@ export class DLDFScan extends BaseScan {
 
   scandldfWGSL = () => {
     let kernel = /* wgsl */ `
-enable subgroups;
+/* enables subgroups ONLY IF it was requested when creating device */
+/* WGSL requires this declaration is first in the shader */
+${this.fnDeclarations.enableSubgroupsIfAppropriate}
 struct ScanParameters
 {
   size: u32,
@@ -123,7 +125,9 @@ fn split(x: ${this.datatype}, tid: u32) -> u32 {
   return (bitcast<u32>(x) >> (tid * 16u)) & VALUE_MASK;
 }
 
+/* defines "binop", the operation associated with the scan monoid */
 ${this.binop.wgslfn}
+/* the following declarations use subgroups only if enabled */
 ${this.fnDeclarations.vec4InclusiveScan}
 ${this.fnDeclarations.vec4InclusiveToExclusive}
 ${this.fnDeclarations.vec4Reduce}
