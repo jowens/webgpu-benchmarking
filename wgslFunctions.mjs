@@ -40,13 +40,13 @@ export class wgslFunctions {
     @builtin(global_invocation_id) gid: vec3u /* 3D thread id in compute shader grid */,
     @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
     @builtin(workgroup_id) wgid: vec3u /* 3D workgroup id within compute shader grid */,
-    @builtin(local_invocation_index) lid: u32 /* 1D thread index within workgroup */,
+    @builtin(local_invocation_index) lidx: u32 /* 1D thread index within workgroup */,
     @builtin(subgroup_size) sgsz: u32, /* 32 on Apple GPUs */
     @builtin(subgroup_invocation_id) sgid: u32 /* 1D thread index within subgroup */
   }
   struct BuiltinsNonuniform {
     @builtin(global_invocation_id) gid: vec3u /* 3D thread id in compute shader grid */,
-    @builtin(local_invocation_index) lid: u32 /* 1D thread index within workgroup */,
+    @builtin(local_invocation_index) lidx: u32 /* 1D thread index within workgroup */,
     @builtin(subgroup_invocation_id) sgid: u32 /* 1D thread index within subgroup */
   }
   struct BuiltinsUniform {
@@ -55,8 +55,14 @@ export class wgslFunctions {
     @builtin(subgroup_size) sgsz: u32 /* 32 on Apple GPUs */
   }`;
   }
+  get initializeSubgroupVars() {
+    return "let sgid = builtinsNonuniform.sgid;\nlet sgsz = builtinsUniform.sgsz;\n";
+  }
   get enableSubgroupsIfAppropriate() {
     return "enable subgroups;\n";
+  }
+  get wgMemoryForSubgroupsIfAppropriate() {
+    return "";
   }
   get roundUpDivU32() {
     return /* wgsl */ `fn roundUpDivU32(a : u32, b : u32) -> u32 {
@@ -145,6 +151,18 @@ export class wgslFunctions {
     }
     `;
   }
+  get subgroupShuffle() {
+    /* keep builtin */
+    return "";
+  }
+  get subgroupBallot() {
+    /* keep builtin */
+    return "";
+  }
+  get subgroupMax() {
+    /* keep builtin */
+    return "";
+  }
   get subgroupInclusiveOpScan() {
     /* helpful reference from Thomas Smith:
      *   https://github.com/b0nes164/GPUSorting/blob/main/GPUSortingCUDA/Utils.cuh
@@ -159,13 +177,13 @@ export class wgslFunctions {
       `;
     } else {
       /* emulate subgroupInclusiveScanOp with subgroupShuffleUp */
-      return /* wgsl */ `
       /* for (int i = 1; i <= 16; i <<= 1) { // 16 = LANE_COUNT >> 1
        *   const uint32_t t = __shfl_up_sync(0xffffffff, val, i, 32);
        *   if (getLaneId() >= i) val += t;
        * }
        * return val;
        */
+      return /* wgsl */ `
       fn subgroupInclusiveOpScan(in: ${this.env.datatype}, laneID: u32, laneCount: u32) ->
         ${this.env.datatype} {
         var i: u32;
@@ -368,7 +386,59 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
   constructor(env) {
     super(env);
   }
+  get commonDefinitions() {
+    return /* wgsl */ `
+    struct Builtins {
+      @builtin(global_invocation_id) gid: vec3u /* 3D thread id in compute shader grid */,
+      @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
+      @builtin(workgroup_id) wgid: vec3u /* 3D workgroup id within compute shader grid */,
+      @builtin(local_invocation_index) lidx: u32 /* 1D thread index within workgroup */,
+      sgsz: u32, /* 32 on Apple GPUs */
+      sgid: u32 /* 1D thread index within subgroup */
+    }
+    struct BuiltinsNonuniform {
+      @builtin(global_invocation_id) gid: vec3u /* 3D thread id in compute shader grid */,
+      @builtin(local_invocation_index) lidx: u32 /* 1D thread index within workgroup */
+    }
+    struct BuiltinsUniform {
+      @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
+      @builtin(workgroup_id) wgid: vec3u /* 3D workgroup id within compute shader grid */
+    }`;
+  }
+  get initializeSubgroupVars() {
+    return /* wgsl */ `
+    let sgsz: u32 = ${this.env.workgroupSize};
+    let sgid: u32 = builtinsNonuniform.lidx;`;
+  }
   get enableSubgroupsIfAppropriate() {
     return "";
+  }
+  get wgMemoryForSubgroupsIfAppropriate() {
+    return /* wgsl */ `var<workgroup> wg_sw_subgroups: array<${this.env.datatype}, ${this.env.workgroupSize}>;\n`;
+  }
+  get subgroupShuffle() {
+    return /* wgsl */ `fn subgroupShuffle(x: ${this.env.datatype}, source: u32) -> ${this.env.datatype} {
+  return x;
+}`;
+  }
+  get subgroupBallot() {
+    return /* wgsl */ `fn subgroupBallot(pred: bool) -> vec4<u32> {
+  return vec4<u32>(0);
+}`;
+  }
+  get subgroupReduce() {
+    return /* wgsl */ `fn subgroupReduce(in: ${this.env.datatype}) -> ${this.env.datatype} {
+      return in;
+    }`;
+  }
+  get subgroupInclusiveOpScan() {
+    /* helpful reference from Thomas Smith:
+     *   https://github.com/b0nes164/GPUSorting/blob/main/GPUSortingCUDA/Utils.cuh
+     */
+    return /* wgsl */ `
+    fn subgroupInclusiveOpScan(in: ${this.env.datatype}, laneID: u32, laneCount: u32) ->
+      ${this.env.datatype} {
+      return in;
+    }`;
   }
 }
