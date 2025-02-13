@@ -1,4 +1,4 @@
-import { range, arrayProd } from "./util.mjs";
+import { range } from "./util.mjs";
 import { Kernel, AllocateBuffer } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import {
@@ -7,8 +7,8 @@ import {
   BinOpMaxU32,
   BinOpMinF32,
 } from "./binop.mjs";
-import { datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
-import { BaseScan, scanWGSizePlot, scanWGCountPlot } from "./scan.mjs";
+import { datatypeToBytes } from "./util.mjs";
+import { BaseScan } from "./scan.mjs";
 
 export class DLDFScan extends BaseScan {
   constructor(args) {
@@ -42,12 +42,11 @@ var<storage, read> inputBuffer: array<vec4<${this.datatype}>>;
 /* for scan output: array<vec4<${this.datatype}>>;
  * for reduce output: array<${this.datatype}>;
  */
-var<storage, read_write> outputBuffer:
-${
-  this.type == "exclusive" || this.type == "inclusive"
-    ? "array<vec4<"
-    : "array<"
-}${this.datatype}${
+var<storage, read_write> outputBuffer: ${
+      this.type == "exclusive" || this.type == "inclusive"
+        ? "array<vec4<"
+        : "array<"
+    }${this.datatype}${
       this.type == "exclusive" || this.type == "inclusive" ? ">>" : ">"
     };
 
@@ -92,6 +91,9 @@ var<workgroup> wg_broadcast_tile_id: u32;
 var<workgroup> wg_broadcast_prev_red: ${this.datatype};
 var<workgroup> wg_partials: array<${this.datatype}, MAX_PARTIALS_SIZE>;
 var<workgroup> wg_fallback: array<${this.datatype}, MAX_PARTIALS_SIZE>;
+/** If we're making subgroup calls and we don't have subgroup hardware,
+ * we need to declare workgroup memory to emulate them */
+${this.fnDeclarations.wgMemoryForSubgroupsIfAppropriate}
 
 @diagnostic(off, subgroup_uniformity)
 fn unsafeShuffle(x: u32, source: u32) -> u32 {
@@ -127,25 +129,31 @@ fn split(x: ${this.datatype}, tid: u32) -> u32 {
 
 /* defines "binop", the operation associated with the scan monoid */
 ${this.binop.wgslfn}
-/* the following declarations use subgroups only if enabled */
+/* the following declarations use subgroups ONLY IF enabled */
+${this.fnDeclarations.commonDefinitions}
 ${this.fnDeclarations.vec4InclusiveScan}
 ${this.fnDeclarations.vec4InclusiveToExclusive}
 ${this.fnDeclarations.vec4Reduce}
 ${this.fnDeclarations.vec4ScalarBinopV4}
+${this.fnDeclarations.subgroupSize}
+${this.fnDeclarations.subgroupInvocationID}
 ${this.fnDeclarations.subgroupInclusiveOpScan}
 ${this.fnDeclarations.subgroupReduce}
+${this.fnDeclarations.subgroupShuffle}
+${this.fnDeclarations.subgroupBallot}
 
 @compute @workgroup_size(BLOCK_DIM, 1, 1)
-fn main(
-  @builtin(local_invocation_id) threadid: vec3<u32>,
-  @builtin(subgroup_invocation_id) laneid: u32,
-  @builtin(subgroup_size) lane_count: u32) {
+fn main(builtinsUniform: BuiltinsUniform,
+        builtinsNonuniform: BuiltinsNonuniform) {
+//   @builtin(local_invocation_id) threadid: vec3<u32>,
+//   @builtin(subgroup_invocation_id) laneid: u32,
+//   @builtin(subgroup_size) lane_count: u32) {
 
   // sid is subgroup ID, "which subgroup am I within this workgroup"
-  let sid = threadid.x / lane_count; // Caution 1D workgroup ONLY! Ok, but technically not in HLSL spec
+  let sid = builtinsNonuniform.lidx / subgroupSize(builtinsUniform); // Caution 1D workgroup ONLY! Ok, but technically not in HLSL spec
 
   // acquire partition index, initialize previous reduction var, set the lock
-  if (threadid.x == 0u) {
+  if (builtinsNonuniform.lidx == 0u) {
     wg_broadcast_tile_id = atomicAdd(&scan_bump, 1u);
     /* this next initialization is important for block 0 because that block never
      * enters lookback and thus this broadcast value is never otherwise set */
@@ -154,7 +162,7 @@ fn main(
   }
   let tile_id = workgroupUniformLoad(&wg_broadcast_tile_id);
   // s_offset: within this workgroup, at what index do I start loading?
-  let s_offset = laneid + sid * lane_count * VEC4_SPT;
+  let s_offset = subgroupInvocationID(builtinsNonuniform) + sid * subgroupSize(builtinsUniform) * VEC4_SPT;
 `;
     if (this.type == "exclusive" || this.type == "inclusive") {
       kernel += /* wgsl */ `
@@ -164,13 +172,13 @@ fn main(
      *     subgroup_size * vec4 * VEC4_SPT items. Each t_scan[k] stripe is
      *     subgroup_size * vec4 items.
      * (1) Per thread: Fill t_scan with inclusive 4-wide scans of input vec4s
-     *     Note thread i reads items i, i+lane_count, i+2*lane_count, etc.
+     *     Note thread i reads items i, i+subgroupSize(builtinsUniform), i+2*subgroupSize(builtinsUniform), etc.
      */
     var i = s_offset + tile_id * VEC_TILE_SIZE;
     if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
       for (var k = 0u; k < VEC4_SPT; k += 1u) {
         t_scan[k] = vec4InclusiveScan(inputBuffer[i]);
-        i += lane_count;
+        i += subgroupSize(builtinsUniform);
       }
     }
 
@@ -179,7 +187,7 @@ fn main(
         if (i < scanParameters.vec_size) {
           t_scan[k] = vec4InclusiveScan(inputBuffer[i]);
         }
-        i += lane_count;
+        i += subgroupSize(builtinsUniform);
       }
     }
     /* t_scan[k].w contains reduction of its vec4 */
@@ -188,26 +196,26 @@ fn main(
      */
 
     var prev: ${this.datatype} = ${this.binop.identity};
-    let lane_mask = lane_count - 1u;
-    let circular_shift = (laneid + lane_mask) & lane_mask;
+    let lane_mask = subgroupSize(builtinsUniform) - 1u;
+    let circular_shift = (subgroupInvocationID(builtinsNonuniform) + lane_mask) & lane_mask;
     /* circular_shift: source is preceding thread in my subgroup, wrapping for thread 0 */
     for (var k = 0u; k < VEC4_SPT; k += 1u) {
       /* (a) scan across reduction of each vec4, feeding in input element "prev" */
-      let subgroupScan =
+      let sgScan =
         subgroupInclusiveOpScan(binop(select(prev,
                                              ${this.binop.identity},
-                                             laneid != 0u),
+                                             subgroupInvocationID(builtinsNonuniform) != 0u),
                                       t_scan[k].w /* reduction of my vec4 */ ),
-                                laneid,
-                                lane_count);
+                                subgroupInvocationID(builtinsNonuniform),
+                                subgroupSize(builtinsUniform));
       /* (b) shuffle the scan result from thread x to thread x+1, wrapping
        * this does two things:
-       *    (i) for laneid > 0, it communicates the reduction of all prior elements
+       *    (i) for subgroupInvocationID(builtinsNonuniform) > 0, it communicates the reduction of all prior elements
        *        (from previous lanes) in this subgroup
-       *   (ii) for laneid == 0, it contains the reduction of *all* lanes, which
+       *   (ii) for subgroupInvocationID(builtinsNonuniform) == 0, it contains the reduction of *all* lanes, which
        *        then gets passed into the next scan
        */
-      let t = subgroupShuffle(subgroupScan, circular_shift);
+      let t = subgroupShuffle(sgScan, circular_shift);
       /* (c) apply that scan to our current thread's vec4. Recall that our current
        *     thread's vec4 in t_scan contains the inclusive scan of the vec4.
        *     If we want an inclusive scan overall, great, we don't have to do anything.
@@ -224,14 +232,14 @@ fn main(
       }
       ${
         this.type == "exclusive" || this.type == "inclusive"
-          ? "t_scan[k] = vec4ScalarBinopV4(select(prev, t, laneid != 0u), t_scan[k]);"
+          ? "t_scan[k] = vec4ScalarBinopV4(select(prev, t, subgroupInvocationID(builtinsNonuniform) != 0u), t_scan[k]);"
           : ""
       }
       /* (d) save the reduction of the entire subgroup into t for next k */
-      prev = t; /* note: only valid for laneid == 0 */
+      prev = t; /* note: only valid for subgroupInvocationID(builtinsNonuniform) == 0 */
     }
 
-    if (laneid == 0u) {
+    if (subgroupInvocationID(builtinsNonuniform) == 0u) {
       wg_partials[sid] = prev;
     }
     /* Outputs of this code block:
@@ -254,7 +262,7 @@ fn main(
       for (var k = 0u; k < VEC4_SPT; k += 1u) {
         subgroupReduction = binop(subgroupReduction,
                                   subgroupReduce(vec4Reduce(inputBuffer[i])));
-        i += lane_count;
+        i += subgroupSize(builtinsUniform);
       }
     }
 
@@ -264,10 +272,10 @@ fn main(
                                   subgroupReduce(select(${this.binop.identity},
                                                         vec4Reduce(inputBuffer[i]),
                                                         i < scanParameters.vec_size)));
-        i += lane_count;
+        i += subgroupSize(builtinsUniform);
       }
     }
-    if (laneid == 0u) {
+    if (subgroupInvocationID(builtinsNonuniform) == 0u) {
       wg_partials[sid] = subgroupReduction;
     }
   }
@@ -277,29 +285,33 @@ fn main(
     workgroupBarrier();
 
   /* Non-divergent subgroup agnostic inclusive scan across subgroup partial reductions */
-  let lane_log = u32(countTrailingZeros(lane_count)); /* log_2(lane_count) */
+  let lane_log = u32(countTrailingZeros(subgroupSize(builtinsUniform))); /* log_2(subgroupSize(builtinsUniform)) */
   let local_spine: u32 = BLOCK_DIM >> lane_log; /* BLOCK_DIM / subgroup size; how
                                                  * many partial reductions in this tile? */
   let aligned_size = 1u << ((u32(countTrailingZeros(local_spine)) + lane_log - 1u) / lane_log * lane_log);
   {
     var offset = 0u;
     var top_offset = 0u;
-    let lane_pred = laneid == lane_count - 1u;
-    for (var j = lane_count; j <= aligned_size; j <<= lane_log) {
+    let lane_pred = subgroupInvocationID(builtinsNonuniform) == subgroupSize(builtinsUniform) - 1u;
+    for (var j = subgroupSize(builtinsUniform); j <= aligned_size; j <<= lane_log) {
       let step = local_spine >> offset;
-      let pred = threadid.x < step;
-      let t = subgroupInclusiveOpScan(select(${this.binop.identity}, wg_partials[threadid.x + top_offset], pred), laneid, lane_count);
+      let pred = builtinsNonuniform.lidx < step;
+      let t = subgroupInclusiveOpScan(select(${this.binop.identity},
+                                             wg_partials[builtinsNonuniform.lidx + top_offset],
+                                             pred),
+                                      subgroupInvocationID(builtinsNonuniform),
+                                      subgroupSize(builtinsUniform));
       if (pred) {
-        wg_partials[threadid.x + top_offset] = t;
+        wg_partials[builtinsNonuniform.lidx + top_offset] = t;
         if (lane_pred) {
           wg_partials[sid + step + top_offset] = t;
         }
       }
       workgroupBarrier();
 
-      if (j != lane_count) {
+      if (j != subgroupSize(builtinsUniform)) {
         let rshift = j >> lane_log;
-        let index = threadid.x + rshift;
+        let index = builtinsNonuniform.lidx + rshift;
         if (index < local_spine && (index & (j - 1u)) >= rshift) {
           wg_partials[index] = binop(wg_partials[(index >> offset) + top_offset - 1u], wg_partials[index]);
         }
@@ -319,9 +331,9 @@ fn main(
   workgroupBarrier();
 
   /* Post my local reduction to the spine; now visible to the whole device */
-  if (threadid.x < SPLIT_MEMBERS /* && (tile_id & params.simulate_mask) != 0u */) {
-    let t = split(wg_partials[local_spine - 1u], threadid.x) | select(FLAG_READY, FLAG_INCLUSIVE, tile_id == 0u);
-    atomicStore(&spine[tile_id][threadid.x], t);
+  if (builtinsNonuniform.lidx < SPLIT_MEMBERS /* && (tile_id & params.simulate_mask) != 0u */) {
+    let t = split(wg_partials[local_spine - 1u], builtinsNonuniform.lidx) | select(FLAG_READY, FLAG_INCLUSIVE, tile_id == 0u);
+    atomicStore(&spine[tile_id][builtinsNonuniform.lidx], t);
   }
 
   /* Begin lookback. Only a single subgroup per workgroup does lookback. */
@@ -330,13 +342,13 @@ fn main(
     var lookback_id = tile_id - 1u;
     var control_flag = workgroupUniformLoad(&wg_control);
     while (control_flag == LOCKED) {
-      if (threadid.x < lane_count) { /* activate only subgroup 0 */
+      if (builtinsNonuniform.lidx < subgroupSize(builtinsUniform)) { /* activate only subgroup 0 */
         var spin_count = 0u;
         while (spin_count < MAX_SPIN_COUNT) {
           /* fetch the value from tile lookback_id into SPLIT_MEMBERS threads */
           var flag_payload: u32 = select(0u,
-                                         atomicLoad(&spine[lookback_id][threadid.x]),
-                                         threadid.x < SPLIT_MEMBERS);
+                                         atomicLoad(&spine[lookback_id][builtinsNonuniform.lidx]),
+                                         builtinsNonuniform.lidx < SPLIT_MEMBERS);
           /* is there useful data there across all participating threads?
            * "useful" means either a local reduction (READY) or an inclusive one (INCLUSIVE) */
           if (unsafeBallot((flag_payload & FLAG_MASK) > FLAG_NOT_READY) == ALL_READY) {
@@ -351,22 +363,22 @@ fn main(
               while (seenInclusive != ALL_READY) {
                 /* keep fetching until all participating threads are INCLUSIVE */
                 flag_payload = select(0u,
-                                      atomicLoad(&spine[lookback_id][threadid.x]),
-                                      threadid.x < SPLIT_MEMBERS);
+                                      atomicLoad(&spine[lookback_id][builtinsNonuniform.lidx]),
+                                      builtinsNonuniform.lidx < SPLIT_MEMBERS);
                 seenInclusive = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE);
               }
               /* flag_payload now contains an inclusive value from lookback_id, put it
                * back together & merge it into prev_red */
-              prev_red = binop(join(flag_payload & VALUE_MASK, threadid.x), prev_red);
+              prev_red = binop(join(flag_payload & VALUE_MASK, builtinsNonuniform.lidx), prev_red);
               /* merge that value with my local reduction and store it to the spine */
-              if (threadid.x < SPLIT_MEMBERS) {
+              if (builtinsNonuniform.lidx < SPLIT_MEMBERS) {
                 let t = split(binop(prev_red, wg_partials[local_spine - 1u]),
-                              threadid.x) |
+                              builtinsNonuniform.lidx) |
                         FLAG_INCLUSIVE;
-                atomicStore(&spine[tile_id][threadid.x], t);
+                atomicStore(&spine[tile_id][builtinsNonuniform.lidx], t);
               }
               /* lookback complete. reduction of all previous tiles is in prev_red. */
-              if (threadid.x == 0u) {
+              if (builtinsNonuniform.lidx == 0u) {
                 wg_control = UNLOCKED;
                 wg_broadcast_prev_red = prev_red;
               }
@@ -374,7 +386,7 @@ fn main(
             } else {
               /* Useful, but only READY, not INCLUSIVE.
                * Accumulate the value and go back another tile. */
-              prev_red = binop(join(flag_payload & VALUE_MASK, threadid.x), prev_red);
+              prev_red = binop(join(flag_payload & VALUE_MASK, builtinsNonuniform.lidx), prev_red);
               spin_count = 0u;
               lookback_id -= 1u;
             }
@@ -383,7 +395,7 @@ fn main(
           }
         } /* end while spin_count */
 
-        if (threadid.x == 0 && spin_count == MAX_SPIN_COUNT) {
+        if (builtinsNonuniform.lidx == 0 && spin_count == MAX_SPIN_COUNT) {
           wg_broadcast_tile_id = lookback_id;
         }
       } /* end activate subgroup 0 */
@@ -405,11 +417,11 @@ fn main(
           var i = s_offset + fallback_id * VEC_TILE_SIZE;
           for (var k = 0u; k < VEC4_SPT; k += 1u) {
             t_red = binop(t_red, vec4Reduce(inputBuffer[i])); /* reduce the 4 members of inputBuffer[i] */
-            i += lane_count;
+            i += subgroupSize(builtinsUniform);
           }
 
           let s_red = subgroupReduce(t_red);
-          if (laneid == 0u) {
+          if (subgroupInvocationID(builtinsNonuniform) == 0u) {
             wg_fallback[sid] = s_red;
           }
         }
@@ -420,11 +432,11 @@ fn main(
         {
           var offset = 0u;
           var top_offset = 0u;
-          let lane_pred = laneid == lane_count - 1u;
-          for (var j = lane_count; j <= aligned_size; j <<= lane_log) {
+          let lane_pred = subgroupInvocationID(builtinsNonuniform) == subgroupSize(builtinsUniform) - 1u;
+          for (var j = subgroupSize(builtinsUniform); j <= aligned_size; j <<= lane_log) {
             let step = local_spine >> offset;
-            let pred = threadid.x < step;
-            f_red = subgroupReduce(select(${this.binop.identity}, wg_fallback[threadid.x + top_offset], pred));
+            let pred = builtinsNonuniform.lidx < step;
+            f_red = subgroupReduce(select(${this.binop.identity}, wg_fallback[builtinsNonuniform.lidx + top_offset], pred));
             if (pred && lane_pred) {
               wg_fallback[sid + step + top_offset] = f_red;
             }
@@ -434,25 +446,25 @@ fn main(
           }
         }
 
-        if (threadid.x < lane_count) { /* activate only subgroup 0 */
-          let f_split = split(f_red, threadid.x) | select(FLAG_READY, FLAG_INCLUSIVE, fallback_id == 0u);
+        if (builtinsNonuniform.lidx < subgroupSize(builtinsUniform)) { /* activate only subgroup 0 */
+          let f_split = split(f_red, builtinsNonuniform.lidx) | select(FLAG_READY, FLAG_INCLUSIVE, fallback_id == 0u);
           var f_payload: u32 = 0u;
-          if (threadid.x < SPLIT_MEMBERS) {
-            f_payload = atomicMax(&spine[fallback_id][threadid.x], f_split);
+          if (builtinsNonuniform.lidx < SPLIT_MEMBERS) {
+            f_payload = atomicMax(&spine[fallback_id][builtinsNonuniform.lidx], f_split);
           }
           let incl_found = unsafeBallot((f_payload & FLAG_MASK) == FLAG_INCLUSIVE) == ALL_READY;
           if (incl_found) {
-            prev_red = binop(join(f_payload & VALUE_MASK, threadid.x), prev_red);
+            prev_red = binop(join(f_payload & VALUE_MASK, builtinsNonuniform.lidx), prev_red);
           } else {
             prev_red = binop(f_red, prev_red);
           }
 
           if (fallback_id == 0u || incl_found) {
-            if (threadid.x < SPLIT_MEMBERS) {
-              let t = split(binop(prev_red, wg_partials[local_spine - 1u]), threadid.x) | FLAG_INCLUSIVE;
-              atomicStore(&spine[tile_id][threadid.x], t);
+            if (builtinsNonuniform.lidx < SPLIT_MEMBERS) {
+              let t = split(binop(prev_red, wg_partials[local_spine - 1u]), builtinsNonuniform.lidx) | FLAG_INCLUSIVE;
+              atomicStore(&spine[tile_id][builtinsNonuniform.lidx], t);
             }
-            if (threadid.x == 0u) {
+            if (builtinsNonuniform.lidx == 0u) {
               wg_control = UNLOCKED;
               wg_broadcast_prev_red = prev_red;
             }
@@ -482,7 +494,7 @@ fn main(
         if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
           for(var k = 0u; k < VEC4_SPT; k += 1u) {
             outputBuffer[i] = vec4ScalarBinopV4(prev, t_scan[k]);
-            i += lane_count;
+            i += subgroupSize(builtinsUniform);
           }
         }
 
@@ -491,7 +503,7 @@ fn main(
             if (i < scanParameters.vec_size) {
               outputBuffer[i] = vec4ScalarBinopV4(prev, t_scan[k]);
             }
-            i += lane_count;
+            i += subgroupSize(builtinsUniform);
           }
         }`;
     } else if (this.type == "reduce") {
@@ -501,7 +513,7 @@ fn main(
        */
       kernel += /* wgsl */ `
         if (tile_id == scanParameters.work_tiles - 1u) { // this is the last tile
-          if (threadid.x == 0u) {
+          if (builtinsNonuniform.lidx == 0u) {
             outputBuffer[0] = binop(wg_broadcast_prev_red, wg_partials[local_spine - 1u]);
           }
         }`;
@@ -577,7 +589,7 @@ fn main(
           ],
         ],
         label: `Thomas Smith's scan (${this.type}) with decoupled lookback/decoupled fallback`,
-        logKernelCodeToConsole: false,
+        logKernelCodeToConsole: true,
         getDispatchGeometry: () => {
           return this.getSimpleDispatchGeometry();
         },
