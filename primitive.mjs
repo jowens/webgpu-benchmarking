@@ -56,8 +56,8 @@ export class BasePrimitive {
     }
 
     this.__buffers = {}; // this is essentially private
-    const hasSubgroups = this.device.features.has("subgroups");
-    if (hasSubgroups) {
+    this.hasSubgroups = this.device.features.has("subgroups");
+    if (this.hasSubgroups) {
       this.fnDeclarations = new wgslFunctions(this);
     } else {
       this.fnDeclarations = new wgslFunctionsWithoutSubgroupSupport(this);
