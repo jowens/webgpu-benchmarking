@@ -93,7 +93,7 @@ var<workgroup> wg_partials: array<${this.datatype}, MAX_PARTIALS_SIZE>;
 var<workgroup> wg_fallback: array<${this.datatype}, MAX_PARTIALS_SIZE>;
 /** If we're making subgroup calls and we don't have subgroup hardware,
  * we need to declare workgroup memory to emulate them */
-${this.fnDeclarations.wgMemoryForSubgroupsIfAppropriate}
+${this.fnDeclarations.wgMemoryForSubgroupEmulation}
 
 @diagnostic(off, subgroup_uniformity)
 fn unsafeShuffle(x: u32, source: u32, sgid: u32) -> u32 {

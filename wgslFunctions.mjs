@@ -61,7 +61,7 @@ export class wgslFunctions {
   get enableSubgroupsIfAppropriate() {
     return "enable subgroups;\n";
   }
-  get wgMemoryForSubgroupsIfAppropriate() {
+  get wgMemoryForSubgroupEmulation() {
     return "";
   }
   get roundUpDivU32() {
@@ -428,7 +428,7 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
     /* don't enable subgroups */
     return "";
   }
-  get wgMemoryForSubgroupsIfAppropriate() {
+  get wgMemoryForSubgroupEmulation() {
     return /* wgsl */ `var<workgroup> wg_sw_subgroups: array<${this.env.datatype}, ${this.env.workgroupSize}>;\n`;
   }
   get subgroupZero() {
@@ -449,34 +449,38 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
   get subgroupBallot() {
     return /* wgsl */ `fn subgroupBallotWrapper(pred: bool, sgid: u32) -> vec4<u32> {
   /* this is simple but will have significant bank conflicts,
-   * and that's probably not easily avoidable */
-  /* hardwired to 32b shuffles, because of nature of output */
-  /* probably won't work if workgroup size % 32 != 0 */
-  /* also ignores any threads with ids >= 128 */
+   * and that's probably not easily avoidable
+   * we could pad but then we'd have to grow wg_sw_subgroups */
+  /* hardwired to 32b shuffles, because output is in 32b words */
+  /* should work if workgroup size % 32 != 0 */
+  /* trying to not do any work for threads >= 128 */
   const bitsPerOutput = 32u;
-  var acc = pred << (sgid & (bitsPerOutput - 1));
-  wg_sw_subgroups[sgid] = acc;
+  var acc: u32 = select(0u, 1u, pred) << (sgid & (bitsPerOutput - 1));
+  if (sgid < 128) {
+    wg_sw_subgroups[sgid] = acc;
+  }
   workgroupBarrier();
-  var i: u32;
-  var acc: u32 = 0; /* accumulate here */
-  for (i = 1; i < bitsPerOutput; i <<= 1) {
+  for (var i: u32 = 1; i < bitsPerOutput; i <<= 1) {
     /* get and integrate my neighbor */
-    acc |= wg_sw_subgroups[sgid ^ i];
+    /* if we're out-of-bounds, just fetch my own value instead */
+    if (sgid < 128) {
+      var sourceID: u32 = select(sgid, sgid ^ i, (sgid ^ i) < ${this.env.workgroupSize});
+      acc |= wg_sw_subgroups[sourceID];
+    }
     workgroupBarrier();
   }
-  wg_sw_subgroups[sgid] = acc;
+  if (sgid < 128) {
+    wg_sw_subgroups[sgid] = acc;
+  }
   workgroupBarrier();
-  vec4<u32> out;
-  out.x = wg_sw_subgroups[0] = acc;
-  if (${this.env.workgroupSize} > 32) {
-    out.y = wg_sw_subgroups[32] = acc;
+  var out: vec4u = vec4u(0);
+  /* uniformity analysis requires the next loads be uniform ones */
+  out[0] = workgroupUniformLoad(&wg_sw_subgroups[0]);
+  for (var i: u32 = 32; i < max(${this.env.workgroupSize}, 128); i += 32) {
+    /* write out[i], i in [1,2,3], if the workgroup is big enough */
+    out[i >> 5] = workgroupUniformLoad(&wg_sw_subgroups[i]);
   }
-  if (${this.env.workgroupSize} > 64) {
-    out.z = wg_sw_subgroups[64] = acc;
-  }
-  if (${this.env.workgroupSize} > 96) {
-    out.z = wg_sw_subgroups[96] = acc;
-  }
+  return out;
 }`;
   }
   get subgroupReduce() {
