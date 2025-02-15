@@ -167,7 +167,11 @@ export class wgslFunctions {
   }
   get subgroupBallot() {
     /* keep builtin */
-    return "";
+    return /* wgsl */ `
+    @diagnostic(off, subgroup_uniformity)
+    fn subgroupBallotWrapper(pred: bool, sgid: u32) -> vec4<u32> {
+      return subgroupBallot(pred);
+    }`;
   }
   get subgroupMax() {
     /* keep builtin */
@@ -443,8 +447,36 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
 }`;
   }
   get subgroupBallot() {
-    return /* wgsl */ `fn subgroupBallot(pred: bool) -> vec4<u32> {
-  return vec4<u32>(0);
+    return /* wgsl */ `fn subgroupBallotWrapper(pred: bool, sgid: u32) -> vec4<u32> {
+  /* this is simple but will have significant bank conflicts,
+   * and that's probably not easily avoidable */
+  /* hardwired to 32b shuffles, because of nature of output */
+  /* probably won't work if workgroup size % 32 != 0 */
+  /* also ignores any threads with ids >= 128 */
+  const bitsPerOutput = 32u;
+  var acc = pred << (sgid & (bitsPerOutput - 1));
+  wg_sw_subgroups[sgid] = acc;
+  workgroupBarrier();
+  var i: u32;
+  var acc: u32 = 0; /* accumulate here */
+  for (i = 1; i < bitsPerOutput; i <<= 1) {
+    /* get and integrate my neighbor */
+    acc |= wg_sw_subgroups[sgid ^ i];
+    workgroupBarrier();
+  }
+  wg_sw_subgroups[sgid] = acc;
+  workgroupBarrier();
+  vec4<u32> out;
+  out.x = wg_sw_subgroups[0] = acc;
+  if (${this.env.workgroupSize} > 32) {
+    out.y = wg_sw_subgroups[32] = acc;
+  }
+  if (${this.env.workgroupSize} > 64) {
+    out.z = wg_sw_subgroups[64] = acc;
+  }
+  if (${this.env.workgroupSize} > 96) {
+    out.z = wg_sw_subgroups[96] = acc;
+  }
 }`;
   }
   get subgroupReduce() {

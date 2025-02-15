@@ -103,8 +103,9 @@ fn unsafeShuffle(x: u32, source: u32, sgid: u32) -> u32 {
 //lop off of the upper ballot bits;
 //we never need them across all subgroup sizes
 @diagnostic(off, subgroup_uniformity)
-fn unsafeBallot(pred: bool) -> u32 {
-  return subgroupBallot(pred).x;
+fn unsafeBallot(pred: bool, sgid: u32) -> u32 {
+  /* sgid isn't used if hardware subgroup support */
+  return subgroupBallotWrapper(pred, sgid).x;
 }
 
 /* I have "mine", a piece (u32) of a data element.
@@ -352,9 +353,9 @@ fn main(builtinsUniform: BuiltinsUniform,
                                          builtinsNonuniform.lidx < SPLIT_MEMBERS);
           /* is there useful data there across all participating threads?
            * "useful" means either a local reduction (READY) or an inclusive one (INCLUSIVE) */
-          if (unsafeBallot((flag_payload & FLAG_MASK) > FLAG_NOT_READY) == ALL_READY) {
+          if (unsafeBallot((flag_payload & FLAG_MASK) > FLAG_NOT_READY, sgid) == ALL_READY) {
             /* Yes, useful data! Is it INCLUSIVE? */
-            var seenInclusive = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE);
+            var seenInclusive = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE, sgid);
             if (seenInclusive != 0u) {
               /* is at least one of the lookback words inclusive? If so, the rest
                * are on their way, let's just wait. */
@@ -366,7 +367,7 @@ fn main(builtinsUniform: BuiltinsUniform,
                 flag_payload = select(0u,
                                       atomicLoad(&spine[lookback_id][builtinsNonuniform.lidx]),
                                       builtinsNonuniform.lidx < SPLIT_MEMBERS);
-                seenInclusive = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE);
+                seenInclusive = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE, sgid);
               }
               /* flag_payload now contains an inclusive value from lookback_id, put it
                * back together & merge it into prev_red */
@@ -454,7 +455,7 @@ fn main(builtinsUniform: BuiltinsUniform,
           if (builtinsNonuniform.lidx < SPLIT_MEMBERS) {
             f_payload = atomicMax(&spine[fallback_id][builtinsNonuniform.lidx], f_split);
           }
-          let incl_found = unsafeBallot((f_payload & FLAG_MASK) == FLAG_INCLUSIVE) == ALL_READY;
+          let incl_found = unsafeBallot((f_payload & FLAG_MASK) == FLAG_INCLUSIVE, sgid) == ALL_READY;
           if (incl_found) {
             prev_red = binop(join(f_payload & VALUE_MASK, builtinsNonuniform.lidx, sgid), prev_red);
           } else {
