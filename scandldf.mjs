@@ -96,8 +96,8 @@ var<workgroup> wg_fallback: array<${this.datatype}, MAX_PARTIALS_SIZE>;
 ${this.fnDeclarations.wgMemoryForSubgroupsIfAppropriate}
 
 @diagnostic(off, subgroup_uniformity)
-fn unsafeShuffle(x: u32, source: u32) -> u32 {
-  return subgroupShuffle(x, source);
+fn unsafeShuffle(x: u32, source: u32, sgid: u32) -> u32 {
+  return subgroupShuffleWrapper(x, source, sgid);
 }
 
 //lop off of the upper ballot bits;
@@ -111,9 +111,9 @@ fn unsafeBallot(pred: bool) -> u32 {
  * I need to recombine it with the piece(s) from other threads ("theirs").
  * Currently this is hardcoded for 2 pieces
  * This is the inverse of the below "split" function */
-fn join(mine: u32, tid: u32) -> ${this.datatype} {
+fn join(mine: u32, tid: u32, sid: u32) -> ${this.datatype} {
   let xor = tid ^ 1;
-  let theirs = unsafeShuffle(mine, xor);
+  let theirs = unsafeShuffle(mine, xor, sid);
   return bitcast<${
     this.datatype
   }>((mine << (16u * tid)) | (theirs << (16u * xor)));
@@ -135,6 +135,7 @@ ${this.fnDeclarations.vec4InclusiveScan}
 ${this.fnDeclarations.vec4InclusiveToExclusive}
 ${this.fnDeclarations.vec4Reduce}
 ${this.fnDeclarations.vec4ScalarBinopV4}
+${this.fnDeclarations.subgroupZero}
 ${this.fnDeclarations.subgroupInclusiveOpScan}
 ${this.fnDeclarations.subgroupReduce}
 ${this.fnDeclarations.subgroupShuffle}
@@ -214,7 +215,7 @@ fn main(builtinsUniform: BuiltinsUniform,
        *   (ii) for sgid == 0, it contains the reduction of *all* lanes, which
        *        then gets passed into the next scan
        */
-      let t = subgroupShuffle(sgScan, circular_shift);
+      let t = subgroupShuffleWrapper(sgScan, circular_shift, sgid);
       /* (c) apply that scan to our current thread's vec4. Recall that our current
        *     thread's vec4 in t_scan contains the inclusive scan of the vec4.
        *     If we want an inclusive scan overall, great, we don't have to do anything.
@@ -341,7 +342,8 @@ fn main(builtinsUniform: BuiltinsUniform,
     var lookback_id = tile_id - 1u;
     var control_flag = workgroupUniformLoad(&wg_control);
     while (control_flag == LOCKED) {
-      if (builtinsNonuniform.lidx < sgsz) { /* activate only subgroup 0 */
+      var sg0: bool = isSubgroupZero(builtinsNonuniform.lidx, sgsz);
+      if (sg0) { /* activate only subgroup 0 */
         var spin_count = 0u;
         while (spin_count < MAX_SPIN_COUNT) {
           /* fetch the value from tile lookback_id into SPLIT_MEMBERS threads */
@@ -368,7 +370,7 @@ fn main(builtinsUniform: BuiltinsUniform,
               }
               /* flag_payload now contains an inclusive value from lookback_id, put it
                * back together & merge it into prev_red */
-              prev_red = binop(join(flag_payload & VALUE_MASK, builtinsNonuniform.lidx), prev_red);
+              prev_red = binop(join(flag_payload & VALUE_MASK, builtinsNonuniform.lidx, sgid), prev_red);
               /* merge that value with my local reduction and store it to the spine */
               if (builtinsNonuniform.lidx < SPLIT_MEMBERS) {
                 let t = split(binop(prev_red, wg_partials[local_spine - 1u]),
@@ -385,7 +387,7 @@ fn main(builtinsUniform: BuiltinsUniform,
             } else {
               /* Useful, but only READY, not INCLUSIVE.
                * Accumulate the value and go back another tile. */
-              prev_red = binop(join(flag_payload & VALUE_MASK, builtinsNonuniform.lidx), prev_red);
+              prev_red = binop(join(flag_payload & VALUE_MASK, builtinsNonuniform.lidx, sgid), prev_red);
               spin_count = 0u;
               lookback_id -= 1u;
             }
@@ -445,7 +447,8 @@ fn main(builtinsUniform: BuiltinsUniform,
           }
         }
 
-        if (builtinsNonuniform.lidx < sgsz) { /* activate only subgroup 0 */
+        var sg0: bool = isSubgroupZero(builtinsNonuniform.lidx, sgsz);
+        if (sg0) { /* activate only subgroup 0 */
           let f_split = split(f_red, builtinsNonuniform.lidx) | select(FLAG_READY, FLAG_INCLUSIVE, fallback_id == 0u);
           var f_payload: u32 = 0u;
           if (builtinsNonuniform.lidx < SPLIT_MEMBERS) {
@@ -453,7 +456,7 @@ fn main(builtinsUniform: BuiltinsUniform,
           }
           let incl_found = unsafeBallot((f_payload & FLAG_MASK) == FLAG_INCLUSIVE) == ALL_READY;
           if (incl_found) {
-            prev_red = binop(join(f_payload & VALUE_MASK, builtinsNonuniform.lidx), prev_red);
+            prev_red = binop(join(f_payload & VALUE_MASK, builtinsNonuniform.lidx, sgid), prev_red);
           } else {
             prev_red = binop(f_red, prev_red);
           }

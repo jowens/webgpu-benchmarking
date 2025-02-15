@@ -79,7 +79,7 @@ export class wgslFunctions {
     var numThreadsPerWorkgroup: u32 = ${
       this.env.numThreadsPerWorkgroup ?? this.env.workgroupSize
     };
-    var gid: u32 = wgid * numThreadsPerWorkgroup + builtins.lid;
+    var gid: u32 = wgid * numThreadsPerWorkgroup + builtins.lidx;
     var workgroupCount = builtins.nwg.z * builtins.nwg.y * builtins.nwg.x;
     var totalThreadCount = workgroupCount * numThreadsPerWorkgroup;`;
   }
@@ -151,9 +151,19 @@ export class wgslFunctions {
     }
     `;
   }
+  get subgroupZero() {
+    return /* wgsl */ `
+    fn isSubgroupZero(lidx: u32, sgsz: u32) -> bool {
+      return lidx < sgsz;
+    }`;
+  }
   get subgroupShuffle() {
     /* keep builtin */
-    return "";
+    return /* wgsl */ `
+    @diagnostic(off, subgroup_uniformity)
+    fn subgroupShuffleWrapper(x: ${this.env.datatype}, source: u32, sgid: u32) -> ${this.env.datatype} {
+      return subgroupShuffle(x, source);
+    }`;
   }
   get subgroupBallot() {
     /* keep builtin */
@@ -248,17 +258,17 @@ export class wgslFunctions {
     /* now we need to reduce acc within our workgroup */
     /* switch to local IDs only. write into wg memory */
     acc = ${this.env.binop.subgroupReduceOp}(acc);
-    var mySubgroupID = builtins.lid / builtins.sgsz;
+    var mySubgroupID = builtins.lidx / builtins.sgsz;
     if (subgroupElect()) {
       /* I'm the first element in my subgroup */
       wgTemp[mySubgroupID] = acc;
     }
     workgroupBarrier(); /* completely populate wg memory */
-    if (builtins.lid < builtins.sgsz) { /* only activate 0th subgroup */
+    if (builtins.lidx < builtins.sgsz) { /* only activate 0th subgroup */
       /* read sums of all other subgroups into acc, in parallel across the subgroup */
       /* acc is only valid for lid < numSubgroups, so ... */
       /* select(f, t, cond) */
-      acc = select(${this.env.binop.identity}, wgTemp[builtins.lid], builtins.lid < numSubgroups);
+      acc = select(${this.env.binop.identity}, wgTemp[builtins.lidx], builtins.lidx < numSubgroups);
     }
     /* acc is called here for everyone, but it only matters for thread 0 */
     acc = ${this.env.binop.subgroupReduceOp}(acc);
@@ -299,7 +309,7 @@ export class wgslFunctions {
       /* (1) reduce "in" within our workgroup */
       /* switch to local IDs only. write into wg memory */
       var sgReduction = ${this.env.binop.subgroupReduceOp}(in);
-      var mySubgroupID = builtins.lid / builtins.sgsz;
+      var mySubgroupID = builtins.lidx / builtins.sgsz;
       if (subgroupElect()) {
         /* I'm the first element in my subgroup */
         wgTemp[mySubgroupID] = sgReduction;
@@ -311,13 +321,13 @@ export class wgslFunctions {
        * for the subgroupScanOp. So the select and subgroup scan are wasted work for
        * all but subgroup == 0. */
       var spineScanInput = select(${this.env.binop.identity},
-                                  wgTemp[builtins.lid],
-                                  builtins.lid < numSubgroups);
+                                  wgTemp[builtins.lidx],
+                                  builtins.lidx < numSubgroups);
       /* no matter what type of scan we have, we use exclusiveScan here */
       var spineScanOutput = ${this.env.binop.subgroupExclusiveScanOp}(spineScanInput);
       /** add reduction of previous workgroups, computed in previous kernel */
-      if (builtins.lid < builtins.sgsz) { /* only activate 0th subgroup */
-        wgTemp[builtins.lid] = binop(partials[wgid], spineScanOutput);
+      if (builtins.lidx < builtins.sgsz) { /* only activate 0th subgroup */
+        wgTemp[builtins.lidx] = binop(partials[wgid], spineScanOutput);
       }
       workgroupBarrier();
       /** Now go add that spineScan value back to my local scan. Here's where
@@ -349,10 +359,10 @@ export class wgslFunctions {
       /* making this work under uniform control flow is tricky */
       /* big idea: convert any control dependence to data dependence (i) */
       var ibase : u32 = 0;
-      var sg0 = builtinsNonuniform.lid < builtinsUniform.sgsz;
+      var sg0 = builtinsNonuniform.lidx < builtinsUniform.sgsz;
       while (ibase < arrayLength(inputoutput)) {
         /* work still left to be done */
-        var i = ibase + builtinsNonuniform.lid;
+        var i = ibase + builtinsNonuniform.lidx;
         var in = select(${this.env.binop.identity},
                         inputoutput[i],
                         (i < arrayLength(inputoutput)) && sg0);
@@ -411,14 +421,25 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
     let sgid: u32 = builtinsNonuniform.lidx;`;
   }
   get enableSubgroupsIfAppropriate() {
+    /* don't enable subgroups */
     return "";
   }
   get wgMemoryForSubgroupsIfAppropriate() {
     return /* wgsl */ `var<workgroup> wg_sw_subgroups: array<${this.env.datatype}, ${this.env.workgroupSize}>;\n`;
   }
+  get subgroupZero() {
+    return /* wgsl */ `
+    fn isSubgroupZero(lidx: u32, sgsz: u32) -> bool {
+      return true;
+    }`;
+  }
   get subgroupShuffle() {
-    return /* wgsl */ `fn subgroupShuffle(x: ${this.env.datatype}, source: u32) -> ${this.env.datatype} {
-  return x;
+    return /* wgsl */ `fn subgroupShuffleWrapper(x: ${this.env.datatype}, source: u32, sgid: u32) -> ${this.env.datatype} {
+  /* subgroup emulation must pass through wg_sw_subgroups */
+  /* write my value to workgroup memory */
+  wg_sw_subgroups[sgid] = x;
+  workgroupBarrier();
+  return wg_sw_subgroups[source];
 }`;
   }
   get subgroupBallot() {
