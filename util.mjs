@@ -111,28 +111,38 @@ export function formatWGSL(wgslCode) {
         ? -1
         : 0;
 
-    /* I'm in the middle of a "documentation block" comment */
+    /* handle comments - pretty specific to my commenting style */
+    const oneLineComment =
+      trimmedLine.startsWith("//") ||
+      (trimmedLine.startsWith("/*") && trimmedLine.endsWith("*/"));
     const midComment =
-      trimmedLine.startsWith("* ") || trimmedLine == "*" || trimmedLine == "*/"
-        ? " "
-        : "";
+      /* I'm in the middle of a "documentation block" comment */
+      trimmedLine.startsWith("* ") || trimmedLine == "*" || trimmedLine == "*/";
+    const midCommentIndent = midComment ? " " : "";
+    const inAComment = midComment || oneLineComment;
 
     if (braceCount > 0) {
       formattedLines.push(
-        indent.repeat(indentLevel) + midComment + trimmedLine
+        indent.repeat(indentLevel) + midCommentIndent + trimmedLine
       );
-      indentLevel += braceCount;
+      if (inAComment == false) {
+        /* only permanently change indent level if we're in code */
+        indentLevel += braceCount;
+      }
     } else if (braceCount < 0) {
-      indentLevel += braceCount; /* adding a negative number */
+      if (inAComment == false) {
+        /* only permanently change indent level if we're in code */
+        indentLevel += braceCount; /* adding a negative number */
+      }
       if (indentLevel < 0) {
         indentLevel = 0;
       }
       formattedLines.push(
-        indent.repeat(indentLevel) + midComment + trimmedLine
+        indent.repeat(indentLevel) + midCommentIndent + trimmedLine
       );
     } else {
       formattedLines.push(
-        indent.repeat(indentLevel + pushLeft) + midComment + trimmedLine
+        indent.repeat(indentLevel + pushLeft) + midCommentIndent + trimmedLine
       );
     }
   });
