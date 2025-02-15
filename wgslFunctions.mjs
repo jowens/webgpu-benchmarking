@@ -214,7 +214,7 @@ export class wgslFunctions {
   get subgroupReduce() {
     /* this will fail if subgroupReduceOp isn't defined; TODO is write it */
     return /* wgsl */ `
-    fn subgroupReduce(in: ${this.env.datatype}) -> ${this.env.datatype} {
+    fn subgroupReduceWrapper(in: ${this.env.datatype}, sgid: u32) -> ${this.env.datatype} {
       return ${this.env.binop.subgroupReduceOp}(in);
     }
     `;
@@ -476,7 +476,11 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
   var out: vec4u = vec4u(0);
   /* uniformity analysis requires the next loads be uniform ones */
   out[0] = workgroupUniformLoad(&wg_sw_subgroups[0]);
-  for (var i: u32 = 32; i < max(${this.env.workgroupSize}, 128); i += 32) {
+  /** possible bank-conflict avoidance: instead of reading from [0,32,64,96],
+   *  we could read from [3,34,65,96], but then we'd have to check for overflow
+   *  on the first three reads, not sure that's a win
+   */
+  for (var i: u32 = 32; i < min(${this.env.workgroupSize}, 128); i += 32) {
     /* write out[i], i in [1,2,3], if the workgroup is big enough */
     out[i >> 5] = workgroupUniformLoad(&wg_sw_subgroups[i]);
   }
@@ -484,9 +488,22 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
 }`;
   }
   get subgroupReduce() {
-    return /* wgsl */ `fn subgroupReduce(in: ${this.env.datatype}) -> ${this.env.datatype} {
-      return in;
-    }`;
+    return /* wgsl */ `
+fn subgroupReduceWrapper(in: ${this.env.datatype}, sgid: u32) -> ${this.env.datatype} {
+  wg_sw_subgroups[sgid] = in;
+  var red: ${this.env.datatype} = in;
+  for (var i: u32 = 1; i < ${this.env.workgroupSize}; i <<= 1) {
+    workgroupBarrier();
+    var neighbor: u32 = sgid ^ i;
+    var neighborVal: ${this.env.datatype} =
+      select(${this.env.binop.identity},
+             wg_sw_subgroups[neighbor],
+             neighbor < ${this.env.workgroupSize});
+    red = binop(red, neighborVal);
+    wg_sw_subgroups[sgid] = red;
+  }
+  return workgroupUniformLoad(&wg_sw_subgroups[0]);
+}`;
   }
   get subgroupInclusiveOpScan() {
     /* helpful reference from Thomas Smith:

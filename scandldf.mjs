@@ -262,7 +262,7 @@ fn main(builtinsUniform: BuiltinsUniform,
     if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
       for (var k = 0u; k < VEC4_SPT; k += 1u) {
         subgroupReduction = binop(subgroupReduction,
-                                  subgroupReduce(vec4Reduce(inputBuffer[i])));
+                                  subgroupReduceWrapper(vec4Reduce(inputBuffer[i]), sgid));
         i += sgsz;
       }
     }
@@ -270,9 +270,10 @@ fn main(builtinsUniform: BuiltinsUniform,
     if (tile_id == scanParameters.work_tiles - 1u) { // the last tile
       for (var k = 0u; k < VEC4_SPT; k += 1u) {
         subgroupReduction = binop(subgroupReduction,
-                                  subgroupReduce(select(${this.binop.identity},
-                                                        vec4Reduce(inputBuffer[i]),
-                                                        i < scanParameters.vec_size)));
+                                  subgroupReduceWrapper(select(${this.binop.identity},
+                                                               vec4Reduce(inputBuffer[i]),
+                                                               i < scanParameters.vec_size),
+                                                         sgid));
         i += sgsz;
       }
     }
@@ -422,7 +423,7 @@ fn main(builtinsUniform: BuiltinsUniform,
             i += sgsz;
           }
 
-          let s_red = subgroupReduce(t_red);
+          let s_red = subgroupReduceWrapper(t_red, sgid);
           if (sgid == 0u) {
             wg_fallback[sid] = s_red;
           }
@@ -438,7 +439,9 @@ fn main(builtinsUniform: BuiltinsUniform,
           for (var j = sgsz; j <= aligned_size; j <<= lane_log) {
             let step = local_spine >> offset;
             let pred = builtinsNonuniform.lidx < step;
-            f_red = subgroupReduce(select(${this.binop.identity}, wg_fallback[builtinsNonuniform.lidx + top_offset], pred));
+            f_red = subgroupReduceWrapper(select(${this.binop.identity},
+                                                 wg_fallback[builtinsNonuniform.lidx + top_offset],
+                                                 pred), sgid);
             if (pred && lane_pred) {
               wg_fallback[sid + step + top_offset] = f_red;
             }
