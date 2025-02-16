@@ -506,13 +506,28 @@ fn subgroupReduceWrapper(in: ${this.env.datatype}, sgid: u32) -> ${this.env.data
 }`;
   }
   get subgroupInclusiveOpScan() {
-    /* helpful reference from Thomas Smith:
-     *   https://github.com/b0nes164/GPUSorting/blob/main/GPUSortingCUDA/Utils.cuh
-     */
     return /* wgsl */ `
-    fn subgroupInclusiveOpScan(in: ${this.env.datatype}, laneID: u32, laneCount: u32) ->
-      ${this.env.datatype} {
-      return in;
-    }`;
+fn subgroupInclusiveOpScan(in: ${this.env.datatype}, sgid: u32, laneCount: u32) ->
+  ${this.env.datatype} {
+  /* emulate subgroupInclusiveScanOp with subgroupShuffleUp */
+  /* for (int i = 1; i <= 16; i <<= 1) { // 16 = LANE_COUNT >> 1
+   *   const uint32_t t = __shfl_up_sync(0xffffffff, val, i, 32);
+   *   if (getLaneId() >= i) val += t;
+   * }
+   * return val;
+   */
+  var red: ${this.env.datatype} = in;
+  var t: ${this.env.datatype};
+  for (var i: u32 = 1; i < ${this.env.workgroupSize}; i <<= 1) {
+    wg_sw_subgroups[sgid] = red;
+    workgroupBarrier();
+    var neighborIdx: u32 = sgid - i;
+    if (neighborIdx >= 0) {
+      t = wg_sw_subgroups[neighborIdx];
+      red = binop(t, red);
+    }
+  }
+  return red;
+}`;
   }
 }
