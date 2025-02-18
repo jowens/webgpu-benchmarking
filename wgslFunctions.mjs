@@ -159,19 +159,11 @@ export class wgslFunctions {
   }
   get subgroupShuffle() {
     /* keep builtin */
-    return /* wgsl */ `
-    @diagnostic(off, subgroup_uniformity)
-    fn subgroupShuffleWrapper(x: ${this.env.datatype}, source: u32, sgid: u32) -> ${this.env.datatype} {
-      return subgroupShuffle(x, source);
-    }`;
+    return "";
   }
   get subgroupBallot() {
     /* keep builtin */
-    return /* wgsl */ `
-    @diagnostic(off, subgroup_uniformity)
-    fn subgroupBallotWrapper(pred: bool, sgid: u32) -> vec4<u32> {
-      return subgroupBallot(pred);
-    }`;
+    return "";
   }
   get subgroupMax() {
     /* keep builtin */
@@ -184,7 +176,7 @@ export class wgslFunctions {
     if (this.env.binop.subgroupInclusiveScanOp) {
       /* use the builtin subgroupInclusiveScanOp */
       return /* wgsl */ `
-      fn subgroupInclusiveOpScan(in: ${this.env.datatype}, laneID: u32, laneCount: u32) ->
+      fn subgroupInclusiveOpScan(in: ${this.env.datatype}) ->
         ${this.env.datatype} {
         return ${this.env.binop.subgroupInclusiveScanOp}(in);
       }
@@ -198,13 +190,13 @@ export class wgslFunctions {
        * return val;
        */
       return /* wgsl */ `
-      fn subgroupInclusiveOpScan(in: ${this.env.datatype}, laneID: u32, laneCount: u32) ->
+      fn subgroupInclusiveOpScan(in: ${this.env.datatype}) ->
         ${this.env.datatype} {
         var i: u32;
         var val = in;
-        for (i = 1; i <= (laneCount >> 1); i <<= 1) {
+        for (i = 1; i <= (sgsz >> 1); i <<= 1) {
           let t: ${this.env.datatype} = subgroupShuffleUp(val, i);
-          val = binop(select(${this.env.binop.identity}, t, laneID >= i), val);
+          val = binop(select(${this.env.binop.identity}, t, sgid >= i), val);
         }
         return val;
       }
@@ -214,7 +206,7 @@ export class wgslFunctions {
   get subgroupReduce() {
     /* this will fail if subgroupReduceOp isn't defined; TODO is write it */
     return /* wgsl */ `
-    fn subgroupReduceWrapper(in: ${this.env.datatype}, sgid: u32) -> ${this.env.datatype} {
+    fn subgroupReduce(in: ${this.env.datatype}) -> ${this.env.datatype} {
       return ${this.env.binop.subgroupReduceOp}(in);
     }
     `;
@@ -436,7 +428,7 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
     }`;
   }
   get subgroupShuffle() {
-    return /* wgsl */ `fn subgroupShuffleWrapper(x: ${this.env.datatype}, source: u32, sgid: u32) -> ${this.env.datatype} {
+    return /* wgsl */ `fn subgroupShuffle(x: ${this.env.datatype}, source: u32) -> ${this.env.datatype} {
   /* subgroup emulation must pass through wg_sw_subgroups */
   /* write my value to workgroup memory */
   wg_sw_subgroups[sgid] = x;
@@ -445,7 +437,7 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
 }`;
   }
   get subgroupBallot() {
-    return /* wgsl */ `fn subgroupBallotWrapper(pred: bool, sgid: u32) -> vec4<u32> {
+    return /* wgsl */ `fn subgroupBallot(pred: bool) -> vec4<u32> {
   /* this is simple but will have significant bank conflicts,
    * and that's probably not easily avoidable
    * we could pad but then we'd have to grow wg_sw_subgroups */
@@ -487,7 +479,7 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
   }
   get subgroupReduce() {
     return /* wgsl */ `
-fn subgroupReduceWrapper(in: ${this.env.datatype}, sgid: u32) -> ${this.env.datatype} {
+fn subgroupReduce(in: ${this.env.datatype}) -> ${this.env.datatype} {
   wg_sw_subgroups[sgid] = in;
   var red: ${this.env.datatype} = in;
   for (var i: u32 = 1; i < ${this.env.workgroupSize}; i <<= 1) {
@@ -505,7 +497,7 @@ fn subgroupReduceWrapper(in: ${this.env.datatype}, sgid: u32) -> ${this.env.data
   }
   get subgroupInclusiveOpScan() {
     return /* wgsl */ `
-fn subgroupInclusiveOpScan(in: ${this.env.datatype}, sgid: u32, laneCount: u32) ->
+fn subgroupInclusiveOpScan(in: ${this.env.datatype}) ->
   ${this.env.datatype} {
   /* emulate subgroupInclusiveScanOp with subgroupShuffleUp */
   /* for (int i = 1; i <= 16; i <<= 1) { // 16 = LANE_COUNT >> 1

@@ -96,25 +96,25 @@ var<workgroup> wg_fallback: array<${this.datatype}, MAX_PARTIALS_SIZE>;
 ${this.fnDeclarations.subgroupEmulation}
 
 @diagnostic(off, subgroup_uniformity)
-fn unsafeShuffle(x: u32, source: u32, sgid: u32) -> u32 {
-  return subgroupShuffleWrapper(x, source, sgid);
+fn unsafeShuffle(x: u32, source: u32) -> u32 {
+  return subgroupShuffle(x, source);
 }
 
 //lop off of the upper ballot bits;
 //we never need them across all subgroup sizes
 @diagnostic(off, subgroup_uniformity)
-fn unsafeBallot(pred: bool, sgid: u32) -> u32 {
+fn unsafeBallot(pred: bool) -> u32 {
   /* sgid isn't used if hardware subgroup support */
-  return subgroupBallotWrapper(pred, sgid).x;
+  return subgroupBallot(pred).x;
 }
 
 /* I have "mine", a piece (u32) of a data element.
  * I need to recombine it with the piece(s) from other threads ("theirs").
  * Currently this is hardcoded for 2 pieces
  * This is the inverse of the below "split" function */
-fn join(mine: u32, tid: u32, sid: u32) -> ${this.datatype} {
+fn join(mine: u32, tid: u32) -> ${this.datatype} {
   let xor = tid ^ 1;
-  let theirs = unsafeShuffle(mine, xor, sid);
+  let theirs = unsafeShuffle(mine, xor);
   return bitcast<${
     this.datatype
   }>((mine << (16u * tid)) | (theirs << (16u * xor)));
@@ -203,9 +203,7 @@ fn main(builtinsUniform: BuiltinsUniform,
         subgroupInclusiveOpScan(binop(select(prev,
                                              ${this.binop.identity},
                                              sgid != 0u),
-                                      t_scan[k].w /* reduction of my vec4 */ ),
-                                sgid,
-                                sgsz);
+                                      t_scan[k].w /* reduction of my vec4 */ ));
       /* (b) shuffle the scan result from thread x to thread x+1, wrapping
        * this does two things:
        *    (i) for sgid > 0, it communicates the reduction of all prior elements
@@ -213,7 +211,7 @@ fn main(builtinsUniform: BuiltinsUniform,
        *   (ii) for sgid == 0, it contains the reduction of *all* lanes, which
        *        then gets passed into the next scan
        */
-      let t = subgroupShuffleWrapper(sgScan, circular_shift, sgid);
+      let t = subgroupShuffle(sgScan, circular_shift);
       /* (c) apply that scan to our current thread's vec4. Recall that our current
        *     thread's vec4 in t_scan contains the inclusive scan of the vec4.
        *     If we want an inclusive scan overall, great, we don't have to do anything.
@@ -259,7 +257,7 @@ fn main(builtinsUniform: BuiltinsUniform,
     if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
       for (var k = 0u; k < VEC4_SPT; k += 1u) {
         subgroupReduction = binop(subgroupReduction,
-                                  subgroupReduceWrapper(vec4Reduce(inputBuffer[i]), sgid));
+                                  subgroupReduce(vec4Reduce(inputBuffer[i])));
         i += sgsz;
       }
     }
@@ -267,10 +265,9 @@ fn main(builtinsUniform: BuiltinsUniform,
     if (tile_id == scanParameters.work_tiles - 1u) { // the last tile
       for (var k = 0u; k < VEC4_SPT; k += 1u) {
         subgroupReduction = binop(subgroupReduction,
-                                  subgroupReduceWrapper(select(${this.binop.identity},
+                                  subgroupReduce(select(${this.binop.identity},
                                                                vec4Reduce(inputBuffer[i]),
-                                                               i < scanParameters.vec_size),
-                                                         sgid));
+                                                               i < scanParameters.vec_size)));
         i += sgsz;
       }
     }
@@ -297,9 +294,7 @@ fn main(builtinsUniform: BuiltinsUniform,
       let pred = builtinsNonuniform.lidx < step;
       let t = subgroupInclusiveOpScan(select(${this.binop.identity},
                                              wg_partials[builtinsNonuniform.lidx + top_offset],
-                                             pred),
-                                      sgid,
-                                      sgsz);
+                                             pred));
       if (pred) {
         wg_partials[builtinsNonuniform.lidx + top_offset] = t;
         if (lane_pred) {
@@ -351,9 +346,9 @@ fn main(builtinsUniform: BuiltinsUniform,
                                          builtinsNonuniform.lidx < SPLIT_MEMBERS);
           /* is there useful data there across all participating threads?
            * "useful" means either a local reduction (READY) or an inclusive one (INCLUSIVE) */
-          if (unsafeBallot((flag_payload & FLAG_MASK) > FLAG_NOT_READY, sgid) == ALL_READY) {
+          if (unsafeBallot((flag_payload & FLAG_MASK) > FLAG_NOT_READY) == ALL_READY) {
             /* Yes, useful data! Is it INCLUSIVE? */
-            var seenInclusive = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE, sgid);
+            var seenInclusive = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE);
             if (seenInclusive != 0u) {
               /* is at least one of the lookback words inclusive? If so, the rest
                * are on their way, let's just wait. */
@@ -365,11 +360,11 @@ fn main(builtinsUniform: BuiltinsUniform,
                 flag_payload = select(0u,
                                       atomicLoad(&spine[lookback_id][builtinsNonuniform.lidx]),
                                       builtinsNonuniform.lidx < SPLIT_MEMBERS);
-                seenInclusive = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE, sgid);
+                seenInclusive = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE);
               }
               /* flag_payload now contains an inclusive value from lookback_id, put it
                * back together & merge it into prev_red */
-              prev_red = binop(join(flag_payload & VALUE_MASK, builtinsNonuniform.lidx, sgid), prev_red);
+              prev_red = binop(join(flag_payload & VALUE_MASK, builtinsNonuniform.lidx), prev_red);
               /* merge that value with my local reduction and store it to the spine */
               if (builtinsNonuniform.lidx < SPLIT_MEMBERS) {
                 let t = split(binop(prev_red, wg_partials[local_spine - 1u]),
@@ -386,7 +381,7 @@ fn main(builtinsUniform: BuiltinsUniform,
             } else {
               /* Useful, but only READY, not INCLUSIVE.
                * Accumulate the value and go back another tile. */
-              prev_red = binop(join(flag_payload & VALUE_MASK, builtinsNonuniform.lidx, sgid), prev_red);
+              prev_red = binop(join(flag_payload & VALUE_MASK, builtinsNonuniform.lidx), prev_red);
               spin_count = 0u;
               lookback_id -= 1u;
             }
@@ -420,7 +415,7 @@ fn main(builtinsUniform: BuiltinsUniform,
             i += sgsz;
           }
 
-          let s_red = subgroupReduceWrapper(t_red, sgid);
+          let s_red = subgroupReduce(t_red);
           if (sgid == 0u) {
             wg_fallback[sid] = s_red;
           }
@@ -436,9 +431,9 @@ fn main(builtinsUniform: BuiltinsUniform,
           for (var j = sgsz; j <= aligned_size; j <<= lane_log) {
             let step = local_spine >> offset;
             let pred = builtinsNonuniform.lidx < step;
-            f_red = subgroupReduceWrapper(select(${this.binop.identity},
+            f_red = subgroupReduce(select(${this.binop.identity},
                                                  wg_fallback[builtinsNonuniform.lidx + top_offset],
-                                                 pred), sgid);
+                                                 pred));
             if (pred && lane_pred) {
               wg_fallback[sid + step + top_offset] = f_red;
             }
@@ -455,9 +450,9 @@ fn main(builtinsUniform: BuiltinsUniform,
           if (builtinsNonuniform.lidx < SPLIT_MEMBERS) {
             f_payload = atomicMax(&spine[fallback_id][builtinsNonuniform.lidx], f_split);
           }
-          let incl_found = unsafeBallot((f_payload & FLAG_MASK) == FLAG_INCLUSIVE, sgid) == ALL_READY;
+          let incl_found = unsafeBallot((f_payload & FLAG_MASK) == FLAG_INCLUSIVE) == ALL_READY;
           if (incl_found) {
-            prev_red = binop(join(f_payload & VALUE_MASK, builtinsNonuniform.lidx, sgid), prev_red);
+            prev_red = binop(join(f_payload & VALUE_MASK, builtinsNonuniform.lidx), prev_red);
           } else {
             prev_red = binop(f_red, prev_red);
           }
