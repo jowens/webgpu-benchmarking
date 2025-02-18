@@ -56,12 +56,12 @@ export class wgslFunctions {
   }`;
   }
   get initializeSubgroupVars() {
-    return "let sgid = builtinsNonuniform.sgid;\nlet sgsz = builtinsUniform.sgsz;\n";
+    return "let sgsz: u32 = builtinsUniform.sgsz;\nlet sgid: u32 = builtinsNonuniform.sgid;\n";
   }
   get enableSubgroupsIfAppropriate() {
     return "enable subgroups;\n";
   }
-  get wgMemoryForSubgroupEmulation() {
+  get subgroupEmulation() {
     return "";
   }
   get roundUpDivU32() {
@@ -407,28 +407,27 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
       @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
       @builtin(workgroup_id) wgid: vec3u /* 3D workgroup id within compute shader grid */,
       @builtin(local_invocation_index) lidx: u32 /* 1D thread index within workgroup */,
-      sgsz: u32, /* 32 on Apple GPUs */
-      sgid: u32 /* 1D thread index within subgroup */
     }
     struct BuiltinsNonuniform {
       @builtin(global_invocation_id) gid: vec3u /* 3D thread id in compute shader grid */,
-      @builtin(local_invocation_index) lidx: u32 /* 1D thread index within workgroup */
+      @builtin(local_invocation_index) lidx: u32 /* 1D thread index within workgroup */,
     }
     struct BuiltinsUniform {
       @builtin(num_workgroups) nwg: vec3u /* == dispatch */,
-      @builtin(workgroup_id) wgid: vec3u /* 3D workgroup id within compute shader grid */
+      @builtin(workgroup_id) wgid: vec3u /* 3D workgroup id within compute shader grid */,
     }`;
   }
   get initializeSubgroupVars() {
     return /* wgsl */ `
-    let sgsz: u32 = ${this.env.workgroupSize};
-    let sgid: u32 = builtinsNonuniform.lidx;`;
+    sgid = builtinsNonuniform.lidx;`;
   }
   get enableSubgroupsIfAppropriate() {
     return "/* don't enable subgroups */\n";
   }
-  get wgMemoryForSubgroupEmulation() {
-    return /* wgsl */ `var<workgroup> wg_sw_subgroups: array<${this.env.datatype}, ${this.env.workgroupSize}>;\n`;
+  get subgroupEmulation() {
+    return /* wgsl */ `var<workgroup> wg_sw_subgroups: array<${this.env.datatype}, ${this.env.workgroupSize}>;
+    const sgsz: u32 = ${this.env.workgroupSize};
+    var<private> sgid: u32;`;
   }
   get subgroupZero() {
     return /* wgsl */ `

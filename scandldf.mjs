@@ -92,8 +92,8 @@ var<workgroup> wg_broadcast_prev_red: ${this.datatype};
 var<workgroup> wg_partials: array<${this.datatype}, MAX_PARTIALS_SIZE>;
 var<workgroup> wg_fallback: array<${this.datatype}, MAX_PARTIALS_SIZE>;
 /** If we're making subgroup calls and we don't have subgroup hardware,
- * we need to declare workgroup memory to emulate them */
-${this.fnDeclarations.wgMemoryForSubgroupEmulation}
+ * this sets up necessary declarations (workgroup memory, subgroup vars) */
+${this.fnDeclarations.subgroupEmulation}
 
 @diagnostic(off, subgroup_uniformity)
 fn unsafeShuffle(x: u32, source: u32, sgid: u32) -> u32 {
@@ -592,7 +592,7 @@ fn main(builtinsUniform: BuiltinsUniform,
           ],
         ],
         label: `Thomas Smith's scan (${this.type}) with decoupled lookback/decoupled fallback [subgroups: ${this.hasSubgroups}]`,
-        logKernelCodeToConsole: false,
+        logKernelCodeToConsole: true,
         getDispatchGeometry: () => {
           return this.getSimpleDispatchGeometry();
         },
