@@ -146,9 +146,6 @@ ${this.fnDeclarations.subgroupBallot}
 fn main(builtinsUniform: BuiltinsUniform,
         builtinsNonuniform: BuiltinsNonuniform) {
   ${this.fnDeclarations.initializeSubgroupVars}
-//   @builtin(local_invocation_id) threadid: vec3<u32>,
-//   @builtin(subgroup_invocation_id) laneid: u32,
-//   @builtin(subgroup_size) lane_count: u32) {
 
   // sid is subgroup ID, "which subgroup am I within this workgroup"
   let sid = builtinsNonuniform.lidx / sgsz; // Caution 1D workgroup ONLY! Ok, but technically not in HLSL spec
@@ -594,8 +591,8 @@ fn main(builtinsUniform: BuiltinsUniform,
             "misc",
           ],
         ],
-        label: `Thomas Smith's scan (${this.type}) with decoupled lookback/decoupled fallback`,
-        logKernelCodeToConsole: true,
+        label: `Thomas Smith's scan (${this.type}) with decoupled lookback/decoupled fallback [subgroups: ${this.hasSubgroups}]`,
+        logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
           return this.getSimpleDispatchGeometry();
         },
