@@ -425,8 +425,7 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
     let sgid: u32 = builtinsNonuniform.lidx;`;
   }
   get enableSubgroupsIfAppropriate() {
-    /* don't enable subgroups */
-    return "";
+    return "/* don't enable subgroups */\n";
   }
   get wgMemoryForSubgroupEmulation() {
     return /* wgsl */ `var<workgroup> wg_sw_subgroups: array<${this.env.datatype}, ${this.env.workgroupSize}>;\n`;
@@ -518,10 +517,11 @@ fn subgroupInclusiveOpScan(in: ${this.env.datatype}, sgid: u32, laneCount: u32) 
    */
   var red: ${this.env.datatype} = in;
   var t: ${this.env.datatype};
-  for (var i: u32 = 1; i < ${this.env.workgroupSize}; i <<= 1) {
+  for (var delta: u32 = 1; delta < ${this.env.workgroupSize}; delta <<= 1) {
+    /* delta == how many threads I'm reaching back */
     wg_sw_subgroups[sgid] = red;
     workgroupBarrier();
-    var neighborIdx: u32 = sgid - i;
+    var neighborIdx: i32 = i32(sgid) - i32(delta);
     if (neighborIdx >= 0) {
       t = wg_sw_subgroups[neighborIdx];
       red = binop(t, red);
