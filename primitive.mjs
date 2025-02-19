@@ -295,6 +295,22 @@ export class BasePrimitive {
             code: kernelString,
           });
 
+          if (action?.logCompilationInfo) {
+            /* careful: probably has performance implications b/c await */
+            const shaderInfo = await computeModule.getCompilationInfo();
+            if (shaderInfo.messages.length > 0) {
+              console.log("Warnings for", action.label, shaderInfo.messages);
+            }
+            for (const message of shaderInfo.messages) {
+              console.log(
+                message.type,
+                "at line",
+                message.lineNum,
+                message.message
+              );
+            }
+          }
+
           // build up bindGroupLayouts and pipelineLayout
           let pipelineLayout;
           if (action.bufferTypes in BasePrimitive.pipelineLayoutsCache) {
