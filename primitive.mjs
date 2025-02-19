@@ -404,14 +404,16 @@ export class BasePrimitive {
             kernelPass.dispatchWorkgroups(...dispatchGeometry);
           }
 
-          console.info(`${this.label} | ${action.label}
+          if (action.logLaunchParameters) {
+            console.info(`${this.label} | ${action.label}
 size of bindings: ${action.bindings[0].map(
-            (e) => this.__buffers[e].buffer.buffer.size
-          )}
+              (e) => this.__buffers[e].buffer.buffer.size
+            )}
 workgroupCount: ${this.workgroupCount}
 workgroupSize: ${this.workgroupSize}
 maxGSLWorkgroupCount: ${this.maxGSLWorkgroupCount}
 dispatchGeometry: ${dispatchGeometry}`);
+          }
           kernelPass.end();
           break;
         }
