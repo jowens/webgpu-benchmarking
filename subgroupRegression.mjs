@@ -7,7 +7,7 @@ import {
   BinOpMaxU32,
   BinOpMinF32,
 } from "./binop.mjs";
-import { datatypeToBytes } from "./util.mjs";
+import { datatypeToTypedArray } from "./util.mjs";
 
 export class SubgroupShuffleRegression extends BasePrimitive {
   constructor(args) {
@@ -20,6 +20,49 @@ export class SubgroupShuffleRegression extends BasePrimitive {
       this.getBuffer("inputBuffer").size + this.getBuffer("outputBuffer").size
     );
   }
+  validate = (args = {}) => {
+    /** if we pass in buffers, use them, otherwise use the named buffers
+     * that are stored in the primitive */
+    /* assumes that cpuBuffers are populated with useful data */
+    const memsrc = args.inputBuffer ?? this.getBuffer("inputBuffer").cpuBuffer;
+    const memdest =
+      args.outputBuffer ?? this.getBuffer("outputBuffer").cpuBuffer;
+    const referenceOutput = new (datatypeToTypedArray(this.datatype))(
+      memdest.length
+    );
+    /* compute reference output */
+    for (let i = 0; i < memsrc.length; i++) {
+      referenceOutput[i] = memsrc[i ^ 1];
+    }
+    console.log(
+      this.label,
+      this.type,
+      "should validate to",
+      referenceOutput,
+      "and actually validates to",
+      memdest,
+      "\n"
+    );
+    function validates(cpu, gpu, datatype) {
+      return cpu == gpu;
+    }
+    let returnString = "";
+    let allowedErrors = 5;
+    for (let i = 0; i < memdest.length; i++) {
+      if (allowedErrors == 0) {
+        break;
+      }
+      if (!validates(referenceOutput[i], memdest[i], this.datatype)) {
+        returnString += `Element ${i}: expected ${referenceOutput[i]}, instead saw ${memdest[i]}.`;
+        if (args.debugBuffer) {
+          returnString += ` debug[${i}] = ${args.debugBuffer[i]}.`;
+        }
+        returnString += "\n";
+        allowedErrors--;
+      }
+    }
+    return returnString;
+  };
   kernel = () => {
     return /* wgsl */ `
 ${this.fnDeclarations.enableSubgroupsIfAppropriate}
@@ -31,8 +74,6 @@ var<storage, read_write> outputBuffer: array<${this.datatype}>;
 var<storage, read> inputBuffer: array<${this.datatype}>;
 
 ${this.fnDeclarations.subgroupEmulation}
-/* defines "binop", the operation associated with the scan monoid */
-${this.binop.wgslfn}
 ${this.fnDeclarations.commonDefinitions}
 ${this.fnDeclarations.subgroupShuffle}
 
@@ -56,7 +97,7 @@ fn main(builtinsUniform: BuiltinsUniform,
         kernel: this.kernel,
         bufferTypes: [["storage", "read-only-storage"]],
         bindings: [["outputBuffer", "inputBuffer"]],
-        logKernelCodeToConsole: true,
+        logKernelCodeToConsole: false,
       }),
     ];
   }
@@ -65,7 +106,8 @@ fn main(builtinsUniform: BuiltinsUniform,
 const SubgroupParams = {
   inputLength: range(8, 10).map((i) => 2 ** i),
   workgroupSize: range(5, 8).map((i) => 2 ** i),
-  datatype: ["f32"],
+  datatype: ["f32", "u32"],
+  disableSubgroups: [true, false],
 };
 
 export const SubgroupShuffleTestSuite = new BaseTestSuite({
@@ -74,10 +116,4 @@ export const SubgroupShuffleTestSuite = new BaseTestSuite({
   trials: 1,
   params: SubgroupParams,
   primitive: SubgroupShuffleRegression,
-  primitiveConfig: {
-    datatype: "u32",
-    type: "inclusive",
-    binop: BinOpMaxU32,
-    gputimestamps: true,
-  },
 });

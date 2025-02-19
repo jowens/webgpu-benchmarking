@@ -41,6 +41,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 import { NoAtomicPKReduceTestSuite } from "./reduce.mjs";
 import { HierarchicalScanTestSuite } from "./scan.mjs";
 import { DLDFScanTestSuite, DLDFReduceTestSuite } from "./scandldf.mjs";
+import { SubgroupShuffleTestSuite } from "./subgroupRegression.mjs";
 
 async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -85,10 +86,11 @@ async function main(navigator) {
   const testSuites = [
     // AtomicGlobalU32ReduceTestSuite,
     // AtomicGlobalU32ReduceBinOpsTestSuite,
-    NoAtomicPKReduceTestSuite,
+    // NoAtomicPKReduceTestSuite,
     // HierarchicalScanTestSuite,
     // DLDFScanTestSuite,
-    DLDFReduceTestSuite,
+    // DLDFReduceTestSuite,
+    SubgroupShuffleTestSuite,
     //AtomicGlobalU32SGReduceTestSuite,
     //AtomicGlobalU32WGReduceTestSuite,
     //AtomicGlobalF32WGReduceTestSuite,
@@ -135,7 +137,10 @@ async function main(navigator) {
         const testOutputBuffer = new Buffer({
           device,
           datatype: primitive.datatype,
-          length: testSuite.category == "scan" ? primitive.inputLength : 1,
+          length:
+            testSuite.category == "scan" || testSuite.category == "subgroups"
+              ? primitive.inputLength
+              : 1,
           label: "outputBuffer",
           createGPUBuffer: true,
           createMappableGPUBuffer: true,
