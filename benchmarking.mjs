@@ -147,6 +147,19 @@ async function main(navigator) {
         });
         primitive.registerBuffer(testOutputBuffer);
 
+        let testDebugBuffer;
+        if (primitive.knownBuffers.includes("debugBuffer")) {
+          testDebugBuffer = new Buffer({
+            device,
+            datatype: "u32",
+            length: 1,
+            label: "debugBuffer",
+            createGPUBuffer: true,
+            createMappableGPUBuffer: true,
+          });
+          primitive.registerBuffer(testDebugBuffer);
+        }
+
         console.log(testSuite);
 
         // TEST FOR CORRECTNESS
@@ -154,6 +167,9 @@ async function main(navigator) {
           // submit ONE run just for correctness
           await primitive.execute();
           await testOutputBuffer.copyGPUToCPU();
+          if (testDebugBuffer) {
+            await testDebugBuffer.copyGPUToCPU();
+          }
           const errorstr = primitive.validate();
           if (errorstr == "") {
             console.info("Validation passed");
