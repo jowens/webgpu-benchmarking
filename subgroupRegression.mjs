@@ -2,6 +2,7 @@ import { range } from "./util.mjs";
 import { BasePrimitive, Kernel } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import {
+  BinOpNopU32,
   BinOpAddF32,
   BinOpAddU32,
   BinOpMaxU32,
@@ -79,6 +80,9 @@ var<storage, read_write> debugBuffer: array<u32>;
 ${this.fnDeclarations.subgroupEmulation}
 ${this.fnDeclarations.commonDefinitions}
 ${this.fnDeclarations.subgroupShuffle}
+/* some functions only work if binop is defined in the primitive */
+${this.binop ? this.binop.wgslfn : ""}
+${this.binop ? this.fnDeclarations.subgroupReduce : ""}
 
 @compute @workgroup_size(${this.workgroupSize}, 1, 1)
 fn main(builtinsUniform: BuiltinsUniform,
@@ -122,6 +126,13 @@ const SubgroupParams = {
   disableSubgroups: [true, false],
 };
 
+const SubgroupBinOpParams = {
+  inputLength: range(8, 10).map((i) => 2 ** i),
+  workgroupSize: range(5, 8).map((i) => 2 ** i),
+  binop: [BinOpAddF32, BinOpMaxU32],
+  disableSubgroups: [true, false],
+};
+
 const seeds = [
   {
     /* swap with your neighbor, even <-> odd */
@@ -159,11 +170,10 @@ const seeds = [
 
 function tsGen(params) {
   return new BaseTestSuite({
-    category: "subgroups",
-    testSuite: params.testSuite,
-    trials: 0,
-    params: SubgroupParams,
-    primitive: params.primitive,
+    category: params.category ?? "subgroups",
+    trials: params.trials ?? 0,
+    params: params.params ?? SubgroupParams,
+    primitive: params.primitive ?? SubgroupRegression,
     primitiveConfig: params.primitiveConfig,
   });
 }

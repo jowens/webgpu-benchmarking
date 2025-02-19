@@ -20,6 +20,16 @@ class BinOp {
   }
 }
 
+export class BinOpNop extends BinOp {
+  constructor(args) {
+    super(args);
+    this.identity = 42;
+    this.op = (a, b) => a;
+    this.wgslfn = `fn binop(a : ${this.datatype}, b : ${this.datatype}) -> ${this.datatype} {return a;}`;
+  }
+}
+export const BinOpNopU32 = new BinOpNop({ datatype: "u32" });
+
 export class BinOpAdd extends BinOp {
   constructor(args) {
     super(args);
