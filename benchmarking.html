@@ -9,10 +9,13 @@
   <body>
     <div id="plot"></div>
     <script>
-      const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const isLocalhost =
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1" ||
+        window.location.protocol === "file:";
       const script = document.createElement("script");
       script.type = "module";
-      script.src = (isLocalhost ? "http://localhost:8000/" : "https://jowens.github.io/") + "webgpu-benchmarking/benchmarking_chrome.mjs";
+      script.src = (isLocalhost ? "http://localhost:8000" : "https://jowens.github.io") + "/webgpu-benchmarking/benchmarking_chrome.mjs";
       document.body.appendChild(script);
     // <script src="http://localhost:8000/webgpu-benchmarking/benchmarking_chrome.mjs" type="module"></script>
     </script>
