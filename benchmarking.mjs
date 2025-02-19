@@ -41,7 +41,10 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 import { NoAtomicPKReduceTestSuite } from "./reduce.mjs";
 import { HierarchicalScanTestSuite } from "./scan.mjs";
 import { DLDFScanTestSuite, DLDFReduceTestSuite } from "./scandldf.mjs";
-import { SubgroupShuffleTestSuite } from "./subgroupRegression.mjs";
+import {
+  SubgroupShuffleNeighborTestSuite,
+  SubgroupShuffleRotateTestSuite,
+} from "./subgroupRegression.mjs";
 
 async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -90,7 +93,8 @@ async function main(navigator) {
     // HierarchicalScanTestSuite,
     // DLDFScanTestSuite,
     // DLDFReduceTestSuite,
-    SubgroupShuffleTestSuite,
+    SubgroupShuffleNeighborTestSuite,
+    SubgroupShuffleRotateTestSuite,
     //AtomicGlobalU32SGReduceTestSuite,
     //AtomicGlobalU32WGReduceTestSuite,
     //AtomicGlobalF32WGReduceTestSuite,
@@ -101,6 +105,7 @@ async function main(navigator) {
 
   const expts = new Array(); // push new rows (experiments) onto this
   for (const testSuite of testSuites) {
+    console.log(testSuite);
     const lastTestSeen = {
       testSuite: testSuite.testSuite,
       category: testSuite.category,
@@ -160,8 +165,6 @@ async function main(navigator) {
           primitive.registerBuffer(testDebugBuffer);
         }
 
-        console.log(testSuite);
-
         // TEST FOR CORRECTNESS
         if (testSuite.validate && primitive.validate) {
           // submit ONE run just for correctness
@@ -172,7 +175,7 @@ async function main(navigator) {
           }
           const errorstr = primitive.validate();
           if (errorstr == "") {
-            console.info("Validation passed");
+            console.info("Validation passed", params);
           } else {
             console.error("Validation failed for", params, ":", errorstr);
           }
