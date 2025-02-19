@@ -47,6 +47,6 @@ export class BaseTestSuite {
     return primitive;
   }
   getPlots() {
-    return this.processedPlots;
+    return this.processedPlots ?? [];
   }
 }
