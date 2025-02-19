@@ -9,11 +9,12 @@ import {
 } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
 
-export class SubgroupShuffleRegression extends BasePrimitive {
+export class SubgroupRegression extends BasePrimitive {
   constructor(args) {
     super(args);
     this.getDispatchGeometry = this.getSimpleDispatchGeometry;
-    this.knownBuffers = ["inputBuffer", "outputBuffer"];
+    this.knownBuffers = ["inputBuffer", "outputBuffer", "debugBuffer"];
+    this.args = args;
   }
   get bytesTransferred() {
     return (
@@ -27,16 +28,14 @@ export class SubgroupShuffleRegression extends BasePrimitive {
     const memsrc = args.inputBuffer ?? this.getBuffer("inputBuffer").cpuBuffer;
     const memdest =
       args.outputBuffer ?? this.getBuffer("outputBuffer").cpuBuffer;
+    const sgsz = this.getBuffer("debugBuffer").cpuBuffer[0];
     const referenceOutput = new (datatypeToTypedArray(this.datatype))(
       memdest.length
     );
-    /* compute reference output */
-    for (let i = 0; i < memsrc.length; i++) {
-      referenceOutput[i] = memsrc[i ^ 1];
-    }
+    /* compute reference output - this populates referenceOutput */
+    this.args.computeReference({ referenceOutput, memsrc, sgsz });
     console.log(
       this.label,
-      this.type,
       "should validate to",
       referenceOutput,
       "and actually validates to",
@@ -73,6 +72,9 @@ var<storage, read_write> outputBuffer: array<${this.datatype}>;
 @group(0) @binding(1)
 var<storage, read> inputBuffer: array<${this.datatype}>;
 
+@group(0) @binding(2)
+var<storage, read_write> debugBuffer: array<u32>;
+
 ${this.fnDeclarations.subgroupEmulation}
 ${this.fnDeclarations.commonDefinitions}
 ${this.fnDeclarations.subgroupShuffle}
@@ -82,7 +84,14 @@ fn main(builtinsUniform: BuiltinsUniform,
         builtinsNonuniform: BuiltinsNonuniform) {
   ${this.fnDeclarations.initializeSubgroupVars}
   ${this.fnDeclarations.computeLinearizedGridParametersSplit}
-  outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], gid ^ 1);
+  ${this.args.wgslOp}
+  // example of wgslOp:
+  // outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid ^ 1) & (sgsz - 1));
+  if (gid == 0) {
+    /* validation requires knowing the subgroup size */
+    debugBuffer[0] = sgsz;
+  }
+  return;
 }`;
   };
   finalizeRuntimeParameters() {
@@ -95,9 +104,10 @@ fn main(builtinsUniform: BuiltinsUniform,
     return [
       new Kernel({
         kernel: this.kernel,
-        bufferTypes: [["storage", "read-only-storage"]],
-        bindings: [["outputBuffer", "inputBuffer"]],
+        bufferTypes: [["storage", "read-only-storage", "storage"]],
+        bindings: [["outputBuffer", "inputBuffer", "debugBuffer"]],
         logKernelCodeToConsole: false,
+        logCompilationInfo: true,
       }),
     ];
   }
@@ -115,5 +125,15 @@ export const SubgroupShuffleTestSuite = new BaseTestSuite({
   testSuite: "subgroupShuffle",
   trials: 1,
   params: SubgroupParams,
-  primitive: SubgroupShuffleRegression,
+  primitive: SubgroupRegression,
+  primitiveConfig: {
+    wgslOp:
+      "outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid ^ 1) & (sgsz - 1));",
+    computeReference: ({ referenceOutput, memsrc, sgsz }) => {
+      /* compute reference output */
+      for (let i = 0; i < memsrc.length; i++) {
+        referenceOutput[i] = memsrc[i ^ 1];
+      }
+    },
+  },
 });
