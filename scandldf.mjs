@@ -526,9 +526,9 @@ fn main(builtinsUniform: BuiltinsUniform,
     this.MAX_READBACK_SIZE = 8192; // Max size of our readback buffer
     this.workgroupSize = 256;
     const inputSize = this.getBuffer("inputBuffer").size; // bytes
-    const inputCount = inputSize / 4; /* 4 is size of datatype */
-    this.workgroupCount = Math.ceil(inputCount / this.PART_SIZE);
-    this.vec_size = Math.ceil(inputCount / 4); /* 4 is sizeof vec4 */
+    const inputLength = inputSize / 4; /* 4 is size of datatype */
+    this.workgroupCount = Math.ceil(inputLength / this.PART_SIZE);
+    this.vec_size = Math.ceil(inputLength / 4); /* 4 is sizeof vec4 */
     this.work_tiles = this.workgroupCount;
     this.scanBumpSize = datatypeToBytes(this.datatype);
     // one vec4 per workgroup in spine
@@ -537,7 +537,7 @@ fn main(builtinsUniform: BuiltinsUniform,
 
     // scanParameters is: size: u32, vec_size: u32, work_tiles: u32
     this.scanParameters = new Uint32Array([
-      inputCount, // this isn't used in the shader currently
+      inputLength, // this isn't used in the shader currently
       this.vec_size,
       this.workgroupCount,
       this.simulate_mask,
@@ -586,8 +586,8 @@ fn main(builtinsUniform: BuiltinsUniform,
             "misc",
           ],
         ],
-        label: `Thomas Smith's scan (${this.type}) with decoupled lookback/decoupled fallback [subgroups: ${this.hasSubgroups}]`,
-        logKernelCodeToConsole: true,
+        label: `Thomas Smith's scan (${this.type}) with decoupled lookback/decoupled fallback [subgroups: ${this.useSubgroups}]`,
+        logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
           return this.getSimpleDispatchGeometry();
         },
