@@ -34,14 +34,7 @@ export class SubgroupRegression extends BasePrimitive {
     );
     /* compute reference output - this populates referenceOutput */
     this.args.computeReference({ referenceOutput, memsrc, sgsz });
-    console.log(
-      this.label,
-      "should validate to",
-      referenceOutput,
-      "and actually validates to",
-      memdest,
-      "\n"
-    );
+
     function validates(cpu, gpu, datatype) {
       return cpu == gpu;
     }
@@ -52,6 +45,14 @@ export class SubgroupRegression extends BasePrimitive {
         break;
       }
       if (!validates(referenceOutput[i], memdest[i], this.datatype)) {
+        console.log(
+          this.label,
+          "should validate to",
+          referenceOutput,
+          "and actually validates to",
+          memdest,
+          "\n"
+        );
         returnString += `Element ${i}: expected ${referenceOutput[i]}, instead saw ${memdest[i]}.`;
         if (args.debugBuffer) {
           returnString += ` debug[${i}] = ${args.debugBuffer[i]}.`;
@@ -108,6 +109,7 @@ fn main(builtinsUniform: BuiltinsUniform,
         bindings: [["outputBuffer", "inputBuffer", "debugBuffer"]],
         logKernelCodeToConsole: false,
         logCompilationInfo: true,
+        logLaunchParameters: false,
       }),
     ];
   }
@@ -120,10 +122,11 @@ const SubgroupParams = {
   disableSubgroups: [true, false],
 };
 
-export const SubgroupShuffleTestSuite = new BaseTestSuite({
+/* swap with your neighbor, even <-> odd */
+export const SubgroupShuffleNeighborTestSuite = new BaseTestSuite({
   category: "subgroups",
-  testSuite: "subgroupShuffle",
-  trials: 1,
+  testSuite: "subgroupShuffle neighbor",
+  trials: 0,
   params: SubgroupParams,
   primitive: SubgroupRegression,
   primitiveConfig: {
@@ -133,6 +136,27 @@ export const SubgroupShuffleTestSuite = new BaseTestSuite({
       /* compute reference output */
       for (let i = 0; i < memsrc.length; i++) {
         referenceOutput[i] = memsrc[i ^ 1];
+      }
+    },
+  },
+});
+
+/* rotate +1, within a subgroup */
+export const SubgroupShuffleRotateTestSuite = new BaseTestSuite({
+  category: "subgroups",
+  testSuite: "subgroupShuffle rotate +1",
+  trials: 0,
+  params: SubgroupParams,
+  primitive: SubgroupRegression,
+  primitiveConfig: {
+    wgslOp:
+      "outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid + 1) & (sgsz - 1));",
+    computeReference: ({ referenceOutput, memsrc, sgsz }) => {
+      /* compute reference output */
+      for (let i = 0; i < memsrc.length; i++) {
+        const subgroupBaseIdx = i & ~(sgsz - 1); /* top bits */
+        const subgroupIdx = (i + 1) & (sgsz - 1); /* bottom bits */
+        referenceOutput[i] = memsrc[subgroupBaseIdx + subgroupIdx];
       }
     },
   },
