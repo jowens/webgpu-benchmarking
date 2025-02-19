@@ -21,6 +21,7 @@ export class BasePrimitive {
     //   inputBuffer0: inputbuffer0,
     //   inputBuffer1: inputbuffer1,
     //   outputs: outputbuffer0,
+    //   disableSubgroups: true [default: false],
     // }
     if (this.constructor === BasePrimitive) {
       throw new Error(
@@ -56,8 +57,11 @@ export class BasePrimitive {
     }
 
     this.__buffers = {}; // this is essentially private
-    this.hasSubgroups = this.device.features.has("subgroups");
-    if (this.hasSubgroups) {
+    this.useSubgroups = this.device.features.has("subgroups");
+    if (args.disableSubgroups) {
+      this.useSubgroups = false;
+    }
+    if (this.useSubgroups) {
       this.fnDeclarations = new wgslFunctions(this);
     } else {
       this.fnDeclarations = new wgslFunctionsWithoutSubgroupSupport(this);
@@ -201,7 +205,7 @@ export class BasePrimitive {
 
     if (args.encoder && args.enableCPUTiming) {
       console.warn(
-        "Primitive:execute: cannot pass in an encoder AND\nenable CPU timing, CPU timing will be disabled"
+        "Primitive::execute: cannot pass in an encoder AND\nenable CPU timing, CPU timing will be disabled"
       );
     }
 
@@ -211,13 +215,19 @@ export class BasePrimitive {
     }
 
     /* do we need to register any new buffers specified in execute? */
-    for (const knownBuffer of this.knownBuffers) {
-      if (knownBuffer in args) {
-        this.registerBuffer({
-          label: knownBuffer,
-          buffer: args[knownBuffer],
-        });
+    if (this.knownBuffers) {
+      for (const knownBuffer of this.knownBuffers) {
+        if (knownBuffer in args) {
+          this.registerBuffer({
+            label: knownBuffer,
+            buffer: args[knownBuffer],
+          });
+        }
       }
+    } else {
+      console.warn(
+        "Primitive::execute: This primitive has no knownBuffers, please specify\nthem in the primitive class constructor."
+      );
     }
 
     /* begin timestamp prep - count kernels, allocate 2 timestamps/kernel */
