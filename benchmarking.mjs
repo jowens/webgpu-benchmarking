@@ -41,10 +41,7 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 import { NoAtomicPKReduceTestSuite } from "./reduce.mjs";
 import { HierarchicalScanTestSuite } from "./scan.mjs";
 import { DLDFScanTestSuite, DLDFReduceTestSuite } from "./scandldf.mjs";
-import {
-  SubgroupShuffleNeighborTestSuite,
-  SubgroupShuffleRotateTestSuite,
-} from "./subgroupRegression.mjs";
+import { subgroupTestSuites } from "./subgroupRegression.mjs";
 
 async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -86,22 +83,21 @@ async function main(navigator) {
   //  SubgroupSumSGTestSuite,
   //  SubgroupSumWGTestSuite,
   //];
-  const testSuites = [
-    // AtomicGlobalU32ReduceTestSuite,
-    // AtomicGlobalU32ReduceBinOpsTestSuite,
-    // NoAtomicPKReduceTestSuite,
-    // HierarchicalScanTestSuite,
-    // DLDFScanTestSuite,
-    // DLDFReduceTestSuite,
-    SubgroupShuffleNeighborTestSuite,
-    SubgroupShuffleRotateTestSuite,
-    //AtomicGlobalU32SGReduceTestSuite,
-    //AtomicGlobalU32WGReduceTestSuite,
-    //AtomicGlobalF32WGReduceTestSuite,
-    //AtomicGlobalNonAtomicWGF32ReduceTestSuite,
-    //AtomicGlobalPrimedNonAtomicWGF32ReduceTestSuite,
-  ];
+  // const testSuites = [
+  // AtomicGlobalU32ReduceTestSuite,
+  // AtomicGlobalU32ReduceBinOpsTestSuite,
+  // NoAtomicPKReduceTestSuite,
+  // HierarchicalScanTestSuite,
+  // DLDFScanTestSuite,
+  // DLDFReduceTestSuite,
+  //AtomicGlobalU32SGReduceTestSuite,
+  //AtomicGlobalU32WGReduceTestSuite,
+  //AtomicGlobalF32WGReduceTestSuite,
+  //AtomicGlobalNonAtomicWGF32ReduceTestSuite,
+  //AtomicGlobalPrimedNonAtomicWGF32ReduceTestSuite,
+  // ];
   //const testSuites = [AtomicGlobalU32ReduceTestSuite];
+  const testSuites = subgroupTestSuites;
 
   const expts = new Array(); // push new rows (experiments) onto this
   for (const testSuite of testSuites) {

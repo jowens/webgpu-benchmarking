@@ -122,42 +122,50 @@ const SubgroupParams = {
   disableSubgroups: [true, false],
 };
 
-/* swap with your neighbor, even <-> odd */
-export const SubgroupShuffleNeighborTestSuite = new BaseTestSuite({
-  category: "subgroups",
-  testSuite: "subgroupShuffle neighbor",
-  trials: 0,
-  params: SubgroupParams,
-  primitive: SubgroupRegression,
-  primitiveConfig: {
-    wgslOp:
-      "outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid ^ 1) & (sgsz - 1));",
-    computeReference: ({ referenceOutput, memsrc, sgsz }) => {
-      /* compute reference output */
-      for (let i = 0; i < memsrc.length; i++) {
-        referenceOutput[i] = memsrc[i ^ 1];
-      }
+const seeds = [
+  {
+    /* swap with your neighbor, even <-> odd */
+    testSuite: "subgroupShuffle neighbor",
+    primitive: SubgroupRegression,
+    primitiveConfig: {
+      wgslOp:
+        "outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid ^ 1) & (sgsz - 1));",
+      computeReference: ({ referenceOutput, memsrc, sgsz }) => {
+        /* compute reference output */
+        for (let i = 0; i < memsrc.length; i++) {
+          referenceOutput[i] = memsrc[i ^ 1];
+        }
+      },
     },
   },
-});
+  {
+    /* rotate +1, within a subgroup */
+    testSuite: "subgroupShuffle rotate +1",
+    primitive: SubgroupRegression,
+    primitiveConfig: {
+      wgslOp:
+        "outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid + 1) & (sgsz - 1));",
+      computeReference: ({ referenceOutput, memsrc, sgsz }) => {
+        /* compute reference output */
+        for (let i = 0; i < memsrc.length; i++) {
+          const subgroupBaseIdx = i & ~(sgsz - 1); /* top bits */
+          const subgroupIdx = (i + 1) & (sgsz - 1); /* bottom bits */
+          referenceOutput[i] = memsrc[subgroupBaseIdx + subgroupIdx];
+        }
+      },
+    },
+  },
+];
 
-/* rotate +1, within a subgroup */
-export const SubgroupShuffleRotateTestSuite = new BaseTestSuite({
-  category: "subgroups",
-  testSuite: "subgroupShuffle rotate +1",
-  trials: 0,
-  params: SubgroupParams,
-  primitive: SubgroupRegression,
-  primitiveConfig: {
-    wgslOp:
-      "outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid + 1) & (sgsz - 1));",
-    computeReference: ({ referenceOutput, memsrc, sgsz }) => {
-      /* compute reference output */
-      for (let i = 0; i < memsrc.length; i++) {
-        const subgroupBaseIdx = i & ~(sgsz - 1); /* top bits */
-        const subgroupIdx = (i + 1) & (sgsz - 1); /* bottom bits */
-        referenceOutput[i] = memsrc[subgroupBaseIdx + subgroupIdx];
-      }
-    },
-  },
-});
+function tsGen(params) {
+  return new BaseTestSuite({
+    category: "subgroups",
+    testSuite: params.testSuite,
+    trials: 0,
+    params: SubgroupParams,
+    primitive: params.primitive,
+    primitiveConfig: params.primitiveConfig,
+  });
+}
+
+export const subgroupTestSuites = seeds.map(tsGen);
