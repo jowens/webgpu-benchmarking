@@ -83,6 +83,21 @@ export class wgslFunctions {
     var workgroupCount = builtins.nwg.z * builtins.nwg.y * builtins.nwg.x;
     var totalThreadCount = workgroupCount * numThreadsPerWorkgroup;`;
   }
+  get computeLinearizedGridParametersSplit() {
+    /* "split" meaning "split builtin uniforms vs. nonuniforms" */
+    return /* wgsl */ `
+    /* wgid is a linearized (1d) unique ID per wg;
+     * gid is a linearized (1d) unique ID per thread */
+    var wgid = builtinsUniform.wgid.z * builtinsUniform.nwg.y * builtinsUniform.nwg.x +
+               builtinsUniform.wgid.y * builtinsUniform.nwg.x +
+               builtinsUniform.wgid.x;
+    var numThreadsPerWorkgroup: u32 = ${
+      this.env.numThreadsPerWorkgroup ?? this.env.workgroupSize
+    };
+    var gid: u32 = wgid * numThreadsPerWorkgroup + builtinsNonuniform.lidx;
+    var workgroupCount = builtinsUniform.nwg.z * builtinsUniform.nwg.y * builtinsUniform.nwg.x;
+    var totalThreadCount = workgroupCount * numThreadsPerWorkgroup;`;
+  }
   get vec4InclusiveScan() {
     return /* wgsl */ `
     fn vec4InclusiveScan(in: vec4<${this.env.datatype}>) ->
