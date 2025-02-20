@@ -6,6 +6,8 @@ import {
   BinOpAddF32,
   BinOpAddU32,
   BinOpMaxU32,
+  BinOpMaxF32,
+  BinOpMinU32,
   BinOpMinF32,
 } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
@@ -37,7 +39,16 @@ export class SubgroupRegression extends BasePrimitive {
     this.args.computeReference({ referenceOutput, memsrc, sgsz });
 
     function validates(cpu, gpu, datatype) {
-      return cpu == gpu;
+      switch (datatype) {
+        case "f32":
+          if (cpu == 0) {
+            return gpu == 0; // don't divide by zero
+          } else {
+            return Math.abs((cpu - gpu) / cpu) < 0.001;
+          }
+        default:
+          return cpu == gpu;
+      }
     }
     let returnString = "";
     let allowedErrors = 5;
@@ -46,14 +57,6 @@ export class SubgroupRegression extends BasePrimitive {
         break;
       }
       if (!validates(referenceOutput[i], memdest[i], this.datatype)) {
-        console.log(
-          this.label,
-          "should validate to",
-          referenceOutput,
-          "and actually validates to",
-          memdest,
-          "\n"
-        );
         returnString += `Element ${i}: expected ${referenceOutput[i]}, instead saw ${memdest[i]}.`;
         if (args.debugBuffer) {
           returnString += ` debug[${i}] = ${args.debugBuffer[i]}.`;
@@ -61,6 +64,17 @@ export class SubgroupRegression extends BasePrimitive {
         returnString += "\n";
         allowedErrors--;
       }
+    }
+    if (returnString !== "") {
+      /* we saw an error */
+      console.log(
+        this.label,
+        "should validate to",
+        referenceOutput,
+        "and actually validates to",
+        memdest,
+        "\n"
+      );
     }
     return returnString;
   };
@@ -129,7 +143,14 @@ const SubgroupParams = {
 const SubgroupBinOpParams = {
   inputLength: range(8, 10).map((i) => 2 ** i),
   workgroupSize: range(5, 8).map((i) => 2 ** i),
-  binop: [BinOpAddF32, BinOpMaxU32],
+  binop: [
+    BinOpAddF32,
+    BinOpAddU32,
+    BinOpMaxU32,
+    BinOpMaxF32,
+    BinOpMinU32,
+    BinOpMinF32,
+  ],
   disableSubgroups: [true, false],
 };
 
@@ -166,11 +187,33 @@ const seeds = [
       },
     },
   },
+  {
+    /* sum-reduce */
+    testSuite: "subgroupReduce",
+    primitive: SubgroupRegression,
+    params: SubgroupBinOpParams,
+    primitiveConfig: {
+      wgslOp: "outputBuffer[gid] = subgroupReduce(inputBuffer[gid]);",
+      computeReference: function ({ referenceOutput, memsrc, sgsz }) {
+        /* compute reference output */
+        for (let i = 0; i < memsrc.length; i += sgsz) {
+          let red = this.binop.identity;
+          for (let j = 0; j < sgsz; j++) {
+            red = this.binop.op(red, memsrc[i + j]);
+          }
+          for (let j = 0; j < sgsz; j++) {
+            referenceOutput[i + j] = red;
+          }
+        }
+      },
+    },
+  },
 ];
 
 function tsGen(params) {
   return new BaseTestSuite({
     category: params.category ?? "subgroups",
+    ...("testSuite" in params && { testSuite: params.testSuite }),
     trials: params.trials ?? 0,
     params: params.params ?? SubgroupParams,
     primitive: params.primitive ?? SubgroupRegression,
