@@ -138,10 +138,10 @@ fn main(builtinsUniform: BuiltinsUniform,
 }
 
 const SubgroupParams = {
-  disableSubgroups: [true, false],
   inputLength: range(8, 10).map((i) => 2 ** i),
   workgroupSize: range(5, 8).map((i) => 2 ** i),
   datatype: ["f32", "u32"],
+  disableSubgroups: [true, false],
 };
 
 const SubgroupBinOpParams = {
@@ -222,6 +222,7 @@ const seeds = [
       computeReference: function ({ referenceOutput, memsrc, sgsz }) {
         /* compute reference output */
         let out = new Uint32Array(4);
+        /* f32ToU32 objects allow a bitcast to U32 */
         const f32ToU32Buffer = new ArrayBuffer(4);
         const f32ToU32DataView = new DataView(f32ToU32Buffer);
         const cappedSgsz = Math.min(sgsz, 128);
@@ -239,7 +240,6 @@ const seeds = [
                 u32Value = memsrc[i + j];
                 break;
             }
-            /* >>> 0 bitcasts to u32 */
             out[Math.floor(j / 32)] |= (u32Value & 1) << j % 32;
           }
           /* ... then write it to the entire subgroup */

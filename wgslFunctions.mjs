@@ -469,16 +469,16 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
   }
   workgroupBarrier();
   for (var i: u32 = 1; i < bitsPerOutput; i <<= 1) {
-    /* get and integrate my neighbor */
+    /* get and integrate my neighbor, write it back */
     /* if we're out-of-bounds, just fetch my own value instead */
     if (sgid < 128) {
       var sourceID: u32 = select(sgid, sgid ^ i, (sgid ^ i) < ${this.env.workgroupSize});
       acc |= bitcast<u32>(wg_sw_subgroups[sourceID]);
     }
     workgroupBarrier();
-  }
-  if (sgid < 128) {
-    wg_sw_subgroups[sgid] = bitcast<${this.env.datatype}>(acc);
+    if (sgid < 128) {
+      wg_sw_subgroups[sgid] = bitcast<${this.env.datatype}>(acc);
+    }
   }
   workgroupBarrier();
   var out: vec4u = vec4u(0);
