@@ -459,10 +459,13 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
   /* hardwired to 32b shuffles, because output is in 32b words */
   /* should work if workgroup size % 32 != 0 */
   /* trying to not do any work for threads >= 128 */
+  /** note acc is always u32 but wg_sw_subgroups might be another datatype,
+   * so we have to bitcast. Every write to wg_sw_subgroups must be cast
+   * to its datatype; every read from it must be cast to u32. */
   const bitsPerOutput = 32u;
   var acc: u32 = select(0u, 1u, pred) << (sgid & (bitsPerOutput - 1));
   if (sgid < 128) {
-    wg_sw_subgroups[sgid] = acc;
+    wg_sw_subgroups[sgid] = bitcast<${this.env.datatype}>(acc);
   }
   workgroupBarrier();
   for (var i: u32 = 1; i < bitsPerOutput; i <<= 1) {
@@ -470,24 +473,24 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
     /* if we're out-of-bounds, just fetch my own value instead */
     if (sgid < 128) {
       var sourceID: u32 = select(sgid, sgid ^ i, (sgid ^ i) < ${this.env.workgroupSize});
-      acc |= wg_sw_subgroups[sourceID];
+      acc |= bitcast<u32>(wg_sw_subgroups[sourceID]);
     }
     workgroupBarrier();
   }
   if (sgid < 128) {
-    wg_sw_subgroups[sgid] = acc;
+    wg_sw_subgroups[sgid] = bitcast<${this.env.datatype}>(acc);
   }
   workgroupBarrier();
   var out: vec4u = vec4u(0);
   /* uniformity analysis requires the next loads be uniform ones */
-  out[0] = workgroupUniformLoad(&wg_sw_subgroups[0]);
+  out[0] = bitcast<u32>(workgroupUniformLoad(&wg_sw_subgroups[0]));
   /** possible bank-conflict avoidance: instead of reading from [0,32,64,96],
    *  we could read from [3,34,65,96], but then we'd have to check for overflow
    *  on the first three reads, not sure that's a win
    */
   for (var i: u32 = 32; i < min(${this.env.workgroupSize}, 128); i += 32) {
     /* write out[i], i in [1,2,3], if the workgroup is big enough */
-    out[i >> 5] = workgroupUniformLoad(&wg_sw_subgroups[i]);
+    out[i / bitsPerOutput] = bitcast<u32>(workgroupUniformLoad(&wg_sw_subgroups[i]));
   }
   return out;
 }`;
