@@ -47,6 +47,7 @@ export function datatypeToTypedArray(datatype) {
     case "i32":
       return Int32Array;
     case "u32":
+    case "vec4u":
       return Uint32Array;
   }
   return undefined;
@@ -60,6 +61,8 @@ export function datatypeToBytes(datatype) {
       return Int32Array.BYTES_PER_ELEMENT;
     case "u32":
       return Uint32Array.BYTES_PER_ELEMENT;
+    case "vec4u":
+      return Uint32Array.BYTES_PER_ELEMENT * 4;
   }
   return undefined;
 }
