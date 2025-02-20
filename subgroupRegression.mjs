@@ -138,10 +138,10 @@ fn main(builtinsUniform: BuiltinsUniform,
 }
 
 const SubgroupParams = {
+  disableSubgroups: [true, false],
   inputLength: range(8, 10).map((i) => 2 ** i),
   workgroupSize: range(5, 8).map((i) => 2 ** i),
   datatype: ["f32", "u32"],
-  disableSubgroups: [true, false],
 };
 
 const SubgroupBinOpParams = {
@@ -222,13 +222,25 @@ const seeds = [
       computeReference: function ({ referenceOutput, memsrc, sgsz }) {
         /* compute reference output */
         let out = new Uint32Array(4);
+        const f32ToU32Buffer = new ArrayBuffer(4);
+        const f32ToU32DataView = new DataView(f32ToU32Buffer);
         const cappedSgsz = Math.min(sgsz, 128);
         for (let i = 0; i < memsrc.length; i += sgsz) {
           out[0] = out[1] = out[2] = out[3] = 0;
           /* first ballot across the subgroup (capping after 128 elements) ... */
           for (let j = 0; j < cappedSgsz && i + j < memsrc.length; j++) {
+            let u32Value;
+            switch (this.datatype) {
+              case "f32":
+                f32ToU32DataView.setFloat32(0, memsrc[i + j], true);
+                u32Value = f32ToU32DataView.getUint32(0, true);
+                break;
+              case "u32":
+                u32Value = memsrc[i + j];
+                break;
+            }
             /* >>> 0 bitcasts to u32 */
-            out[j / 32] |= ((memsrc[i + j] >>> 0) & 1) << j % 32;
+            out[Math.floor(j / 32)] |= (u32Value & 1) << j % 32;
           }
           /* ... then write it to the entire subgroup */
           for (let j = 0; j < sgsz && i + j < memsrc.length; j++) {
