@@ -4,8 +4,10 @@ import { BaseTestSuite } from "./testsuite.mjs";
 import {
   BinOpAddF32,
   BinOpAddU32,
-  BinOpMaxU32,
   BinOpMinF32,
+  BinOpMinU32,
+  BinOpMaxF32,
+  BinOpMaxU32,
 } from "./binop.mjs";
 import { datatypeToBytes } from "./util.mjs";
 import { BaseScan } from "./scan.mjs";
@@ -642,4 +644,27 @@ export const DLDFReduceTestSuite = new BaseTestSuite({
     gputimestamps: true,
   },
   plots: [DLDFScanPlot],
+});
+
+const DLDFRegressionParams = {
+  inputLength: range(8, 28).map((i) => 2 ** i),
+  type: ["inclusive", "exclusive", "reduce"],
+  datatype: ["f32", "u32"],
+  binop: [
+    BinOpAddF32,
+    BinOpAddU32,
+    BinOpMaxU32,
+    BinOpMaxF32,
+    BinOpMinU32,
+    BinOpMinF32,
+  ],
+  disableSubgroups: [true, false],
+};
+
+export const DLDFScanAccuracyRegressionSuite = new BaseTestSuite({
+  category: "DLDF",
+  testSuite: "scan-ish",
+  trials: 2,
+  params: DLDFRegressionParams,
+  primitive: DLDFScan,
 });
