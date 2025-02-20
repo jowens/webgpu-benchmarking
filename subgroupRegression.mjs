@@ -2,7 +2,6 @@ import { range } from "./util.mjs";
 import { BasePrimitive, Kernel } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import {
-  BinOpNopU32,
   BinOpAddF32,
   BinOpAddU32,
   BinOpMaxU32,
@@ -32,9 +31,9 @@ export class SubgroupRegression extends BasePrimitive {
     const memdest =
       args.outputBuffer ?? this.getBuffer("outputBuffer").cpuBuffer;
     const sgsz = this.getBuffer("debugBuffer").cpuBuffer[0];
-    const referenceOutput = new (datatypeToTypedArray(this.datatype))(
-      memdest.length
-    );
+    const referenceOutput = new (datatypeToTypedArray(
+      this.getBuffer("outputBuffer").datatype
+    ))(memdest.length);
     /* compute reference output - this populates referenceOutput */
     this.args.computeReference({ referenceOutput, memsrc, sgsz });
 
@@ -83,10 +82,14 @@ export class SubgroupRegression extends BasePrimitive {
 ${this.fnDeclarations.enableSubgroupsIfAppropriate}
 
 @group(0) @binding(0)
-var<storage, read_write> outputBuffer: array<${this.datatype}>;
+var<storage, read_write> outputBuffer: array<${
+      this.getBuffer("outputBuffer").datatype
+    }>;
 
 @group(0) @binding(1)
-var<storage, read> inputBuffer: array<${this.datatype}>;
+var<storage, read> inputBuffer: array<${
+      this.getBuffer("inputBuffer").datatype
+    }>;
 
 @group(0) @binding(2)
 var<storage, read_write> debugBuffer: array<u32>;
@@ -94,6 +97,7 @@ var<storage, read_write> debugBuffer: array<u32>;
 ${this.fnDeclarations.subgroupEmulation}
 ${this.fnDeclarations.commonDefinitions}
 ${this.fnDeclarations.subgroupShuffle}
+${this.fnDeclarations.subgroupBallot}
 /* some functions only work if binop is defined in the primitive */
 ${this.binop ? this.binop.wgslfn : ""}
 ${this.binop ? this.fnDeclarations.subgroupReduce : ""}
@@ -162,7 +166,7 @@ const seeds = [
     primitiveConfig: {
       wgslOp:
         "outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid ^ 1) & (sgsz - 1));",
-      computeReference: ({ referenceOutput, memsrc, sgsz }) => {
+      computeReference: ({ referenceOutput, memsrc /*, sgsz */ }) => {
         /* compute reference output */
         for (let i = 0; i < memsrc.length; i++) {
           referenceOutput[i] = memsrc[i ^ 1];
@@ -175,8 +179,7 @@ const seeds = [
     testSuite: "subgroupShuffle rotate +1",
     primitive: SubgroupRegression,
     primitiveConfig: {
-      wgslOp:
-        "outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid + 1) & (sgsz - 1));",
+      wgslOp: /* wgsl */ `outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid + 1) & (sgsz - 1));`,
       computeReference: ({ referenceOutput, memsrc, sgsz }) => {
         /* compute reference output */
         for (let i = 0; i < memsrc.length; i++) {
@@ -188,21 +191,50 @@ const seeds = [
     },
   },
   {
-    /* sum-reduce */
+    /* reduce */
     testSuite: "subgroupReduce",
     primitive: SubgroupRegression,
     params: SubgroupBinOpParams,
     primitiveConfig: {
-      wgslOp: "outputBuffer[gid] = subgroupReduce(inputBuffer[gid]);",
+      wgslOp: /* wgsl */ `outputBuffer[gid] = subgroupReduce(inputBuffer[gid]);`,
       computeReference: function ({ referenceOutput, memsrc, sgsz }) {
         /* compute reference output */
         for (let i = 0; i < memsrc.length; i += sgsz) {
           let red = this.binop.identity;
-          for (let j = 0; j < sgsz; j++) {
+          /* first reduce across the subgroup ... */
+          for (let j = 0; j < sgsz && i + j < memsrc.length; j++) {
             red = this.binop.op(red, memsrc[i + j]);
           }
-          for (let j = 0; j < sgsz; j++) {
+          /* ... then write it to the entire subgroup */
+          for (let j = 0; j < sgsz && i + j < memsrc.length; j++) {
             referenceOutput[i + j] = red;
+          }
+        }
+      },
+    },
+  },
+  {
+    /* ballot */
+    testSuite: "subgroupBallot",
+    primitive: SubgroupRegression,
+    primitiveConfig: {
+      wgslOp: /* wgsl */ `outputBuffer[gid] = subgroupBallot((bitcast<u32>(inputBuffer[gid]) & 1) != 0);`,
+      computeReference: function ({ referenceOutput, memsrc, sgsz }) {
+        /* compute reference output */
+        let out = new Uint32Array(4);
+        const cappedSgsz = Math.min(sgsz, 128);
+        for (let i = 0; i < memsrc.length; i += sgsz) {
+          out[0] = out[1] = out[2] = out[3] = 0;
+          /* first ballot across the subgroup (capping after 128 elements) ... */
+          for (let j = 0; j < cappedSgsz && i + j < memsrc.length; j++) {
+            /* >>> 0 bitcasts to u32 */
+            out[j / 32] |= ((memsrc[i + j] >>> 0) & 1) << j % 32;
+          }
+          /* ... then write it to the entire subgroup */
+          for (let j = 0; j < sgsz && i + j < memsrc.length; j++) {
+            for (let k = 0; k < 4; k++) {
+              referenceOutput[4 * (i + j) + k] = out[k];
+            }
           }
         }
       },
