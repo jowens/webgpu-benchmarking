@@ -188,10 +188,13 @@ export class wgslFunctions {
     /* helpful reference from Thomas Smith:
      *   https://github.com/b0nes164/GPUSorting/blob/main/GPUSortingCUDA/Utils.cuh
      */
+    /** Would prefer to not make sgsz/sgid an argument here, but we need it for
+     *  the subgroup-hardware-capable, non-hardware-supported-scan-op case
+     *  An alternative would be putting sgsz/sgid in workgroup memory. */
     if (this.env.binop.subgroupInclusiveScanOp) {
       /* use the builtin subgroupInclusiveScanOp */
       return /* wgsl */ `
-      fn subgroupInclusiveOpScan(in: ${this.env.datatype}) ->
+      fn subgroupInclusiveOpScan(in: ${this.env.datatype}, sgid: u32, sgsz: u32) ->
         ${this.env.datatype} {
         return ${this.env.binop.subgroupInclusiveScanOp}(in);
       }
@@ -205,7 +208,7 @@ export class wgslFunctions {
        * return val;
        */
       return /* wgsl */ `
-      fn subgroupInclusiveOpScan(in: ${this.env.datatype}) ->
+      fn subgroupInclusiveOpScan(in: ${this.env.datatype}, sgid: u32, sgsz: u32) ->
         ${this.env.datatype} {
         var i: u32;
         var val = in;
@@ -515,15 +518,9 @@ fn subgroupReduce(in: ${this.env.datatype}) -> ${this.env.datatype} {
   }
   get subgroupInclusiveOpScan() {
     return /* wgsl */ `
-fn subgroupInclusiveOpScan(in: ${this.env.datatype}) ->
+fn subgroupInclusiveOpScan(in: ${this.env.datatype}, sgid: u32, sgsz: u32) ->
   ${this.env.datatype} {
-  /* emulate subgroupInclusiveScanOp with subgroupShuffleUp */
-  /* for (int i = 1; i <= 16; i <<= 1) { // 16 = LANE_COUNT >> 1
-   *   const uint32_t t = __shfl_up_sync(0xffffffff, val, i, 32);
-   *   if (getLaneId() >= i) val += t;
-   * }
-   * return val;
-   */
+  /* sgsz is not used, see above */
   var red: ${this.env.datatype} = in;
   var t: ${this.env.datatype};
   for (var delta: u32 = 1; delta < ${this.env.workgroupSize}; delta <<= 1) {

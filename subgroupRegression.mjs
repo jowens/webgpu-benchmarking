@@ -101,6 +101,7 @@ ${this.fnDeclarations.subgroupBallot}
 /* some functions only work if binop is defined in the primitive */
 ${this.binop ? this.binop.wgslfn : ""}
 ${this.binop ? this.fnDeclarations.subgroupReduce : ""}
+${this.binop ? this.fnDeclarations.subgroupInclusiveOpScan : ""}
 
 @compute @workgroup_size(${this.workgroupSize}, 1, 1)
 fn main(builtinsUniform: BuiltinsUniform,
@@ -247,6 +248,25 @@ const seeds = [
             for (let k = 0; k < 4; k++) {
               referenceOutput[4 * (i + j) + k] = out[k];
             }
+          }
+        }
+      },
+    },
+  },
+  {
+    /* subgroupInclusiveOpScan */
+    testSuite: "subgroupInclusiveOpScan",
+    primitive: SubgroupRegression,
+    params: SubgroupBinOpParams,
+    primitiveConfig: {
+      wgslOp: /* wgsl */ `outputBuffer[gid] = subgroupInclusiveOpScan(inputBuffer[gid], sgid, sgsz);`,
+      computeReference: function ({ referenceOutput, memsrc, sgsz }) {
+        /* compute reference output */
+        for (let i = 0; i < memsrc.length; i += sgsz) {
+          let acc = this.binop.identity;
+          for (let j = 0; j < sgsz && i + j < memsrc.length; j++) {
+            acc = this.binop.op(acc, memsrc[i + j]);
+            referenceOutput[i + j] = acc;
           }
         }
       },
