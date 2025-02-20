@@ -254,11 +254,16 @@ async function main(navigator) {
       // delay is just to make sure previous jobs finish before plotting
       // almost certainly the timer->then clause above should be written in a way
       //   that lets me wait on it instead
+    }
+    if (expts.length > 0) {
+      console.info(expts);
+    }
+
+    const plots = testSuite.getPlots();
+    if (plots.length > 0) {
       await delay(2000);
     }
-    console.info(expts);
-
-    for (let plot of testSuite.getPlots()) {
+    for (let plot of plots) {
       /* default: if filter not specified, only take expts from the last test we ran */
       let filteredExpts = expts.filter(
         plot.filter ??
