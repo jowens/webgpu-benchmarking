@@ -4,7 +4,7 @@ const isLocalhost =
   window.location.protocol === "file:";
 
 const modulePath =
-  (isLocalhost ? "http://localhost:8000" : "https://jowens.github.io") +
+  (isLocalhost ? "http://localhost:8080" : "https://jowens.github.io") +
   "/webgpu-benchmarking/benchmarking.mjs";
 
 import(modulePath)
@@ -15,5 +15,5 @@ import(modulePath)
     console.error("Error loading module", error);
   });
 
-//import { main } from "http://localhost:8000/webgpu-benchmarking/benchmarking.mjs";
+//import { main } from "http://localhost:8080/webgpu-benchmarking/benchmarking.mjs";
 // main(navigator);
