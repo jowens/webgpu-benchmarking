@@ -43,6 +43,12 @@ export class BasePrimitive {
       this[requiredField] = args[requiredField];
     }
 
+    /** possible that we've specified binop but not datatype, in
+     * which case set datatype from binop */
+    if (!("datatype" in args) && "binop" in args) {
+      args.datatype = args.binop.datatype;
+    }
+
     // now let's walk through all the args
     for (const [field, value] of Object.entries(args)) {
       switch (field) {
