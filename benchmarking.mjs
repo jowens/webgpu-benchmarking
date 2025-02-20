@@ -137,7 +137,11 @@ async function main(navigator) {
 
         const testOutputBuffer = new Buffer({
           device,
-          datatype: primitive.datatype,
+          datatype:
+            testSuite.category === "subgroups" &&
+            testSuite.testSuite === "subgroupBallot"
+              ? "vec4u"
+              : primitive.datatype,
           length:
             testSuite.category == "scan" || testSuite.category == "subgroups"
               ? primitive.inputLength
@@ -146,6 +150,7 @@ async function main(navigator) {
           createGPUBuffer: true,
           createMappableGPUBuffer: true,
         });
+
         primitive.registerBuffer(testOutputBuffer);
 
         let testDebugBuffer;
