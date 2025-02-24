@@ -108,7 +108,11 @@ fn main(builtinsUniform: BuiltinsUniform,
         builtinsNonuniform: BuiltinsNonuniform) {
   ${this.fnDeclarations.initializeSubgroupVars}
   ${this.fnDeclarations.computeLinearizedGridParametersSplit}
-  ${this.args.wgslOp}
+  ${
+    typeof this.args.wgslOp === "function"
+      ? this.args.wgslOp(this)
+      : this.args.wgslOp
+  }
   // example of wgslOp:
   // outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid ^ 1) & (sgsz - 1));
   if (gid == 0) {
@@ -165,8 +169,9 @@ const seeds = [
     testSuite: "subgroupShuffle neighbor",
     primitive: SubgroupRegression,
     primitiveConfig: {
-      wgslOp:
-        "outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid ^ 1) & (sgsz - 1));",
+      wgslOp: (env) => {
+        return /* wgsl */ `outputBuffer[gid] = bitcast<${env.datatype}>(subgroupShuffle(bitcast<u32>(inputBuffer[gid]), (gid ^ 1) & (sgsz - 1)));`;
+      },
       computeReference: ({ referenceOutput, memsrc /*, sgsz */ }) => {
         /* compute reference output */
         for (let i = 0; i < memsrc.length; i++) {
@@ -180,7 +185,9 @@ const seeds = [
     testSuite: "subgroupShuffle rotate +1",
     primitive: SubgroupRegression,
     primitiveConfig: {
-      wgslOp: /* wgsl */ `outputBuffer[gid] = subgroupShuffle(inputBuffer[gid], (gid + 1) & (sgsz - 1));`,
+      wgslOp: (env) => {
+        return /* wgsl */ `outputBuffer[gid] = bitcast<${env.datatype}>(subgroupShuffle(bitcast<u32>(inputBuffer[gid]), (gid + 1) & (sgsz - 1)));`;
+      },
       computeReference: ({ referenceOutput, memsrc, sgsz }) => {
         /* compute reference output */
         for (let i = 0; i < memsrc.length; i++) {
@@ -274,7 +281,7 @@ const seeds = [
   },
 ];
 
-function tsGen(params) {
+function regressionGen(params) {
   return new BaseTestSuite({
     category: params.category ?? "subgroups",
     ...("testSuite" in params && { testSuite: params.testSuite }),
@@ -285,4 +292,4 @@ function tsGen(params) {
   });
 }
 
-export const subgroupTestSuites = seeds.map(tsGen);
+export const subgroupAccuracyRegressionSuites = seeds.map(regressionGen);
