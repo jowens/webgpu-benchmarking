@@ -446,12 +446,12 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
     }`;
   }
   get subgroupShuffle() {
-    return /* wgsl */ `fn subgroupShuffle(x: ${this.env.datatype}, source: u32) -> ${this.env.datatype} {
+    return /* wgsl */ `fn subgroupShuffle(x: u32, source: u32) -> u32 {
   /* subgroup emulation must pass through wg_sw_subgroups */
   /* write my value to workgroup memory */
-  wg_sw_subgroups[sgid] = x;
+  wg_sw_subgroups[sgid] = bitcast<${this.env.datatype}>(x);
   workgroupBarrier();
-  return wg_sw_subgroups[source];
+  return bitcast<u32>(wg_sw_subgroups[source]);
 }`;
   }
   get subgroupBallot() {
