@@ -87,6 +87,32 @@ export function download(content, mimeType, filename) {
   URL.revokeObjectURL(url);
 }
 
+export function f32approxeq(reference, target) {
+  const margin = 0;
+  const scale = 0;
+  const f32epsilon = 10000 * 1.192092896e-7;
+  const functionallyZero = 0.01;
+  function marginComparison(lhs, rhs, margin) {
+    // Math.abs(lhs - rhs) <= margin, but allows infinity
+    return lhs + margin >= rhs && rhs + margin >= lhs;
+  }
+  return (
+    marginComparison(reference, target, margin) /* equal */ ||
+    (marginComparison(0, reference, functionallyZero) &&
+      marginComparison(
+        0,
+        target,
+        functionallyZero
+      )) /* close enough to zero */ ||
+    marginComparison(
+      /* within f32epsilon of each other */
+      reference,
+      target,
+      f32epsilon * (scale + Math.abs(Number.isFinite(target) ? target : 0))
+    )
+  );
+}
+
 export function formatWGSL(wgslCode) {
   const lines = wgslCode.split("\n");
   const indent = "  ";
