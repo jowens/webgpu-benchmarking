@@ -523,7 +523,11 @@ fn subgroupInclusiveOpScan(in: ${this.env.datatype}, sgid: u32, sgsz: u32) ->
   /* sgsz is not used, see above */
   var red: ${this.env.datatype} = in;
   var t: ${this.env.datatype};
+  /* TODO: Handle case where input size is not a multiple of workgroup size */
   for (var delta: u32 = 1; delta < ${this.env.workgroupSize}; delta <<= 1) {
+    /** On pass 0, element i - 1 (if in range) is added into element i, in parallel.
+     * On pass 1, element i - 2 is added into element i.
+     * On pass 2, element i - 4 is added into element i, and so on. */
     /* delta == how many threads I'm reaching back */
     wg_sw_subgroups[sgid] = red;
     workgroupBarrier();
