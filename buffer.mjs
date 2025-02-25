@@ -56,14 +56,24 @@ export class Buffer {
       }
       this.#cpuBuffer = new (datatypeToTypedArray(this.datatype))(this.length);
       if (this.args.initializeCPUBuffer) {
-        // since we're input, fill the buffer with useful data
         for (let i = 0; i < this.length; i++) {
           if (this.datatype == "f32") {
-            this.#cpuBuffer[i] =
-              this.args.initializeCPUBuffer === "randomize"
-                ? Math.random() * 2.0 - 1.0
-                : i & (2 ** 22 - 1);
-            // Rand: [-1,1]; non-rand: roughly, range of 32b significand
+            let val;
+            switch (this.args.initializeCPUBuffer) {
+              case "randomizeMinusOneToOne":
+                /* [-1, 1] */
+                val = Math.random() * 2.0 - 1.0;
+                break;
+              case "randomizeAbsUnder1024":
+                /* [-1024, 1024], ints only */
+                val = Math.floor((Math.random() * 2.0 - 1.0) * 1024);
+                break;
+              default:
+                /* roughly, range of 32b significand */
+                val = i & (2 ** 22 - 1);
+                break;
+            }
+            this.#cpuBuffer[i] = val;
           } else if (this.datatype == "u32") {
             this.#cpuBuffer[i] = i == 0 ? 0 : this.#cpuBuffer[i - 1] + 1; // trying to get u32s
           }
