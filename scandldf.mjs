@@ -2,6 +2,9 @@ import { range } from "./util.mjs";
 import { Kernel, AllocateBuffer } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import {
+  BinOpAdd,
+  BinOpMax,
+  BinOpMin,
   BinOpAddF32,
   BinOpAddU32,
   BinOpMinF32,
@@ -116,7 +119,7 @@ fn unsafeBallot(pred: bool) -> u32 {
  * This is the inverse of the below "split" function */
 fn join(mine: u32, tid: u32) -> ${this.datatype} {
   let xor = tid ^ 1;
-  let theirs = unsafeShuffle(mine, xor);
+  let theirs: u32 = unsafeShuffle(mine, xor);
   return bitcast<${
     this.datatype
   }>((mine << (16u * tid)) | (theirs << (16u * xor)));
@@ -205,7 +208,8 @@ fn main(builtinsUniform: BuiltinsUniform,
         subgroupInclusiveOpScan(binop(select(prev,
                                              ${this.binop.identity},
                                              sgid != 0u),
-                                      t_scan[k].w /* reduction of my vec4 */ ));
+                                      t_scan[k].w /* reduction of my vec4 */ ),
+                                    sgid, sgsz);
       /* (b) shuffle the scan result from thread x to thread x+1, wrapping
        * this does two things:
        *    (i) for sgid > 0, it communicates the reduction of all prior elements
@@ -213,7 +217,9 @@ fn main(builtinsUniform: BuiltinsUniform,
        *   (ii) for sgid == 0, it contains the reduction of *all* lanes, which
        *        then gets passed into the next scan
        */
-      let t = subgroupShuffle(sgScan, circular_shift);
+      let t = bitcast<${
+        this.datatype
+      }>(subgroupShuffle(bitcast<u32>(sgScan), circular_shift));
       /* (c) apply that scan to our current thread's vec4. Recall that our current
        *     thread's vec4 in t_scan contains the inclusive scan of the vec4.
        *     If we want an inclusive scan overall, great, we don't have to do anything.
@@ -296,7 +302,8 @@ fn main(builtinsUniform: BuiltinsUniform,
       let pred = builtinsNonuniform.lidx < step;
       let t = subgroupInclusiveOpScan(select(${this.binop.identity},
                                              wg_partials[builtinsNonuniform.lidx + top_offset],
-                                             pred));
+                                             pred),
+                                      sgid, sgsz);
       if (pred) {
         wg_partials[builtinsNonuniform.lidx + top_offset] = t;
         if (lane_pred) {
@@ -650,20 +657,13 @@ const DLDFRegressionParams = {
   inputLength: range(8, 28).map((i) => 2 ** i),
   type: ["inclusive", "exclusive", "reduce"],
   datatype: ["f32", "u32"],
-  binop: [
-    BinOpAddF32,
-    BinOpAddU32,
-    BinOpMaxU32,
-    BinOpMaxF32,
-    BinOpMinU32,
-    BinOpMinF32,
-  ],
+  binopbase: [BinOpAdd, BinOpMax, BinOpMin],
   disableSubgroups: [true, false],
 };
 
 export const DLDFScanAccuracyRegressionSuite = new BaseTestSuite({
-  category: "DLDF",
-  testSuite: "scan-ish",
+  category: "scan",
+  testSuite: "DLDF",
   trials: 2,
   params: DLDFRegressionParams,
   primitive: DLDFScan,
