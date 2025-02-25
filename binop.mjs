@@ -34,7 +34,17 @@ export class BinOpAdd extends BinOp {
   constructor(args) {
     super(args);
     this.identity = 0;
-    this.op = (a, b) => a + b;
+    if (args.datatype == "f32") {
+      const f32array = new Float32Array(3);
+      this.op = (a, b) => {
+        f32array[1] = a;
+        f32array[2] = b;
+        f32array[0] = f32array[1] + f32array[2];
+        return f32array[0];
+      };
+    } else {
+      this.op = (a, b) => a + b;
+    }
     switch (this.datatype) {
       case "f32":
         break;
