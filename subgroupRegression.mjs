@@ -31,17 +31,7 @@ export class SubgroupRegression extends BasePrimitive {
     this.args.computeReference({ referenceOutput, memsrc, sgsz });
 
     function validates(cpu, gpu, datatype) {
-      switch (datatype) {
-        case "f32":
-          if (cpu == 0) {
-            return gpu == 0; // don't divide by zero
-          } else {
-            return f32approxeq(cpu, gpu);
-            // return Math.abs((cpu - gpu) / cpu) < 0.001;
-          }
-        default:
-          return cpu == gpu;
-      }
+      return cpu == gpu;
     }
     let returnString = "";
     let allowedErrors = 5;
