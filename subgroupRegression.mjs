@@ -1,15 +1,8 @@
 import { range } from "./util.mjs";
 import { BasePrimitive, Kernel } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
-import {
-  BinOpAddF32,
-  BinOpAddU32,
-  BinOpMaxU32,
-  BinOpMaxF32,
-  BinOpMinU32,
-  BinOpMinF32,
-} from "./binop.mjs";
-import { datatypeToTypedArray } from "./util.mjs";
+import { BinOpAdd, BinOpMax, BinOpMin } from "./binop.mjs";
+import { datatypeToTypedArray, f32approxeq } from "./util.mjs";
 
 export class SubgroupRegression extends BasePrimitive {
   constructor(args) {
@@ -43,7 +36,8 @@ export class SubgroupRegression extends BasePrimitive {
           if (cpu == 0) {
             return gpu == 0; // don't divide by zero
           } else {
-            return Math.abs((cpu - gpu) / cpu) < 0.001;
+            return f32approxeq(cpu, gpu);
+            // return Math.abs((cpu - gpu) / cpu) < 0.001;
           }
         default:
           return cpu == gpu;
@@ -68,6 +62,8 @@ export class SubgroupRegression extends BasePrimitive {
       /* we saw an error */
       console.log(
         this.label,
+        "with input",
+        memsrc,
         "should validate to",
         referenceOutput,
         "and actually validates to",
@@ -152,14 +148,16 @@ const SubgroupParams = {
 const SubgroupBinOpParams = {
   inputLength: range(8, 10).map((i) => 2 ** i),
   workgroupSize: range(5, 8).map((i) => 2 ** i),
-  binop: [
-    BinOpAddF32,
-    BinOpAddU32,
-    BinOpMaxU32,
-    BinOpMaxF32,
-    BinOpMinU32,
-    BinOpMinF32,
-  ],
+  datatype: ["f32", "u32"],
+  binopbase: [BinOpAdd, BinOpMax, BinOpMin],
+  disableSubgroups: [true, false],
+};
+
+const SubgroupInclScanParams = {
+  inputLength: [...Array(100)].map(() => 32),
+  workgroupSize: [32],
+  datatype: ["f32"],
+  binopbase: [BinOpAdd],
   disableSubgroups: [true, false],
 };
 
@@ -272,8 +270,7 @@ const seeds = [
         for (let i = 0; i < memsrc.length; i += sgsz) {
           let acc = this.binop.identity;
           for (let j = 0; j < sgsz && i + j < memsrc.length; j++) {
-            acc = this.binop.op(acc, memsrc[i + j]);
-            referenceOutput[i + j] = acc;
+            acc = referenceOutput[i + j] = this.binop.op(acc, memsrc[i + j]);
           }
         }
       },
