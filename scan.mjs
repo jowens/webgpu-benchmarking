@@ -93,36 +93,8 @@ export class BaseScan extends BasePrimitive {
           break;
       }
     }
-    console.log(
-      this.label,
-      this.type,
-      "should validate to",
-      referenceOutput,
-      "and actually validates to",
-      memdest,
-      "\n",
-      this.binop.constructor.name,
-      this.binop.datatype,
-      "identity is",
-      this.binop.identity,
-      "length is",
-      memsrc.length,
-      "memsrc[",
-      memsrc.length - 1,
-      "] is",
-      memsrc[memsrc.length - 1]
-    );
     function validates(cpu, gpu, datatype) {
-      switch (datatype) {
-        case "f32":
-          if (cpu == 0) {
-            return gpu == 0; // don't divide by zero
-          } else {
-            return Math.abs((cpu - gpu) / cpu) < 0.001;
-          }
-        default:
-          return cpu == gpu;
-      }
+      return cpu == gpu;
     }
     let returnString = "";
     let allowedErrors = 5;
@@ -131,13 +103,40 @@ export class BaseScan extends BasePrimitive {
         break;
       }
       if (!validates(referenceOutput[i], memdest[i], this.datatype)) {
-        returnString += `Element ${i}: expected ${referenceOutput[i]}, instead saw ${memdest[i]}.`;
+        returnString += `Element ${i}: expected ${
+          referenceOutput[i]
+        }, instead saw ${memdest[i]} (diff: ${Math.abs(
+          (referenceOutput[i] - memdest[i]) / referenceOutput[i]
+        )}).`;
         if (args.debugBuffer) {
           returnString += ` debug[${i}] = ${args.debugBuffer[i]}.`;
         }
         returnString += "\n";
         allowedErrors--;
       }
+    }
+    if (returnString !== "") {
+      console.log(
+        this.label,
+        this.type,
+        "with input",
+        memsrc,
+        "should validate to",
+        referenceOutput,
+        "and actually validates to",
+        memdest,
+        "\n",
+        this.binop.constructor.name,
+        this.binop.datatype,
+        "identity is",
+        this.binop.identity,
+        "length is",
+        memsrc.length,
+        "memsrc[",
+        memsrc.length - 1,
+        "] is",
+        memsrc[memsrc.length - 1]
+      );
     }
     return returnString;
   };
