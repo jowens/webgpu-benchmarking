@@ -40,8 +40,12 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 // tests
 import { NoAtomicPKReduceTestSuite } from "./reduce.mjs";
 import { HierarchicalScanTestSuite } from "./scan.mjs";
-import { DLDFScanTestSuite, DLDFReduceTestSuite } from "./scandldf.mjs";
-import { subgroupTestSuites } from "./subgroupRegression.mjs";
+import {
+  DLDFScanTestSuite,
+  DLDFReduceTestSuite,
+  DLDFScanAccuracyRegressionSuite,
+} from "./scandldf.mjs";
+import { subgroupAccuracyRegressionSuites } from "./subgroupRegression.mjs";
 
 async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -97,7 +101,9 @@ async function main(navigator) {
   //AtomicGlobalPrimedNonAtomicWGF32ReduceTestSuite,
   // ];
   //const testSuites = [AtomicGlobalU32ReduceTestSuite];
-  const testSuites = subgroupTestSuites;
+
+  // const testSuites = subgroupAccuracyRegressionSuites;
+  const testSuites = [DLDFScanAccuracyRegressionSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
   for (const testSuite of testSuites) {
@@ -109,7 +115,14 @@ async function main(navigator) {
     /* do we perform a computation? */
     if (testSuite?.primitive?.prototype.compute) {
       const uniqueRuns = new Set(); // if uniqueRuns is defined, don't run dups
+      let testInputBuffer;
       for (const params of combinations(testSuite.params)) {
+        console.log(params);
+        if (params.binopbase && params.datatype && !params.binop) {
+          /** we're iterating over both binopbase and datatype, which we can use
+           * to construct binop */
+          params.binop = new params.binopbase({ datatype: params.datatype });
+        }
         const primitive = testSuite.getPrimitive({ device, ...params });
 
         /** for test purposes, let's initialize some buffers.
@@ -122,17 +135,26 @@ async function main(navigator) {
          */
 
         /* these next two buffers have both CPU and GPU buffers within them */
-        const testInputBuffer = new Buffer({
-          device,
-          datatype: primitive.datatype,
-          length: primitive.inputLength,
-          label: "inputBuffer",
-          createCPUBuffer: true,
-          // initializeCPUBuffer: true /* fill with default data */,
-          initializeCPUBuffer: "randomize" /* fill with default data */,
-          createGPUBuffer: true,
-          initializeGPUBuffer: true /* with CPU data */,
-        });
+        if (
+          testInputBuffer?.datatype === primitive.datatype &&
+          testInputBuffer?.length === primitive.dataLength
+        ) {
+          /* do nothing, keep existing buffer */
+          /* this is (1) to reduce work and (2) to not reset the input data */
+        } else {
+          testInputBuffer = new Buffer({
+            device,
+            datatype: primitive.datatype,
+            length: primitive.inputLength,
+            label: "inputBuffer",
+            createCPUBuffer: true,
+            // initializeCPUBuffer: true /* fill with default data */,
+            initializeCPUBuffer:
+              "randomizeAbsUnder1024" /* fill with default data */,
+            createGPUBuffer: true,
+            initializeGPUBuffer: true /* with CPU data */,
+          });
+        }
         primitive.registerBuffer(testInputBuffer);
 
         const testOutputBuffer = new Buffer({
