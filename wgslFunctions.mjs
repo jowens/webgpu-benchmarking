@@ -511,12 +511,15 @@ fn subgroupReduce(in: ${this.env.datatype}) -> ${this.env.datatype} {
              wg_sw_subgroups[neighbor],
              neighbor < ${this.env.workgroupSize});
     red = binop(red, neighborVal);
+    workgroupBarrier();
     wg_sw_subgroups[sgid] = red;
   }
+  workgroupBarrier(); // possibly not necessary given the next line?
   return workgroupUniformLoad(&wg_sw_subgroups[0]);
 }`;
   }
   get subgroupInclusiveOpScan() {
+    /* this is almost certainly faster if we double-buffered */
     return /* wgsl */ `
 fn subgroupInclusiveOpScan(in: ${this.env.datatype}, sgid: u32, sgsz: u32) ->
   ${this.env.datatype} {
@@ -536,6 +539,7 @@ fn subgroupInclusiveOpScan(in: ${this.env.datatype}, sgid: u32, sgsz: u32) ->
       t = wg_sw_subgroups[neighborIdx];
       red = binop(t, red);
     }
+    workgroupBarrier();
   }
   return red;
 }`;
