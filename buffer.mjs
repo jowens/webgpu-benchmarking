@@ -64,10 +64,12 @@ export class Buffer {
                 /* [-1, 1] */
                 val = Math.random() * 2.0 - 1.0;
                 break;
-              case "randomizeAbsUnder1024":
+              case "randomizeAbsUnder1024": {
+                // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random#getting_a_random_integer_between_two_values
                 /* [-1024, 1024], ints only */
-                val = Math.floor((Math.random() * 2.0 - 1.0) * 1024);
+                val = Math.floor(Math.random() * 2049.0 - 1024);
                 break;
+              }
               default:
                 /* roughly, range of 32b significand */
                 val = i & (2 ** 22 - 1);
@@ -168,9 +170,18 @@ export class Buffer {
 
     // ... then back to host
     await this.#mappableGPUBuffer.mapAsync(GPUMapMode.READ);
-    this.#cpuBuffer = new (datatypeToTypedArray(this.datatype))(
-      this.#mappableGPUBuffer.getMappedRange().slice()
-    );
+    try {
+      this.#cpuBuffer = new (datatypeToTypedArray(this.datatype))(
+        this.#mappableGPUBuffer.getMappedRange().slice()
+      );
+    } catch (error) {
+      console.error(
+        error,
+        "Buffer::copyGPUToCPU: tried to allocate and copy array of length",
+        this.#mappableGPUBuffer.getMappedRange().slice().length
+      );
+    }
+
     this.#mappableGPUBuffer.unmap();
   }
 

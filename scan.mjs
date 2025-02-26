@@ -68,9 +68,14 @@ export class BaseScan extends BasePrimitive {
     const memsrc = args.inputBuffer ?? this.getBuffer("inputBuffer").cpuBuffer;
     const memdest =
       args.outputBuffer ?? this.getBuffer("outputBuffer").cpuBuffer;
-    const referenceOutput = new (datatypeToTypedArray(this.datatype))(
-      memdest.length
-    );
+    let referenceOutput;
+    try {
+      referenceOutput = new (datatypeToTypedArray(this.datatype))(
+        memdest.length
+      );
+    } catch (error) {
+      console.error(error, "Tried to allocate array of length", memdest.length);
+    }
     for (let i = 0; i < memsrc.length; i++) {
       switch (this.type) {
         case "exclusive":
