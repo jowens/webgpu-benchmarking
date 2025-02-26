@@ -136,7 +136,7 @@ const SubgroupParams = {
 };
 
 const SubgroupBinOpParams = {
-  inputLength: range(8, 10).map((i) => 2 ** i),
+  inputLength: range(8, 20).map((i) => 2 ** i),
   workgroupSize: range(5, 8).map((i) => 2 ** i),
   datatype: ["f32", "u32"],
   binopbase: [BinOpAdd, BinOpMax, BinOpMin],
@@ -181,6 +181,24 @@ const seeds = [
         for (let i = 0; i < memsrc.length; i++) {
           const subgroupBaseIdx = i & ~(sgsz - 1); /* top bits */
           const subgroupIdx = (i + 1) & (sgsz - 1); /* bottom bits */
+          referenceOutput[i] = memsrc[subgroupBaseIdx + subgroupIdx];
+        }
+      },
+    },
+  },
+  {
+    /* rotate -1, within a subgroup */
+    testSuite: "subgroupShuffle rotate -1",
+    primitive: SubgroupRegression,
+    primitiveConfig: {
+      wgslOp: (env) => {
+        return /* wgsl */ `outputBuffer[gid] = bitcast<${env.datatype}>(subgroupShuffle(bitcast<u32>(inputBuffer[gid]), (gid + sgsz - 1) & (sgsz - 1)));`;
+      },
+      computeReference: ({ referenceOutput, memsrc, sgsz }) => {
+        /* compute reference output */
+        for (let i = 0; i < memsrc.length; i++) {
+          const subgroupBaseIdx = i & ~(sgsz - 1); /* top bits */
+          const subgroupIdx = (i - 1) & (sgsz - 1); /* bottom bits */
           referenceOutput[i] = memsrc[subgroupBaseIdx + subgroupIdx];
         }
       },
