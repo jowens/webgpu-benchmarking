@@ -117,7 +117,6 @@ async function main(navigator) {
       const uniqueRuns = new Set(); // if uniqueRuns is defined, don't run dups
       let testInputBuffer;
       for (const params of combinations(testSuite.params)) {
-        console.log(params);
         if (params.binopbase && params.datatype && !params.binop) {
           /** we're iterating over both binopbase and datatype, which we can use
            * to construct binop */
@@ -165,9 +164,9 @@ async function main(navigator) {
               ? "vec4u"
               : primitive.datatype,
           length:
-            testSuite.category == "scan" || testSuite.category == "subgroups"
-              ? primitive.inputLength
-              : 1,
+            "type" in primitive && primitive.type == "reduce"
+              ? 1
+              : primitive.inputLength,
           label: "outputBuffer",
           createGPUBuffer: true,
           createMappableGPUBuffer: true,
@@ -198,7 +197,7 @@ async function main(navigator) {
           }
           const errorstr = primitive.validate();
           if (errorstr == "") {
-            console.info("Validation passed", params);
+            // console.info("Validation passed", params);
           } else {
             console.error("Validation failed for", params, ":", errorstr);
           }
@@ -382,5 +381,6 @@ async function main(navigator) {
   if (saveJSON) {
     download(expts, "application/json", "foo.json");
   }
+  console.info("Finished.");
 }
 export { main };
