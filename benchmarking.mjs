@@ -136,7 +136,7 @@ async function main(navigator) {
         /* these next two buffers have both CPU and GPU buffers within them */
         if (
           testInputBuffer?.datatype === primitive.datatype &&
-          testInputBuffer?.length === primitive.dataLength
+          testInputBuffer?.length === primitive.inputLength
         ) {
           /* do nothing, keep existing buffer */
           /* this is (1) to reduce work and (2) to not reset the input data */
