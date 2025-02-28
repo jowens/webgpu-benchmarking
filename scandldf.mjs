@@ -21,7 +21,7 @@ export class DLDFScan extends BaseScan {
 
     /* this scan implementation has an additional buffer beyond BaseScan */
     /* Possibly: BaseScan should just list this buffer, even if it's not used */
-    this.additionalKnownBuffers = ["scanParameters"];
+    this.additionalKnownBuffers = ["scanParameters", "debugBuffer"];
     for (const knownBuffer of this.additionalKnownBuffers) {
       this.knownBuffers.push(knownBuffer);
     }
@@ -70,6 +70,8 @@ var<storage, read_write> spine: array<array<atomic<u32>, 2>>;
 
 @group(0) @binding(5)
 var<storage, read_write> misc: array<u32>;
+@group(0) @binding(6)
+var<storage, read_write> debugBuffer: array<vec4<${this.datatype}>>;
 
 
 const BLOCK_DIM: u32 = ${this.workgroupSize};
@@ -266,6 +268,9 @@ fn main(builtinsUniform: BuiltinsUniform,
       for (var k = 0u; k < VEC4_SPT; k += 1u) {
         subgroupReduction = binop(subgroupReduction,
                                   subgroupReduce(vec4Reduce(inputBuffer[i])));
+        if (sgid == 0) {
+          // debugBuffer[tile_id * VEC4_SPT + k].x = subgroupReduction; ////
+        }
         i += sgsz;
       }
     }
@@ -276,6 +281,9 @@ fn main(builtinsUniform: BuiltinsUniform,
                                   subgroupReduce(select(${this.binop.identity},
                                                                vec4Reduce(inputBuffer[i]),
                                                                i < scanParameters.vec_size)));
+        if (sgid == 0) {
+          // debugBuffer[tile_id * VEC4_SPT + k].x = subgroupReduction; ////
+        }
         i += sgsz;
       }
     }
@@ -283,6 +291,7 @@ fn main(builtinsUniform: BuiltinsUniform,
       wg_partials[sid] = subgroupReduction;
     }
   }
+  /* reduce looks clean up to here */ ////
   `;
     }
     kernel += /* wgsl */ `
@@ -330,15 +339,19 @@ fn main(builtinsUniform: BuiltinsUniform,
    * wg_partials[local_spine - 1u] contains reduction of my entire tile
    * - scan and reduction both care about this
    */
-
+  if (sgid == 0) {
+    // debugBuffer[tile_id].x = wg_partials[local_spine - 1u]; ////
+  }
   workgroupBarrier();
 
   /* Post my local reduction to the spine; now visible to the whole device */
   if (builtinsNonuniform.lidx < SPLIT_MEMBERS /* && (tile_id & params.simulate_mask) != 0u */) {
     let t = split(wg_partials[local_spine - 1u], builtinsNonuniform.lidx) | select(FLAG_READY, FLAG_INCLUSIVE, tile_id == 0u);
     atomicStore(&spine[tile_id][builtinsNonuniform.lidx], t);
+    //// debugBuffer[tile_id * 2 + builtinsNonuniform.lidx].x = bitcast<f32>(t);
   }
 
+    /* reduce looks clean up to here */ ////
   /* Begin lookback. Only a single subgroup per workgroup does lookback. */
   if (tile_id != 0u) {
     var prev_red: ${this.datatype} = ${this.binop.identity};
@@ -353,6 +366,16 @@ fn main(builtinsUniform: BuiltinsUniform,
           var flag_payload: u32 = select(0u,
                                          atomicLoad(&spine[lookback_id][builtinsNonuniform.lidx]),
                                          builtinsNonuniform.lidx < SPLIT_MEMBERS);
+          /* this looks OK */ ////
+          if (builtinsNonuniform.lidx < SPLIT_MEMBERS) { ////
+            if (builtinsNonuniform.lidx == 0) {
+              //// debugBuffer[4*tile_id+spin_count].x = bitcast<f32>(flag_payload);
+            }
+            if (builtinsNonuniform.lidx == 1) {
+              //// debugBuffer[4*tile_id+spin_count].y = bitcast<f32>(flag_payload);
+            }
+          }
+
           /* is there useful data there across all participating threads?
            * "useful" means either a local reduction (READY) or an inclusive one (INCLUSIVE) */
           if (unsafeBallot((flag_payload & FLAG_MASK) > FLAG_NOT_READY) == ALL_READY) {
@@ -371,15 +394,42 @@ fn main(builtinsUniform: BuiltinsUniform,
                                       builtinsNonuniform.lidx < SPLIT_MEMBERS);
                 seenInclusive = unsafeBallot((flag_payload & FLAG_MASK) == FLAG_INCLUSIVE);
               }
+//// look ok
+          if (builtinsNonuniform.lidx < SPLIT_MEMBERS) { ////
+            if (builtinsNonuniform.lidx == 0) {
+              //// debugBuffer[4*tile_id+spin_count].x = bitcast<f32>(flag_payload);
+            }
+            if (builtinsNonuniform.lidx == 1) {
+              //// debugBuffer[4*tile_id+spin_count].y = bitcast<f32>(flag_payload);
+            }
+          }
               /* flag_payload now contains an inclusive value from lookback_id, put it
                * back together & merge it into prev_red */
+              ////
+              if (builtinsNonuniform.lidx == 0) {
+                debugBuffer[4*tile_id+spin_count].w = prev_red;
+              }
               prev_red = binop(join(flag_payload & VALUE_MASK, builtinsNonuniform.lidx), prev_red);
+              if (builtinsNonuniform.lidx < SPLIT_MEMBERS) { ////
+                if (builtinsNonuniform.lidx == 0) {
+                  debugBuffer[4*tile_id+spin_count].x = bitcast<f32>(flag_payload);
+                  debugBuffer[4*tile_id+spin_count].z = prev_red;
+                }
+                if (builtinsNonuniform.lidx == 1) {
+                  // debugBuffer[4*tile_id+spin_count].y = bitcast<f32>(flag_payload);
+                }
+              }
               /* merge that value with my local reduction and store it to the spine */
               if (builtinsNonuniform.lidx < SPLIT_MEMBERS) {
                 let t = split(binop(prev_red, wg_partials[local_spine - 1u]),
                               builtinsNonuniform.lidx) |
                         FLAG_INCLUSIVE;
+
                 atomicStore(&spine[tile_id][builtinsNonuniform.lidx], t);
+                /* wrong */
+                if (sgid == 0) {
+                  //// debugBuffer[tile_id].x = prev_red; ////
+                }
               }
               /* lookback complete. reduction of all previous tiles is in prev_red. */
               if (builtinsNonuniform.lidx == 0u) {
@@ -427,6 +477,11 @@ fn main(builtinsUniform: BuiltinsUniform,
           let s_red = subgroupReduce(t_red);
           if (sgid == 0u) {
             wg_fallback[sid] = s_red;
+            if (builtinsNonuniform.lidx == 0) { ////
+              //// s_red is right
+              //// but the next tile's prev_red is wrong
+              debugBuffer[4*tile_id].y = s_red;
+            }
           }
         }
         workgroupBarrier();
@@ -437,20 +492,32 @@ fn main(builtinsUniform: BuiltinsUniform,
           var offset = 0u;
           var top_offset = 0u;
           let lane_pred = sgid == sgsz - 1u;
-          for (var j = sgsz; j <= aligned_size; j <<= lane_log) {
-            let step = local_spine >> offset;
-            let pred = builtinsNonuniform.lidx < step;
-            f_red = subgroupReduce(select(${this.binop.identity},
-                                                 wg_fallback[builtinsNonuniform.lidx + top_offset],
-                                                 pred));
-            if (pred && lane_pred) {
-              wg_fallback[sid + step + top_offset] = f_red;
+          if (builtinsNonuniform.lidx == 0) { ////
+            //// s_red is right
+            //// but the next tile's prev_red is wrong
+            debugBuffer[4*tile_id].y = bitcast<f32>(0xbeefbe);
+          }
+          if (sgsz > aligned_size) {
+            /* don't enter the loop */
+            f_red = wg_fallback[builtinsNonuniform.lidx + top_offset];
+          } else {
+            for (var j = sgsz; j <= aligned_size; j <<= lane_log) {
+              let step = local_spine >> offset;
+              let pred = builtinsNonuniform.lidx < step;
+              //// EMU never enters this loop
+              f_red = subgroupReduce(select(${this.binop.identity},
+                                            wg_fallback[builtinsNonuniform.lidx + top_offset],
+                                            pred));
+              if (pred && lane_pred) {
+                wg_fallback[sid + step + top_offset] = f_red;
+              }
+              workgroupBarrier();
+              top_offset += step;
+              offset += lane_log;
             }
-            workgroupBarrier();
-            top_offset += step;
-            offset += lane_log;
           }
         }
+        // output of the above block is f_red
 
         var sg0: bool = isSubgroupZero(builtinsNonuniform.lidx, sgsz);
         if (sg0) { /* activate only subgroup 0 */
@@ -583,6 +650,7 @@ fn main(builtinsUniform: BuiltinsUniform,
             "storage",
             "storage",
             "storage",
+            "storage",
           ],
         ],
         bindings: [
@@ -593,6 +661,7 @@ fn main(builtinsUniform: BuiltinsUniform,
             "scanBump",
             "spine",
             "misc",
+            "debugBuffer",
           ],
         ],
         label: `Thomas Smith's scan (${this.type}) with decoupled lookback/decoupled fallback [subgroups: ${this.useSubgroups}]`,
@@ -654,11 +723,20 @@ export const DLDFReduceTestSuite = new BaseTestSuite({
 });
 
 const DLDFRegressionParams = {
-  inputLength: range(8, 28).map((i) => 2 ** i),
-  type: ["inclusive", "exclusive", "reduce"],
+  inputLength: range(12, 25).map((i) => 2 ** i),
+  type: ["reduce", "inclusive", "exclusive"],
   datatype: ["f32", "u32"],
   binopbase: [BinOpAdd, BinOpMax, BinOpMin],
-  disableSubgroups: [true, false],
+  disableSubgroups: [false, true],
+};
+
+const DLDFRegressionParamsError = {
+  inputLength: range(18, 18).map((i) => 2 ** i),
+  type: ["reduce"],
+  datatype: ["f32"],
+  binopbase: [BinOpMin],
+  loopvar: range(0, 50),
+  disableSubgroups: [true],
 };
 
 export const DLDFScanAccuracyRegressionSuite = new BaseTestSuite({
