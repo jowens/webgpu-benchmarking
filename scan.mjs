@@ -130,7 +130,10 @@ export class BaseScan extends BasePrimitive {
         referenceOutput,
         "and actually validates to",
         memdest,
-        "\n",
+        this.getBuffer("debugBuffer") ? "\ndebugBuffer" : "",
+        this.getBuffer("debugBuffer")
+          ? this.getBuffer("debugBuffer").cpuBuffer
+          : "",
         this.binop.constructor.name,
         this.binop.datatype,
         "identity is",
