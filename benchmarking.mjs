@@ -102,8 +102,8 @@ async function main(navigator) {
   // ];
   //const testSuites = [AtomicGlobalU32ReduceTestSuite];
 
-  // const testSuites = subgroupAccuracyRegressionSuites;
-  const testSuites = [DLDFScanAccuracyRegressionSuite];
+  const testSuites = subgroupAccuracyRegressionSuites;
+  /// const testSuites = [DLDFScanAccuracyRegressionSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
   for (const testSuite of testSuites) {
@@ -178,8 +178,9 @@ async function main(navigator) {
         if (primitive.knownBuffers.includes("debugBuffer")) {
           testDebugBuffer = new Buffer({
             device,
-            datatype: "u32",
-            length: 1,
+            datatype:
+              "u32" /* probably need primitive.knownBufferDatatype[] here */,
+            length: primitive.inputLength,
             label: "debugBuffer",
             createGPUBuffer: true,
             createMappableGPUBuffer: true,
