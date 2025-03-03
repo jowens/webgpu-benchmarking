@@ -203,14 +203,13 @@ fn main(builtinsUniform: BuiltinsUniform,
     /* circular_shift: source is preceding thread in my subgroup, wrapping for thread 0 */
     for (var k = 0u; k < VEC4_SPT; k += 1u) {
       /* (a) scan across reduction of each vec4, feeding in input element "prev" */
-      workgroupBarrier(); ////
       let sgScan =
         subgroupInclusiveOpScan(binop(select(prev,
                                              ${this.binop.identity},
                                              sgid != 0u),
                                       t_scan[k].w /* reduction of my vec4 */ ),
                                 sgid, sgsz);
-      workgroupBarrier(); ////
+
 
       /* (b) shuffle the scan result from thread x to thread x+1, wrapping
        * this does two things:
