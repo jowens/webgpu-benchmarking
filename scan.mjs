@@ -108,15 +108,17 @@ export class BaseScan extends BasePrimitive {
         break;
       }
       if (!validates(referenceOutput[i], memdest[i], this.datatype)) {
-        returnString += `Element ${i}: expected ${
+        returnString += `\nElement ${i}: expected ${
           referenceOutput[i]
         }, instead saw ${memdest[i]} (diff: ${Math.abs(
           (referenceOutput[i] - memdest[i]) / referenceOutput[i]
         )}).`;
-        if (args.debugBuffer) {
-          returnString += ` debug[${i}] = ${args.debugBuffer[i]}.`;
+        if (this.getBuffer("debugBuffer")) {
+          returnString += ` debug[${i}] = ${this.getBuffer("debugBuffer").cpuBuffer[i]}.`;
         }
-        returnString += "\n";
+        if (this.getBuffer("debug2Buffer")) {
+          returnString += ` debug2[${i}] = ${this.getBuffer("debug2Buffer").cpuBuffer[i]}.`;
+        }
         allowedErrors--;
       }
     }
@@ -133,6 +135,10 @@ export class BaseScan extends BasePrimitive {
         this.getBuffer("debugBuffer") ? "\ndebugBuffer" : "",
         this.getBuffer("debugBuffer")
           ? this.getBuffer("debugBuffer").cpuBuffer
+          : "",
+        this.getBuffer("debug2Buffer") ? "\ndebug2Buffer" : "",
+        this.getBuffer("debug2Buffer")
+          ? this.getBuffer("debug2Buffer").cpuBuffer
           : "",
         this.binop.constructor.name,
         this.binop.datatype,
