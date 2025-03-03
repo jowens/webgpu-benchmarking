@@ -21,7 +21,7 @@ export class DLDFScan extends BaseScan {
 
     /* this scan implementation has an additional buffer beyond BaseScan */
     /* Possibly: BaseScan should just list this buffer, even if it's not used */
-    this.additionalKnownBuffers = ["scanParameters", "debugBuffer", "debug2Buffer"];
+    this.additionalKnownBuffers = ["scanParameters"]; // add "debugBuffer" if necessary
     for (const knownBuffer of this.additionalKnownBuffers) {
       this.knownBuffers.push(knownBuffer);
     }
@@ -70,11 +70,6 @@ var<storage, read_write> spine: array<array<atomic<u32>, 2>>;
 
 @group(0) @binding(5)
 var<storage, read_write> misc: array<u32>;
-@group(0) @binding(6)
-var<storage, read_write> debugBuffer: array<vec4<${this.datatype}>>;
-@group(0) @binding(7)
-var<storage, read_write> debug2Buffer: array<vec4<${this.datatype}>>;
-
 
 const BLOCK_DIM: u32 = ${this.workgroupSize};
 const SPLIT_MEMBERS = 2u;
@@ -206,7 +201,6 @@ fn main(builtinsUniform: BuiltinsUniform,
     let lane_mask = sgsz - 1u;
     let circular_shift = (sgid + lane_mask) & lane_mask;
     /* circular_shift: source is preceding thread in my subgroup, wrapping for thread 0 */
-    i = s_offset + tile_id * VEC_TILE_SIZE;
     for (var k = 0u; k < VEC4_SPT; k += 1u) {
       /* (a) scan across reduction of each vec4, feeding in input element "prev" */
       workgroupBarrier(); ////
@@ -216,10 +210,6 @@ fn main(builtinsUniform: BuiltinsUniform,
                                              sgid != 0u),
                                       t_scan[k].w /* reduction of my vec4 */ ),
                                 sgid, sgsz);
-      //// debug2Buffer[i].x = prev;
-      //// debug2Buffer[i].y = t_scan[k].w; //// low
-      //// debug2Buffer[i].z = sgScan; //// low
-      //// debug2Buffer[i].w = circular_shift;
       workgroupBarrier(); ////
 
       /* (b) shuffle the scan result from thread x to thread x+1, wrapping
@@ -254,7 +244,6 @@ fn main(builtinsUniform: BuiltinsUniform,
       }
       /* (d) save the reduction of the entire subgroup into t for next k */
       prev = t; /* note: only valid for sgid == 0 */
-      i += sgsz;
     }
 
     if (sgid == 0u) {
@@ -527,10 +516,6 @@ fn main(builtinsUniform: BuiltinsUniform,
         if (tile_id < scanParameters.work_tiles - 1u) { // not the last tile
           for(var k = 0u; k < VEC4_SPT; k += 1u) {
             outputBuffer[i] = vec4ScalarBinopV4(prev, t_scan[k]);
-            debugBuffer[i].x = prev;
-            debugBuffer[i].y = t_scan[k].x; //// this is terrible
-            debugBuffer[i].z = t_scan[k].y; //// this is terrible but consistent with above
-            debugBuffer[i].w = bitcast<${this.datatype}>(k);
             i += sgsz;
           }
         }
@@ -613,8 +598,6 @@ fn main(builtinsUniform: BuiltinsUniform,
             "storage",
             "storage",
             "storage",
-            "storage",
-            "storage",
           ],
         ],
         bindings: [
@@ -625,8 +608,6 @@ fn main(builtinsUniform: BuiltinsUniform,
             "scanBump",
             "spine",
             "misc",
-            "debugBuffer",
-            "debug2Buffer",
           ],
         ],
         label: `Thomas Smith's scan (${this.type}) with decoupled lookback/decoupled fallback [subgroups: ${this.useSubgroups}]`,
