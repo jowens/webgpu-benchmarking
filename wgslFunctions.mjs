@@ -451,7 +451,9 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
   /* write my value to workgroup memory */
   wg_sw_subgroups[sgid] = bitcast<${this.env.datatype}>(x);
   workgroupBarrier();
-  return bitcast<u32>(wg_sw_subgroups[source]);
+  var shuffled: u32 = bitcast<u32>(wg_sw_subgroups[source]);
+  workgroupBarrier();
+  return shuffled;
 }`;
   }
   get subgroupBallot() {
