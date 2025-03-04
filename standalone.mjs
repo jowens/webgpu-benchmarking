@@ -11,7 +11,19 @@ import {
 } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
 
-if (typeof process !== "undefined" && process.release.name === "node") {
+let create;
+
+const isNode = typeof process !== "undefined" && process.release.name === "node";
+if (isNode) {
+  // import { globals, create } from 'webgpu';
+  let webgpuGlobals;
+  async function loadWebGPU() {
+    const module = await import('webgpu');
+    webgpuGlobals = module.globals;
+    create = module.create;
+  }
+  await loadWebGPU();
+  Object.assign(globalThis, webgpuGlobals);
   // running in Node
 } else {
   // running in Chrome
@@ -38,7 +50,7 @@ export async function main(navigator) {
   if (!device) {
     console.error("Fatal error: Device does not support WebGPU.");
   }
-  const inputCount = 2 ** 20; // items, not bytes
+  const inputCount = 2 ** 25; // items, not bytes
   const datatype = "u32";
   const memsrcX32 = new (datatypeToTypedArray(datatype))(inputCount);
   for (let i = 0; i < inputCount; i++) {
@@ -87,7 +99,7 @@ export async function main(navigator) {
   const dldfscanPrimitive = new DLDFScan({
     device,
     binop: new BinOpAdd({ datatype }),
-    type: "reduce",
+    type: "exclusive",
     datatype: datatype,
     gputimestamps: true, //// TODO should work without this
   });
@@ -192,6 +204,7 @@ export async function main(navigator) {
   );
   mappableMemdestDebugBuffer.unmap();
 
+  console.log("out", memdest);
   console.log("memdebug", memdebug);
 
   if (primitive.validate) {
@@ -207,4 +220,9 @@ export async function main(navigator) {
     }
   }
   // currently no timing computation, that's fine
+}
+
+if (isNode) {
+  const navigator = { gpu: create(['enable-dawn-features=use_user_defined_labels_in_backend,disable_symbol_renaming']) };
+  main(navigator);
 }
