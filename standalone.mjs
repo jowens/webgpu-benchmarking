@@ -1,21 +1,24 @@
 import { BinOpAdd } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
 
-let create;
+let webgpuCreate;
 
+const isDeno = typeof Deno !== "undefined";
 const isNode =
-  typeof process !== "undefined" && process.release.name === "node";
+  !isDeno && typeof process !== "undefined" && process.release.name === "node";
 if (isNode) {
   // import { globals, create } from 'webgpu';
   let webgpuGlobals;
   async function loadWebGPU() {
     const module = await import("webgpu");
     webgpuGlobals = module.globals;
-    create = module.create;
+    webgpuCreate = module.create;
   }
   await loadWebGPU();
   Object.assign(globalThis, webgpuGlobals);
   // running in Node
+} else if (isDeno) {
+  /* empty */
 } else {
   // running in Chrome
   // eslint-disable-next-line no-unused-vars
@@ -214,9 +217,11 @@ export async function main(navigator) {
 
 if (isNode) {
   const navigator = {
-    gpu: create([
+    gpu: webgpuCreate([
       "enable-dawn-features=use_user_defined_labels_in_backend,disable_symbol_renaming",
     ]),
   };
+  main(navigator);
+} else if (isNode || isDeno) {
   main(navigator);
 }
