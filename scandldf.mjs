@@ -194,8 +194,7 @@ fn main(builtinsUniform: BuiltinsUniform,
     }
     /* t_scan[k].w contains reduction of its vec4 */
 
-    /* (2) Per subgroup: Scan across entire subgroup
-     */
+    /* (2) Per subgroup: Scan across entire subgroup */
 
     var prev: ${this.datatype} = ${this.binop.identity};
     let lane_mask = sgsz - 1u;
@@ -212,7 +211,7 @@ fn main(builtinsUniform: BuiltinsUniform,
 
 
       /* (b) shuffle the scan result from thread x to thread x+1, wrapping
-       * this does two things:
+       * after the shuffle is completed, this does two things:
        *    (i) for sgid > 0, it communicates the reduction of all prior elements
        *        (from previous lanes) in this subgroup
        *   (ii) for sgid == 0, it contains the reduction of *all* lanes, which
@@ -242,7 +241,7 @@ fn main(builtinsUniform: BuiltinsUniform,
           : ""
       }
       /* (d) save the reduction of the entire subgroup into t for next k */
-      prev = t; /* note: only valid for sgid == 0 */
+      prev = t; /* note: only valid/interesting for sgid == 0 */
     }
 
     if (sgid == 0u) {
@@ -284,9 +283,7 @@ fn main(builtinsUniform: BuiltinsUniform,
     if (sgid == 0u) {
       wg_partials[sid] = subgroupReduction;
     }
-  }
-  /* reduce looks clean up to here */ ////
-  `;
+  }`;
     }
     kernel += /* wgsl */ `
     workgroupBarrier();
@@ -296,7 +293,7 @@ fn main(builtinsUniform: BuiltinsUniform,
   let local_spine: u32 = BLOCK_DIM >> lane_log; /* BLOCK_DIM / subgroup size; how
                                                  * many partial reductions in this tile? */
   let aligned_size_base = 1u << ((u32(countTrailingZeros(local_spine)) + lane_log - 1u) / lane_log * lane_log);
-    /* fix for aligned_size_base == 1 (occurs when subgroup_size == BLOCK_DIM ) */
+    /* fix for aligned_size_base == 1 (needed when subgroup_size == BLOCK_DIM) */
   let aligned_size = select(aligned_size_base, BLOCK_DIM, aligned_size_base == 1);
   {
     var offset = 0u;
