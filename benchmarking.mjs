@@ -38,11 +38,11 @@ if (typeof process !== "undefined" && process.release.name === "node") {
 }
 
 // tests
-import { NoAtomicPKReduceTestSuite } from "./reduce.mjs";
-import { HierarchicalScanTestSuite } from "./scan.mjs";
+// import { NoAtomicPKReduceTestSuite } from "./reduce.mjs";
+// import { HierarchicalScanTestSuite } from "./scan.mjs";
 import {
-  DLDFScanTestSuite,
-  DLDFReduceTestSuite,
+  // DLDFScanTestSuite,
+  // DLDFReduceTestSuite,
   DLDFScanAccuracyRegressionSuite,
 } from "./scandldf.mjs";
 import { subgroupAccuracyRegressionSuites } from "./subgroupRegression.mjs";
@@ -50,14 +50,14 @@ import { subgroupAccuracyRegressionSuites } from "./subgroupRegression.mjs";
 async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
   const hasSubgroups = adapter.features.has("subgroups");
-  const canTimestamp = adapter.features.has("timestamp-query");
+  const hasTimestampQuery = adapter.features.has("timestamp-query");
   const device = await adapter?.requestDevice({
     requiredLimits: {
       maxBufferSize: 4294967296,
       maxStorageBufferBindingSize: 4294967292,
     },
     requiredFeatures: [
-      ...(canTimestamp ? ["timestamp-query"] : []),
+      ...(hasTimestampQuery ? ["timestamp-query"] : []),
       ...(hasSubgroups ? ["subgroups"] : []),
     ],
   });
@@ -103,9 +103,11 @@ async function main(navigator) {
   //const testSuites = [AtomicGlobalU32ReduceTestSuite];
 
   const testSuites = subgroupAccuracyRegressionSuites;
-  /// const testSuites = [DLDFScanAccuracyRegressionSuite];
+  testSuites.push(DLDFScanAccuracyRegressionSuite);
 
   const expts = new Array(); // push new rows (experiments) onto this
+  let validationsDone = 0;
+  let validationErrors = 0;
   for (const testSuite of testSuites) {
     console.log(testSuite);
     const lastTestSeen = {
@@ -200,8 +202,10 @@ async function main(navigator) {
           if (errorstr == "") {
             // console.info("Validation passed", params);
           } else {
+            validationErrors++;
             console.error("Validation failed for", params, ":", errorstr);
           }
+          validationsDone++;
         } // end of TEST FOR CORRECTNESS
 
         if (testSuite.uniqueRuns) {
@@ -223,7 +227,7 @@ async function main(navigator) {
         if (testSuite?.trials > 0) {
           await primitive.execute({
             trials: testSuite.trials,
-            enableGPUTiming: canTimestamp,
+            enableGPUTiming: hasTimestampQuery,
             enableCPUTiming: true,
           });
           primitive
@@ -277,6 +281,14 @@ async function main(navigator) {
             });
         } // end of TEST FOR PERFORMANCE
       } // end of running all combinations for this testSuite
+      if (validationsDone > 0) {
+        console.info(
+          validationsDone,
+          "validations complete,",
+          validationErrors,
+          "errors."
+        );
+      }
 
       // delay is just to make sure previous jobs finish before plotting
       // almost certainly the timer->then clause above should be written in a way
@@ -382,6 +394,5 @@ async function main(navigator) {
   if (saveJSON) {
     download(expts, "application/json", "foo.json");
   }
-  console.info("Finished.");
 }
 export { main };

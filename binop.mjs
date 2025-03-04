@@ -24,7 +24,8 @@ export class BinOpNop extends BinOp {
   constructor(args) {
     super(args);
     this.identity = 42;
-    this.op = (a, b) => a;
+    // eslint-disable-next-line no-unused-vars
+    this.op = (a, _b) => a;
     this.wgslfn = `fn binop(a : ${this.datatype}, b : ${this.datatype}) -> ${this.datatype} {return a;}`;
   }
 }

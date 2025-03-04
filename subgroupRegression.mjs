@@ -2,7 +2,7 @@ import { range } from "./util.mjs";
 import { BasePrimitive, Kernel } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import { BinOpAdd, BinOpMax, BinOpMin } from "./binop.mjs";
-import { datatypeToTypedArray, f32approxeq } from "./util.mjs";
+import { datatypeToTypedArray } from "./util.mjs";
 
 export class SubgroupRegression extends BasePrimitive {
   constructor(args) {
@@ -30,8 +30,8 @@ export class SubgroupRegression extends BasePrimitive {
     /* compute reference output - this populates referenceOutput */
     this.args.computeReference({ referenceOutput, memsrc, sgsz });
 
-    function validates(cpu, gpu, datatype) {
-      return cpu == gpu;
+    function validates(args) {
+      return args.cpu == args.gpu;
     }
     let returnString = "";
     let allowedErrors = 5;
@@ -39,7 +39,13 @@ export class SubgroupRegression extends BasePrimitive {
       if (allowedErrors == 0) {
         break;
       }
-      if (!validates(referenceOutput[i], memdest[i], this.datatype)) {
+      if (
+        !validates({
+          cpu: referenceOutput[i],
+          gpu: memdest[i],
+          datatype: this.datatype,
+        })
+      ) {
         returnString += `Element ${i}: expected ${referenceOutput[i]}, instead saw ${memdest[i]}.`;
         if (args.debugBuffer) {
           returnString += ` debug[${i}] = ${args.debugBuffer[i]}.`;
@@ -140,14 +146,6 @@ const SubgroupBinOpParams = {
   workgroupSize: range(5, 8).map((i) => 2 ** i),
   datatype: ["f32", "u32"],
   binopbase: [BinOpAdd, BinOpMax, BinOpMin],
-  disableSubgroups: [true, false],
-};
-
-const SubgroupInclScanParams = {
-  inputLength: [...Array(100)].map(() => 32),
-  workgroupSize: [32],
-  datatype: ["f32"],
-  binopbase: [BinOpAdd],
   disableSubgroups: [true, false],
 };
 

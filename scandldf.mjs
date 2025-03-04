@@ -6,10 +6,6 @@ import {
   BinOpMax,
   BinOpMin,
   BinOpAddF32,
-  BinOpAddU32,
-  BinOpMinF32,
-  BinOpMinU32,
-  BinOpMaxF32,
   BinOpMaxU32,
 } from "./binop.mjs";
 import { datatypeToBytes } from "./util.mjs";
@@ -620,10 +616,6 @@ const DLDFScanParams = {
   inputLength: range(8, 28).map((i) => 2 ** i),
 };
 
-const DLDFScanParamsSingleton = {
-  inputLength: range(8, 8).map((i) => 2 ** i),
-};
-
 export const DLDFScanPlot = {
   x: { field: "inputBytes", label: "Input array size (B)" },
   y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
@@ -670,24 +662,6 @@ const DLDFRegressionParams = {
   datatype: ["f32", "u32"],
   binopbase: [BinOpAdd, BinOpMax, BinOpMin],
   disableSubgroups: [false, true],
-};
-
-const DLDFRegressionParamsError = {
-  inputLength: range(18, 18).map((i) => 2 ** i),
-  type: ["reduce"],
-  datatype: ["f32"],
-  binopbase: [BinOpMin],
-  loopvar: range(0, 50),
-  disableSubgroups: [true],
-};
-
-const DLDFRegressionParamsError2 = {
-  inputLength: range(20, 20).map((i) => 2 ** i),
-  type: ["exclusive"],
-  datatype: ["u32"],
-  binopbase: [BinOpAdd],
-  loopvar: range(0, 20),
-  disableSubgroups: [true],
 };
 
 export const DLDFScanAccuracyRegressionSuite = new BaseTestSuite({

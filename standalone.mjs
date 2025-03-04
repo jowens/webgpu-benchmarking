@@ -1,24 +1,15 @@
-import {
-  BinOpAddU32,
-  BinOpMinU32,
-  BinOpMaxU32,
-  BinOpAddF32,
-  BinOpMinF32,
-  BinOpMaxF32,
-  BinOpAdd,
-  BinOpMin,
-  BinOpMax,
-} from "./binop.mjs";
+import { BinOpAdd } from "./binop.mjs";
 import { datatypeToTypedArray } from "./util.mjs";
 
 let create;
 
-const isNode = typeof process !== "undefined" && process.release.name === "node";
+const isNode =
+  typeof process !== "undefined" && process.release.name === "node";
 if (isNode) {
   // import { globals, create } from 'webgpu';
   let webgpuGlobals;
   async function loadWebGPU() {
-    const module = await import('webgpu');
+    const module = await import("webgpu");
     webgpuGlobals = module.globals;
     create = module.create;
   }
@@ -33,16 +24,16 @@ if (isNode) {
 
 // import primitive only, no test suite
 import { NoAtomicPKReduce } from "./reduce.mjs";
-import { WGScan, HierarchicalScan } from "./scan.mjs";
+import { HierarchicalScan } from "./scan.mjs";
 import { DLDFScan } from "./scandldf.mjs";
 
 export async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
   const hasSubgroups = adapter.features.has("subgroups");
-  const canTimestamp = adapter.features.has("timestamp-query");
+  const hasTimestampQuery = adapter.features.has("timestamp-query");
   const device = await adapter?.requestDevice({
     requiredFeatures: [
-      ...(canTimestamp ? ["timestamp-query"] : []),
+      ...(hasTimestampQuery ? ["timestamp-query"] : []),
       ...(hasSubgroups ? ["subgroups"] : []),
     ],
   });
@@ -50,10 +41,10 @@ export async function main(navigator) {
   if (!device) {
     console.error("Fatal error: Device does not support WebGPU.");
   }
-  const inputCount = 2 ** 25; // items, not bytes
+  const inputLength = 2 ** 25; // items, not bytes
   const datatype = "u32";
-  const memsrcX32 = new (datatypeToTypedArray(datatype))(inputCount);
-  for (let i = 0; i < inputCount; i++) {
+  const memsrcX32 = new (datatypeToTypedArray(datatype))(inputLength);
+  for (let i = 0; i < inputLength; i++) {
     switch (datatype) {
       case "u32":
         memsrcX32[i] = i == 0 ? 11 : memsrcX32[i - 1] + 1; // trying to get u32s
@@ -95,7 +86,6 @@ export async function main(navigator) {
     gputimestamps: true, //// TODO should work without this
   });
 
-  // eslint-disable-next-line no-unused-vars
   const dldfscanPrimitive = new DLDFScan({
     device,
     binop: new BinOpAdd({ datatype }),
@@ -223,6 +213,10 @@ export async function main(navigator) {
 }
 
 if (isNode) {
-  const navigator = { gpu: create(['enable-dawn-features=use_user_defined_labels_in_backend,disable_symbol_renaming']) };
+  const navigator = {
+    gpu: create([
+      "enable-dawn-features=use_user_defined_labels_in_backend,disable_symbol_renaming",
+    ]),
+  };
   main(navigator);
 }

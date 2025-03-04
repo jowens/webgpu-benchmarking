@@ -75,15 +75,17 @@ class BaseReduce extends BasePrimitive {
       "] is",
       memsrc[memsrc.length - 1]
     );
-    function validates(cpu, gpu, datatype) {
-      switch (datatype) {
+    function validates(args) {
+      switch (args.datatype) {
         case "f32":
-          return Math.abs((cpu - gpu) / cpu) < 0.001;
+          return Math.abs((args.cpu - args.gpu) / args.cpu) < 0.001;
         default:
-          return cpu == gpu;
+          return args.cpu == args.gpu;
       }
     }
-    if (validates(reduction[0], memdest[0], this.datatype)) {
+    if (
+      validates({ cpu: reduction[0], gpu: memdest[0], datatype: this.datatype })
+    ) {
       return "";
     } else {
       return `Element ${0}: expected ${reduction[0]}, instead saw ${

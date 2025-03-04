@@ -6,7 +6,7 @@ import {
   AllocateBuffer,
 } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
-import { BinOpAddF32, BinOpAddU32 } from "./binop.mjs";
+import { BinOpAddU32 } from "./binop.mjs";
 import { datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
 
 // exports: TestSuites, Primitives
@@ -98,8 +98,8 @@ export class BaseScan extends BasePrimitive {
           break;
       }
     }
-    function validates(cpu, gpu, datatype) {
-      return cpu == gpu;
+    function validates(args) {
+      return args.cpu == args.gpu;
     }
     let returnString = "";
     let allowedErrors = 5;
@@ -107,17 +107,27 @@ export class BaseScan extends BasePrimitive {
       if (allowedErrors == 0) {
         break;
       }
-      if (!validates(referenceOutput[i], memdest[i], this.datatype)) {
+      if (
+        !validates({
+          cpu: referenceOutput[i],
+          gpu: memdest[i],
+          datatype: this.datatype,
+        })
+      ) {
         returnString += `\nElement ${i}: expected ${
           referenceOutput[i]
         }, instead saw ${memdest[i]} (diff: ${Math.abs(
           (referenceOutput[i] - memdest[i]) / referenceOutput[i]
         )}).`;
         if (this.getBuffer("debugBuffer")) {
-          returnString += ` debug[${i}] = ${this.getBuffer("debugBuffer").cpuBuffer[i]}.`;
+          returnString += ` debug[${i}] = ${
+            this.getBuffer("debugBuffer").cpuBuffer[i]
+          }.`;
         }
         if (this.getBuffer("debug2Buffer")) {
-          returnString += ` debug2[${i}] = ${this.getBuffer("debug2Buffer").cpuBuffer[i]}.`;
+          returnString += ` debug2[${i}] = ${
+            this.getBuffer("debug2Buffer").cpuBuffer[i]
+          }.`;
         }
         allowedErrors--;
       }
