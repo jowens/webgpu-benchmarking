@@ -1,3 +1,10 @@
+/** Partially based on:
+ * Thomas Smith (2024-25)
+ * MIT License
+ * https://github.com/b0nes164/GPUPrefixSums
+ * https://github.com/b0nes164/Decoupled-Fallback-Paper
+ */
+
 import { range } from "./util.mjs";
 import { Kernel, AllocateBuffer } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
