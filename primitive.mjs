@@ -358,6 +358,9 @@ export class BasePrimitive {
             layout: pipelineLayout,
             compute: {
               module: computeModule,
+              ...(action.entryPoint && { entryPoint: action.entryPoint }),
+              // warning: next line has never been used/tested
+              ...(action.constants && { constants: action.constants }),
             },
           });
 
