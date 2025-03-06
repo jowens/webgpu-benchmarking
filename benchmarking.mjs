@@ -46,6 +46,7 @@ import {
   DLDFScanAccuracyRegressionSuite,
 } from "./scandldf.mjs";
 import { subgroupAccuracyRegressionSuites } from "./subgroupRegression.mjs";
+import { SortOneSweepRegressionSuite } from "./onesweep.mjs";
 
 async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -102,8 +103,9 @@ async function main(navigator) {
   // ];
   //const testSuites = [AtomicGlobalU32ReduceTestSuite];
 
-  const testSuites = subgroupAccuracyRegressionSuites;
+  let testSuites = subgroupAccuracyRegressionSuites;
   testSuites.push(DLDFScanAccuracyRegressionSuite);
+  testSuites = [SortOneSweepRegressionSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
   let validationsDone = 0;
