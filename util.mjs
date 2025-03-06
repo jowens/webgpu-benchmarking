@@ -69,7 +69,9 @@ export function datatypeToBytes(datatype) {
 
 // https://stackoverflow.com/questions/8896327/jquery-wait-delay-1-second-without-executing-code
 export const delay = (millis) =>
+  // eslint-disable-next-line no-unused-vars
   new Promise((resolve, reject) => {
+    // eslint-disable-next-line no-unused-vars
     setTimeout((_) => resolve(), millis);
   });
 
