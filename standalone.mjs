@@ -7,6 +7,8 @@ const isDeno = typeof Deno !== "undefined";
 const isNode =
   !isDeno && typeof process !== "undefined" && process.release.name === "node";
 if (isNode) {
+  // running in Node
+  // if we were not in conditional code, the following works:
   // import { globals, create } from 'webgpu';
   let webgpuGlobals;
   async function loadWebGPU() {
@@ -16,7 +18,6 @@ if (isNode) {
   }
   await loadWebGPU();
   Object.assign(globalThis, webgpuGlobals);
-  // running in Node
 } else if (isDeno) {
   /* empty */
 } else {
@@ -222,6 +223,6 @@ if (isNode) {
     ]),
   };
   main(navigator);
-} else if (isNode || isDeno) {
+} else if (isDeno) {
   main(navigator);
 }
