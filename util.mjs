@@ -35,8 +35,11 @@ export const arrayProd = (arr) => {
   }
 };
 
+export function divRoundUp(x, y) {
+  return Math.ceil(x / y);
+}
+
 export function fail(msg) {
-  // eslint-disable-next-line no-alert
   alert(msg);
 }
 
