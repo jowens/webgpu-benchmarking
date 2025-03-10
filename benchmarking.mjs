@@ -158,6 +158,9 @@ async function main(navigator) {
             initializeGPUBuffer: true /* with CPU data */,
           });
         }
+        if (testSuite.category == "sort" && testSuite.testSuite == "onesweep") {
+          testInputBuffer.label = "keysIn"; /* sort wants a different name */
+        }
         primitive.registerBuffer(testInputBuffer);
 
         const testOutputBuffer = new Buffer({
@@ -175,8 +178,41 @@ async function main(navigator) {
           createGPUBuffer: true,
           createMappableGPUBuffer: true,
         });
+        if (testSuite.category == "sort" && testSuite.testSuite == "onesweep") {
+          testOutputBuffer.label = "keysOut"; /* sort wants a different name */
+        }
 
         primitive.registerBuffer(testOutputBuffer);
+
+        if (testSuite.category == "sort" && testSuite.testSuite == "onesweep") {
+          /* these will eventually need to be named variables */
+          /* if a key-only sort, initialize with 0 length */
+          /* first payloadIn ... */
+          primitive.registerBuffer(
+            new Buffer({
+              device,
+              datatype: primitive.datatype,
+              length: primitive.type == "keyvalue" ? testInputBuffer.length : 1,
+              label: "payloadIn",
+              createCPUBuffer: true,
+              initializeCPUBuffer: true /* fill with default data */,
+              createGPUBuffer: true,
+              initializeGPUBuffer: true /* with CPU data */,
+            })
+          );
+          /* ... then payloadOut */
+          primitive.registerBuffer(
+            new Buffer({
+              device,
+              datatype: primitive.datatype,
+              length:
+                primitive.type == "keyvalue" ? testOutputBuffer.length : 1,
+              label: "payloadOut",
+              createCPUBuffer: true,
+              createGPUBuffer: true,
+            })
+          );
+        }
 
         let testDebugBuffer;
         if (primitive.knownBuffers.includes("debugBuffer")) {

@@ -4,7 +4,7 @@ export class BaseSort extends BasePrimitive {
   constructor(args) {
     super(args);
 
-    this.knownBuffers = ["inputKeys", "outputKeys"];
+    this.knownBuffers = ["keysIn", "keysOut", "payloadIn", "payloadOut"];
 
     for (const knownBuffer of this.knownBuffers) {
       /* we passed an existing buffer into the constructor */
