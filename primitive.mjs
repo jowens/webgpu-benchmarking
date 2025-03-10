@@ -371,6 +371,14 @@ export class BasePrimitive {
             );
           }
 
+          for (const element of action.bindings[0]) {
+            if (!(element in this.__buffers)) {
+              console.error(
+                `Primitive ${this.label} has no registered buffer ${element}.`
+              );
+            }
+          }
+
           const kernelBindGroup = this.device.createBindGroup({
             label: `bindGroup for ${this.label} kernel`,
             layout: kernelPipeline.getBindGroupLayout(0),
@@ -473,10 +481,14 @@ dispatchGeometry: ${dispatchGeometry}`);
           break;
         }
         case AllocateBuffer: {
+          if (!("size" in action)) {
+            console.log(
+              `Primitive::AllocateBuffer: Buffer ${action.label} must include a size (args are ${action})`
+            );
+          }
           const allocatedBuffer = this.device.createBuffer({
             label: action.label,
-            ...(action.size && { size: action.size }),
-            ...(action.length && { length: action.length }),
+            size: action.size,
             usage:
               action.usage ??
               /* default: read AND write */
