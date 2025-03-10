@@ -129,14 +129,15 @@ export class BasePrimitive {
       "Cannot call getDispatchGeometry() from abstract class BasePrimitive."
     );
   }
-  getSimpleDispatchGeometry() {
+  getSimpleDispatchGeometry(args = {}) {
+    const workgroupCount = args.workgroupCount ?? this.workgroupCount;
     // todo this is too simple
-    if (this.workgroupCount === undefined) {
+    if (workgroupCount === undefined) {
       throw new Error(
-        "Primitive:getSimpleDispatchGeometry(): Must specify this.workgroupCount."
+        "Primitive:getSimpleDispatchGeometry(): Must specify either a workgroupCount in args or this.workgroupCount."
       );
     }
-    let dispatchGeometry = [this.workgroupCount, 1];
+    let dispatchGeometry = [workgroupCount, 1];
     while (
       dispatchGeometry[0] > this.device.limits.maxComputeWorkgroupsPerDimension
     ) {
@@ -482,28 +483,54 @@ dispatchGeometry: ${dispatchGeometry}`);
         }
         case AllocateBuffer: {
           if (!("size" in action)) {
-            console.log(
+            console.error(
               `Primitive::AllocateBuffer: Buffer ${action.label} must include a size (args are ${action})`
             );
           }
-          const allocatedBuffer = this.device.createBuffer({
-            label: action.label,
-            size: action.size,
-            usage:
-              action.usage ??
-              /* default: read AND write */
-              GPUBufferUsage.STORAGE |
-                GPUBufferUsage.COPY_SRC |
-                GPUBufferUsage.COPY_DST,
-          });
+          /** What if this buffer is already allocated?
+           * We can tell if this is the case if it's already registered.
+           * This might happen if we have an intermediate buffer that's not
+           *   normally visible outside the primitive, but we want to get
+           *   its values.
+           * So: if the buffer is already allocated/registered AND it has the
+           *   same size, then skip the new allocation.
+           */
+          const existingBuffer = this.getBuffer(action.label);
+          if (existingBuffer && existingBuffer.size == action.size) {
+            /* just use the existing buffer */
+          } else {
+            const allocatedBuffer = this.device.createBuffer({
+              label: action.label,
+              size: action.size,
+              usage:
+                action.usage ??
+                /* default: read AND write */
+                GPUBufferUsage.STORAGE |
+                  GPUBufferUsage.COPY_SRC |
+                  GPUBufferUsage.COPY_DST,
+            });
+            this.registerBuffer({
+              label: action.label,
+              buffer: allocatedBuffer,
+            });
+          }
+          /* todo: combine this with WriteGPUBuffer below */
           if (action.populateWith) {
             this.device.queue.writeBuffer(
-              allocatedBuffer,
+              this.getBuffer(action.label).buffer.buffer,
               0,
               action.populateWith
             );
           }
-          this.registerBuffer({ label: action.label, buffer: allocatedBuffer });
+          break;
+        }
+        case WriteGPUBuffer: {
+          const gpuBuffer = this.getBuffer(action.label).buffer;
+          this.device.queue.writeBuffer(
+            gpuBuffer.buffer,
+            action.offset ?? 0,
+            action.cpuSource
+          );
           break;
         }
       }
@@ -566,6 +593,12 @@ export class InitializeMemoryBlock {
 }
 
 export class AllocateBuffer {
+  constructor(args) {
+    Object.assign(this, args);
+  }
+}
+
+export class WriteGPUBuffer {
   constructor(args) {
     Object.assign(this, args);
   }
