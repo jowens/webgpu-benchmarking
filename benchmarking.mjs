@@ -186,13 +186,15 @@ async function main(navigator) {
 
         if (testSuite.category == "sort" && testSuite.testSuite == "onesweep") {
           /* these will eventually need to be named variables */
-          /* if a key-only sort, initialize with 0 length */
+          /* if a key-only sort, initialize with epsilon length */
           /* first payloadIn ... */
+          const length =
+            primitive.type == "keyvalue" ? testInputBuffer.length : 1;
           primitive.registerBuffer(
             new Buffer({
               device,
               datatype: primitive.datatype,
-              length: primitive.type == "keyvalue" ? testInputBuffer.length : 1,
+              length,
               label: "payloadIn",
               createCPUBuffer: true,
               initializeCPUBuffer: true /* fill with default data */,
@@ -205,10 +207,21 @@ async function main(navigator) {
             new Buffer({
               device,
               datatype: primitive.datatype,
-              length:
-                primitive.type == "keyvalue" ? testOutputBuffer.length : 1,
+              length,
               label: "payloadOut",
               createCPUBuffer: true,
+              createGPUBuffer: true,
+            })
+          );
+          /* this is just to make "hist" visible to the CPU */
+          primitive.registerBuffer(
+            new Buffer({
+              device,
+              datatype: "u32",
+              length: 256 * 4,
+              label: "hist",
+              createCPUBuffer: true,
+              createMappableGPUBuffer: true,
               createGPUBuffer: true,
             })
           );
@@ -235,6 +248,10 @@ async function main(navigator) {
           await testOutputBuffer.copyGPUToCPU();
           if (testDebugBuffer) {
             await testDebugBuffer.copyGPUToCPU();
+          }
+          if (primitive.getBuffer("hist")) {
+            console.log(primitive.getBuffer("hist"));
+            await primitive.getBuffer("hist").copyGPUToCPU();
           }
           const errorstr = primitive.validate();
           if (errorstr == "") {
