@@ -26,8 +26,10 @@ export class BaseSort extends BasePrimitive {
     /** if we pass in buffers, use them, otherwise use the named buffers
      * that are stored in the primitive */
     /* assumes that cpuBuffers are populated with useful data */
-    const memsrc = args.inputKeys ?? this.getBuffer("inputKeys").cpuBuffer;
-    const memdest = args.outputKeys ?? this.getBuffer("outputKeys").cpuBuffer;
+    const memsrc = args.inputKeys ?? this.getBuffer("keysIn").cpuBuffer;
+    const memdest = args.outputKeys ?? this.getBuffer("keysOut").cpuBuffer;
+    const hist = this.getBuffer("hist").cpuBuffer;
+    console.log(hist);
     const referenceOutput = memsrc.slice().sort();
     function validates(args) {
       return args.cpu == args.gpu;
