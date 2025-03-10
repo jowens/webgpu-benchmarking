@@ -5,9 +5,9 @@
  */
 
 import { range } from "./util.mjs";
-import { Kernel, AllocateBuffer } from "./primitive.mjs";
+import { Kernel, AllocateBuffer, WriteGPUBuffer } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
-import { datatypeToBytes } from "./util.mjs";
+import { divRoundUp } from "./util.mjs";
 import { BaseSort } from "./sort.mjs";
 
 export class OneSweepSort extends BaseSort {
@@ -431,31 +431,74 @@ export class OneSweepSort extends BaseSort {
 
   finalizeRuntimeParameters() {
     const inputSize = this.getBuffer("keysIn").size; // bytes
-    const inputLength = inputSize / 4; /* 4 is size of key */
+    this.inputLength = inputSize / 4; /* 4 is size of key */
     this.RADIX = 256;
     this.RADIX_BITS = 8;
     this.KEY_BITS = 32;
     this.SORT_PASSES = this.KEY_BITS / this.RADIX_BITS;
-    this.workgroupCount = 0;
+
+    /* the following better match what's in the shader! */
+    this.BLOCK_DIM = 256;
+    this.KEYS_PER_THREAD = 15;
+    this.PART_SIZE = this.KEYS_PER_THREAD * this.BLOCK_DIM;
+    this.REDUCE_KEYS_PER_THREAD = 30;
+    this.REDUCE_BLOCK_DIM = 128;
+    this.REDUCE_KEYS_PER_THREAD = 30;
+    this.REDUCE_PART_SIZE = this.REDUCE_KEYS_PER_THREAD * this.REDUCE_BLOCK_DIM;
+    /* end copy from shader */
+    this.passWorkgroupCount = divRoundUp(inputSize, this.PART_SIZE);
+    this.reduceWorkgroupCount = divRoundUp(inputSize, this.REDUCE_PART_SIZE);
     // sortParameters is size, shift, thread_blocks, seed [all u32]
     this.sortParameters = new Uint32Array([
-      inputLength,
+      this.inputLength,
       0 /* each pass: {0,8,16,24} */,
-      this.workgroupCount,
+      this.reduceWorkgroupCount,
       0 /* currently unused */,
     ]);
     this.sortBumpSize = 4 * 4; // size: (4usize * std::mem::size_of::<u32>())
     this.histSize = this.SORT_PASSES * this.RADIX * 4; // (((SORT_PASSES * RADIX) as usize) * std::mem::size_of::<u32>())
-    this.passHistSize = this.workgroupCount * this.histSize; // ((thread_blocks * (RADIX * SORT_PASSES) as usize) * std::mem::size_of::<u32>())
+    this.passHistSize = this.passWorkgroupCount * this.histSize; // ((thread_blocks * (RADIX * SORT_PASSES) as usize) * std::mem::size_of::<u32>())
   }
   compute() {
     this.finalizeRuntimeParameters();
+    const bufferTypes = [
+      [
+        "read-only-storage",
+        "storage",
+        "read-only-storage",
+        "storage",
+        "uniform",
+        "storage",
+        "storage",
+        "storage",
+      ],
+    ];
+    const bindings = [
+      [
+        "keysIn",
+        "keysOut",
+        "payloadIn",
+        "payloadOut",
+        "sortParameters",
+        "sortBump",
+        "hist",
+        "passHist",
+      ],
+    ];
     return [
       new AllocateBuffer({
         label: "sortParameters",
         size: this.sortParameters.byteLength,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-        populateWith: this.sortParameters,
+      }),
+      new WriteGPUBuffer({
+        label: "sortParameters",
+        cpuSource: new Uint32Array([
+          this.inputLength,
+          0 /* each pass: {0,8,16,24} */,
+          this.reduceWorkgroupCount,
+          0 /* currently unused */,
+        ]),
       }),
       new AllocateBuffer({
         label: "sortBump",
@@ -472,34 +515,12 @@ export class OneSweepSort extends BaseSort {
       new Kernel({
         kernel: this.sortOneSweepWGSL,
         entryPoint: "global_hist",
-        bufferTypes: [
-          [
-            "read-only-storage",
-            "storage",
-            "read-only-storage",
-            "storage",
-            "uniform",
-            "storage",
-            "storage",
-            "storage",
-          ],
-        ],
-        bindings: [
-          [
-            "keysIn",
-            "keysOut",
-            "payloadIn",
-            "payloadOut",
-            "sortParameters",
-            "sortBump",
-            "hist",
-            "passHist",
-          ],
-        ],
-        label: `OneSweep sort (${this.type}) with decoupled lookback/decoupled fallback [subgroups: ${this.useSubgroups}]`,
+        bufferTypes,
+        bindings,
+        label: `OneSweep sort (${this.type}) global_hist with decoupled lookback/decoupled fallback [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
-          return this.getSimpleDispatchGeometry();
+          return [this.reduceWorkgroupCount];
         },
       }),
     ];
