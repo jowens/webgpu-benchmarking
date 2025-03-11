@@ -19,18 +19,37 @@ export class BaseSort extends BasePrimitive {
   }
 
   get bytesTransferred() {
-    return this.getBuffer("inputKeys").size + this.getBuffer("outputKeys").size;
+    return this.getBuffer("keysIn").size + this.getBuffer("keysOut").size;
   }
 
   validate = (args = {}) => {
     /** if we pass in buffers, use them, otherwise use the named buffers
      * that are stored in the primitive */
     /* assumes that cpuBuffers are populated with useful data */
-    const memsrc = args.inputKeys ?? this.getBuffer("keysIn").cpuBuffer;
-    const memdest = args.outputKeys ?? this.getBuffer("keysOut").cpuBuffer;
-    const hist = this.getBuffer("hist").cpuBuffer;
-    console.log(hist);
-    const referenceOutput = memsrc.slice().sort();
+    const memsrc =
+      args.inputKeys?.cpuBuffer ??
+      args.inputKeys ??
+      this.getBuffer("keysIn").cpuBuffer;
+    const memdest =
+      args.outputKeys?.cpuBuffer ??
+      args.outputKeys ??
+      this.getBuffer("keysOut").cpuBuffer;
+    console.log(memsrc);
+    console.log(memdest);
+    let referenceOutput;
+    if (args?.outputKeys?.label === "hist") {
+      referenceOutput = new Uint32Array(1024);
+      for (let i = 0; i < memsrc.length; i++) {
+        for (let j = 0; j < 4; j++) {
+          const histOffset = j * 256;
+          const bucket = (memsrc[i] >>> (j * 8)) & 0xff;
+          referenceOutput[histOffset + bucket]++;
+          // console.log(histOffset, bucket, referenceOutput[histOffset + bucket]);
+        }
+      }
+    } else {
+      referenceOutput = memsrc.slice().sort();
+    }
     function validates(args) {
       return args.cpu == args.gpu;
     }
@@ -71,9 +90,9 @@ export class BaseSort extends BasePrimitive {
         this.type,
         "with input",
         memsrc,
-        "should validate to",
+        "should validate to (reference)",
         referenceOutput,
-        "and actually validates to",
+        "and actually validates to (GPU output)",
         memdest,
         this.getBuffer("debugBuffer") ? "\ndebugBuffer" : "",
         this.getBuffer("debugBuffer")
@@ -83,10 +102,6 @@ export class BaseSort extends BasePrimitive {
         this.getBuffer("debug2Buffer")
           ? this.getBuffer("debug2Buffer").cpuBuffer
           : "",
-        this.binop.constructor.name,
-        this.binop.datatype,
-        "identity is",
-        this.binop.identity,
         "length is",
         memsrc.length,
         "memsrc[",
