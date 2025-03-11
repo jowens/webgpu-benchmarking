@@ -102,11 +102,12 @@ export class OneSweepSort extends BaseSort {
      * Structure of wg_globalHist array:
      * - Each group of 64 threads writes into a different segment
      * - Segment 0 (threads 0-63) histograms its inputs:
-     *   - [0, 256) has 256 buckets that count keysIn[7:0]
-     *   - [256, 512) ...                      keysIn[15:8]
-     *   - [512, 768) ...                      keysIn[23:16]
-     *   - [768, 1024) ...                     keysIn[31:24]
-     * - Segment 1 (threads 64-127) writes into [1024, 2048)
+     *   - wg_globalHist[0, 256) has 256 buckets that count keysIn[7:0]
+     *   -              [256, 512) ...                      keysIn[15:8]
+     *   -              [512, 768) ...                      keysIn[23:16]
+     *   -              [768, 1024) ...                     keysIn[31:24]
+     * - Segment 1 (threads 64-127) writes into wg_globalHist[1024, 2048)
+     * - Final step adds the two segments together and adds them to hist[]
      */
     @compute @workgroup_size(REDUCE_BLOCK_DIM, 1, 1)
     fn global_hist(builtinsUniform: BuiltinsUniform,
@@ -123,12 +124,14 @@ export class OneSweepSort extends BaseSort {
       workgroupBarrier();
 
       // 64 threads: 1 histogram in shared memory
-      let radix_shift = sortParameters.shift;
+      // segment 0 (threads [0,63]) -> wg_globalHist[0:1024),      hist_offset = 0
+      // segment 1 (threads [64,127]) -> wg_globalHist[1024,2048), hist_offset = 1024
       let hist_offset = builtinsNonuniform.lidx / 64u * ALL_RADIX;
       {
-        /* not last workgroup */
         var i = builtinsNonuniform.lidx + builtinsUniform.wgid.x * REDUCE_PART_SIZE;
-        if (builtinsUniform.wgid.x < sortParameters.thread_blocks - 1) {
+        /* not last workgroup */
+        /* assumes nwg is [x, 1, 1] */
+        if (builtinsUniform.wgid.x < builtinsUniform.nwg.x - 1) {
           for (var k = 0u; k < REDUCE_KEYS_PER_THREAD; k += 1u) {
             let key = keysIn[i];
             atomicAdd(&wg_globalHist[(key & RADIX_MASK) + hist_offset], 1u);
@@ -140,9 +143,9 @@ export class OneSweepSort extends BaseSort {
         }
 
         /* last workgroup */
-        if (builtinsUniform.wgid.x == sortParameters.thread_blocks - 1) {
+        if (builtinsUniform.wgid.x == builtinsUniform.nwg.x - 1) {
           for (var k = 0u; k < REDUCE_KEYS_PER_THREAD; k += 1u) {
-            if (i < sortParameters.size) {
+            if (i < arrayLength(&keysIn)) {
               let key = keysIn[i];
               atomicAdd(&wg_globalHist[(key & RADIX_MASK) + hist_offset], 1u);
               atomicAdd(&wg_globalHist[((key >> 8u) & RADIX_MASK) + hist_offset + 256u], 1u);
@@ -157,6 +160,7 @@ export class OneSweepSort extends BaseSort {
 
       /* add all the segments together and add result to global hist[] array */
       for (var i = builtinsNonuniform.lidx; i < RADIX; i += REDUCE_BLOCK_DIM) {
+        /* first loop through: i in [0,128); second loop: i in [128,256) */
         atomicAdd(&hist[i], atomicLoad(&wg_globalHist[i]) + atomicLoad(&wg_globalHist[i + ALL_RADIX]));
         atomicAdd(&hist[i + 256u], atomicLoad(&wg_globalHist[i + 256u]) + atomicLoad(&wg_globalHist[i + 256u + ALL_RADIX]));
         atomicAdd(&hist[i + 512u], atomicLoad(&wg_globalHist[i + 512u]) + atomicLoad(&wg_globalHist[i + 512u + ALL_RADIX]));
@@ -446,8 +450,11 @@ export class OneSweepSort extends BaseSort {
     this.REDUCE_KEYS_PER_THREAD = 30;
     this.REDUCE_PART_SIZE = this.REDUCE_KEYS_PER_THREAD * this.REDUCE_BLOCK_DIM;
     /* end copy from shader */
-    this.passWorkgroupCount = divRoundUp(inputSize, this.PART_SIZE);
-    this.reduceWorkgroupCount = divRoundUp(inputSize, this.REDUCE_PART_SIZE);
+    this.passWorkgroupCount = divRoundUp(this.inputLength, this.PART_SIZE);
+    this.reduceWorkgroupCount = divRoundUp(
+      this.inputLength,
+      this.REDUCE_PART_SIZE
+    );
     // sortParameters is size, shift, thread_blocks, seed [all u32]
     this.sortParameters = new Uint32Array([
       this.inputLength,
