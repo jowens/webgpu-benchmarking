@@ -134,7 +134,7 @@ export class Buffer {
       }
       if (this.args.createMappableGPUBuffer) {
         this.#mappableGPUBuffer = this.device.createBuffer({
-          label: "mappable |" + this.label,
+          label: "mappable | " + this.label,
           size: this.size,
           usage:
             this.args.mappableGPUBufferUsage ??
@@ -156,7 +156,7 @@ export class Buffer {
   async copyGPUToCPU() {
     // copy buffer into mappable buffer ...
     const copyEncoder = this.device.createCommandEncoder({
-      label: "encoder: GPU output buffer data -> mappable buffers",
+      label: `encoder: GPU buffer ${this.label} data -> mappable buffers`,
     });
     copyEncoder.copyBufferToBuffer(
       this.buffer.buffer,
