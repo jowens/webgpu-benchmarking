@@ -109,8 +109,7 @@ async function main(navigator) {
   testSuites = [SortOneSweepRegressionSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
-  let validationsDone = 0;
-  let validationErrors = 0;
+  let validations = { done: 0, errors: 0, tested: undefined };
   for (const testSuite of testSuites) {
     console.log(testSuite);
     const lastTestSeen = {
@@ -271,17 +270,18 @@ async function main(navigator) {
           if (primitive.getBuffer("passHist")) {
             await primitive.getBuffer("passHist").copyGPUToCPU();
           }
+          validations.tested = "passHist";
           const errorstr = primitive.validate({
             /* this is just for sort testing, validate vs. a different buffer */
-            outputKeys: primitive.getBuffer("passHist"),
+            outputKeys: primitive.getBuffer(validations.tested),
           });
           if (errorstr == "") {
             // console.info("Validation passed", params);
           } else {
-            validationErrors++;
+            validations.errors++;
             console.error("Validation failed for", params, ":", errorstr);
           }
-          validationsDone++;
+          validations.done++;
         } // end of TEST FOR CORRECTNESS
 
         if (testSuite.uniqueRuns) {
@@ -357,9 +357,11 @@ async function main(navigator) {
             });
         } // end of TEST FOR PERFORMANCE
       } // end of running all combinations for this testSuite
-      if (validationsDone > 0) {
+      if (validations.done > 0) {
         console.info(
-          `${validationsDone} validations complete, ${validationErrors} errors.`
+          `${validations.done} validations complete${
+            validations?.tested ? ` (${validations.tested})` : ""
+          }, ${validations.errors} errors.`
         );
       }
 
