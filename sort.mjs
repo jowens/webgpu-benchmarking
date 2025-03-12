@@ -47,6 +47,8 @@ export class BaseSort extends BasePrimitive {
           // console.log(histOffset, bucket, referenceOutput[histOffset + bucket]);
         }
       }
+    } else if (args?.outputKeys?.label === "passHist") {
+      referenceOutput = new Uint32Array(memdest.length);
     } else {
       referenceOutput = memsrc.slice().sort();
     }
