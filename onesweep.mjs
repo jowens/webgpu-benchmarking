@@ -322,26 +322,47 @@ export class OneSweepSort extends BaseSort {
         select(0u, wg_scan[sid - 1u], builtinsNonuniform.lidx >= sgsz)) & ~FLAG_MASK) | FLAG_INCLUSIVE);
     }
 
-    var<workgroup> wg_warpHist: array<atomic<u32>, PART_SIZE>;
+    var<workgroup> wg_warpHist: array<atomic<u32>, PART_SIZE>; /* KEYS_PER_THREAD * BLOCK_DIM */
     var<workgroup> wg_localHist: array<u32, RADIX>;
     var<workgroup> wg_broadcast: u32;
 
     /* warp-level multisplit function */
+    /* this appears to be limited to subgroup sizes <= 32 */
+    /* more portable version, HLSL:
+     * https://github.com/b0nes164/GPUSorting/blob/09a6081d964b682bbb58838b83ab75aebe7f4e05/GPUSortingD3D12/Shaders/SortCommon.hlsl#L400-L424
+     * https://github.com/b0nes164/GPUSorting/blob/09a6081d964b682bbb58838b83ab75aebe7f4e05/GPUSortingD3D12/Shaders/SortCommon.hlsl#L359-L375
+     */
     fn WLMS(key: u32, shift: u32, sgid: u32, sgsz: u32, lane_mask_lt: u32, s_offset: u32) -> u32 {
       var eq_mask = 0xffffffffu;
+      /* loop through the bits in this digit place */
       for (var k = 0u; k < RADIX_LOG; k += 1u) {
         let curr_bit = 1u << (k + shift);
         let pred = (key & curr_bit) != 0u;
         let ballot = subgroupBallot(pred);
         eq_mask &= select(~ballot.x, ballot.x, pred);
       }
+      /* eq_mask marks the threads that have the same digit as me ... */
       var out = countOneBits(eq_mask & lane_mask_lt);
+      /* ... and out marks those threads in eq_mask whose ids are less than me */
+      /* what is the largest-sgid thread in my subgroup that has the same digit as me? */
       let highest_rank_peer = sgsz - countLeadingZeros(eq_mask) - 1u;
       var pre_inc = 0u;
       if (sgid == highest_rank_peer) {
+        /* add to wg_warpHist for my digit value: total number of threads with my digit value */
+        /* since I'm the highest rank peer, that's the number of threads ranked below me with
+         * my digit value, plus one for me */
+        /* not quite sure why we're not just adding countOneBits(eq_mask) */
+        /* also puzzled why we are now dividing wg_warpHist into different blocks based on
+         * subgroup ID when we allocated it into KEYS_PER_THREAD blocks
+         * perhaps we are assuming KEYS_PER_THREAD > number of subgroups */
         pre_inc = atomicAdd(&wg_warpHist[((key >> shift) & RADIX_MASK) + s_offset], out + 1u);
+        /* pre_inc now reflects the number of threads seen to date that have my digit (even
+         * from previous calls to WLMS) ...*/
       }
+
       workgroupBarrier();
+      /* ... and then that value is broadcasted to all threads that share my digit value, and
+       * returned */
       out += subgroupShuffle(pre_inc, highest_rank_peer);
       return out;
     }
@@ -419,6 +440,7 @@ export class OneSweepSort extends BaseSort {
       }
 
       /** each key computes an offset for future placement
+       * We are computing a histogram per subgroup
        * Note the call to WLMS also populates wg_warpHist
        */
       var offsets = array<u32, KEYS_PER_THREAD>();
