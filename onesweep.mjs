@@ -33,7 +33,7 @@ export class OneSweepSort extends BaseSort {
     struct SortParameters {
         size: u32,
         shift: u32,
-        thread_blocks: u32,
+        thread_blocks: u32, // number of tiles in the onesweep_pass kernel
         seed: u32,
     };
 
@@ -60,6 +60,56 @@ export class OneSweepSort extends BaseSort {
 
     @group(0) @binding(7)
     var<storage, read_write> passHist: array<atomic<u32>>;
+    /**
+     * Structure of passHist:
+     * (note we don't store anything for the last workgroup
+     *  because no other workgroup needs it)
+     *
+     * Global Hist Post Scan*** SORT PASS_0:
+     * +------------------------------------------+
+     * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
+     * |   ?    |   ?    |   ?    | ... |   ?     |
+     * +------------------------------------------+
+     * Thread_Block 0 SORT_PASS_0:
+     * +------------------------------------------+
+     * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
+     * |   ?    |   ?    |   ?    | ... |   ?     |
+     * +------------------------------------------+
+     * ...
+     *
+     * Global Hist Post Scan*** SORT PASS_1:
+     * +------------------------------------------+
+     * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
+     * |   ?    |   ?    |   ?    | ... |   ?     |
+     * +------------------------------------------+
+     * Thread_Block 0 SORT_PASS_1:
+     * +------------------------------------------+
+     * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
+     * |   ?    |   ?    |   ?    | ... |   ?     |
+     * +------------------------------------------+
+     * ...
+     * Global Hist Post Scan*** SORT PASS_2:
+     * +------------------------------------------+
+     * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
+     * |   ?    |   ?    |   ?    | ... |   ?     |
+     * +------------------------------------------+
+     * Thread_Block 0 SORT_PASS_2:
+     * +------------------------------------------+
+     * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
+     * |   ?    |   ?    |   ?    | ... |   ?     |
+     * +------------------------------------------+
+     * ...
+     * Global Hist Post Scan*** SORT PASS_3:
+     * +------------------------------------------+
+     * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
+     * |   ?    |   ?    |   ?    | ... |   ?     |
+     * +------------------------------------------+
+     * Thread_Block 0 SORT_PASS_3:
+     * +------------------------------------------+
+     * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
+     * |   ?    |   ?    |   ?    | ... |   ?     |
+     * +------------------------------------------+
+     */
 
     const SORT_PASSES = 4u;
     const BLOCK_DIM = 256u;
@@ -73,6 +123,13 @@ export class OneSweepSort extends BaseSort {
 
     /** NOTE kernel code below requires that RADIX is multiple of subgroup size
      * there's a diagnostic that asserts subgroup uniformity that depends on this
+     *
+     * Limitation: Keys must be no larger than 30 bits. "Doing the split here would
+     * be wicked. No idea how the performance will be affected (probably bad). For
+     * reference CUB also throws in the towel and says '30 bits is fine'":
+     *   "The layout of a single counter is depicted in Figure 6. We use the two
+     *    higher-order bits to store status, with the remaining 30 bits storing
+     *    value."
      */
     const RADIX = 256u;
     const ALL_RADIX = RADIX * SORT_PASSES;
@@ -97,7 +154,12 @@ export class OneSweepSort extends BaseSort {
     /**
      * Input: global keysIn[]
      * Output: global hist[1024]
-     * Action: Construct local histogram(s) of global keysIn[] input, add
+     * Configuration:
+     *   - REDUCE_BLOCK_DIM (128) threads per workgroup
+     *   - Each thread handles REDUCE_KEYS_PER_THREAD (30)
+     *   - We launch enough thread blocks to cover the entire input
+     *     (basically, ceil(size of keysIn / (REDUCE_BLOCK_DIM * REDUCE_KEYS_PER_THREAD)))
+     * Action: Construct local histogram(s) of global keysIn[] input, sum
      *   those histograms into global hist[] histogram
      * Structure of wg_globalHist array:
      * - Each group of 64 threads writes into a different segment
@@ -175,18 +237,29 @@ export class OneSweepSort extends BaseSort {
     ${this.fnDeclarations.commonDefinitions}
 
     /**
-     * Input: global hist[1024]
+     * Input: global hist[4*256]
      *   - [0, 256) has 256 buckets that count keysIn[7:0], assigned to wkgp 0
      *   - [256, 512) ...                      keysIn[15:8], ...             1
      *   - [512, 768) ...                      keysIn[23:16] ...             2
      *   - [768, 1024) ...                     keysIn[31:24] ...             3
-     * Output: global passHist[]
-     *   - this is overallocated; we only use 1/nth of its space in this kernel,
-     *     where n is the number of sort passes
-     * Launch parameters: SORT_PASSES workgroups (32b keys / 8b radix = 4 wkgps)
+     * Output: global passHist[4*256, plus more that we're not worried about yet]
+     *   - see diagram of how passHist is laid out where it is allocated at top of file
+     *   - passHist has 4 segments (bits = {7:0, 15:8, 23:16, 31:24}) corresponding
+     *     to keysIn[bits]), each of which has:
+     *     - 1 256-element global offset: Exclusive scan of corresponding
+     *       256-element block of hist[]
+     *     - N * 256-element local offset, where N is the number of thread blocks
+     *       in global_hist. These regions are completely unused in this kernel.
+     *   - The global and local offsets are all in one memory region simply so we
+     *     don't have to bind multiple memory regions
+     * Launch parameters:
+     *   - SORT_PASSES workgroups (32b keys / 8b radix = 4 wkgps)
+     *   - Each workgroup has BLOCK_DIM threads == RADIX
      * Action: Compute the global bin offset for every digit in each digit place.
      *         Each workgroup computes a different digit place.
      *         This is just an exclusive prefix-sum of each digit-place's hist bucket.
+     *         Also tags each global-bin-offset entry in that prefix-sum with
+     *           INCLUSIVE_FLAG in preparation for the scan in onesweep_pass.
      */
     @compute @workgroup_size(BLOCK_DIM, 1, 1)
     fn onesweep_scan(builtinsUniform: BuiltinsUniform,
@@ -239,10 +312,11 @@ export class OneSweepSort extends BaseSort {
       workgroupBarrier();
 
       /** passHist[] now contains the global bin offset for every digit in each digit place,
-       * tagged with FLAG_INCLUSIVE */
-      /* TODO: What is the "constant" (1) on the next line? */
-      /* TODO:     let pass_index = threadid.x + info.thread_blocks * wgid.x * RADIX; */
-      /* 1) Yes we are using the number of threadblocks for the previous kernel. The reason for this is because, we need to make 4 8-bit passes to sort a 32-bit key, and we want don't want to waste precious bind space. So we make one 4x long array. We do the exclusive scan on our global histogram kernel results, then we place these results at the beginning of each section with the inclusive flag. This makes the logic later on a little easier because we know for sure the inclusive flag exists. */
+       *   tagged with FLAG_INCLUSIVE. ("This makes the logic later on a little easier because
+       *   we know for sure the inclusive flag exists.")
+       * sortParameters.thread_blocks is the expansion factor that leaves room for
+       *   all the local per-thread-block offsets
+       */
       let pass_index = builtinsNonuniform.lidx + sortParameters.thread_blocks * builtinsUniform.wgid.x * RADIX;
       atomicStore(&passHist[pass_index], ((subgroupExclusiveAdd(scan) +
         select(0u, wg_scan[sid - 1u], builtinsNonuniform.lidx >= sgsz)) & ~FLAG_MASK) | FLAG_INCLUSIVE);
@@ -280,18 +354,23 @@ export class OneSweepSort extends BaseSort {
      * * FIX
      * Input: global keysIn[]
      * Output: global keysOut[]
+     * Launch parameters:
+     * - Workgroup size: BLOCK_DIM == 256
+     * - Each workgroup is responsible for PART_SIZE = KEYS_PER_THREAD (15) * BLOCK_DIM (256) keys
+     * - Launch enough workgroups to cover all input keys (divRoundUp(inputLength, PART_SIZE))
      * Action:
+     * - Call this kernel 4 times, once for each digit-place. sortParameters.shift is {0,8,16,24}.
      */
-    /* this is called 4 times, once for each digit-place. sortParameters.shift is {0,8,16,24}. */
-    /** algorithmic flow:
-     * Load Keys
-     * Warp Level Multisplit->Make a per warp histogram
-     * Exclusive Scan Circular Shift up the warp histograms
-     * Exclusive Scan across the histogram total
-     * Update the in register offsets so you can scatter to shared memory
-     * Lookback
-     * Scatter to shared memory
-     * Scatter from shared to global
+    /** Steps in this kernel:
+     * - Load keys
+     * - Warp level multisplit -> Make a per-warp histogram
+     * - Exclusive scan / circular shift up the warp histograms
+     * - Exclusive scan across the histogram total
+     * - Update the in-register offsets so we can scatter to shared memory
+     * - Lookback
+     * - (Fallback)
+     * - Scatter to shared memory
+     * - Scatter from shared to global
      */
     @compute @workgroup_size(BLOCK_DIM, 1, 1)
     fn onesweep_pass(builtinsUniform: BuiltinsUniform,
@@ -301,7 +380,9 @@ export class OneSweepSort extends BaseSort {
       let sid = builtinsNonuniform.lidx / sgsz;  // Caution 1D workgroup ONLY! Ok, but technically not in HLSL spec
 
       /* set all of wg_warpHist to 0 */
-      let warp_hists_size = clamp(BLOCK_DIM / sgsz * RADIX, 0u, PART_SIZE);
+      /* PART_SIZE = 256 * 15 */
+      /* BLOCK_DIM = 256; 256 / 32 * 256 */
+      let warp_hists_size = clamp(BLOCK_DIM / sgsz * RADIX, 0u, PART_SIZE); // clamped to [0, PART_SIZE]
       for (var i = builtinsNonuniform.lidx; i < warp_hists_size; i += BLOCK_DIM) {
         atomicStore(&wg_warpHist[i], 0u);
       }
@@ -312,7 +393,8 @@ export class OneSweepSort extends BaseSort {
       }
       let partid = workgroupUniformLoad(&wg_broadcast);
 
-      /** copy from global keysIn[] into local keys[]
+      /** copy KEYS_PER_THREAD from global keysIn[] into local keys[]
+       * Subgroups fetch a contiguous block of (sgsz * KEYS_PER_THREAD) keys
        * note this copy is strided (thread i gets i, i+sgsz, i+2*sgsz, ...)
        */
       var keys = array<u32, KEYS_PER_THREAD>();
@@ -320,14 +402,14 @@ export class OneSweepSort extends BaseSort {
         let dev_offset = partid * PART_SIZE;
         let s_offset = sid * sgsz * KEYS_PER_THREAD;
         var i = builtinsNonuniform.sgid + s_offset + dev_offset;
-        if (partid < sortParameters.thread_blocks - 1) {
+        if (partid < builtinsUniform.nwg.x - 1) {
           for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
             keys[k] = keysIn[i];
             i += sgsz;
           }
         }
 
-        if (partid == sortParameters.thread_blocks - 1) {
+        if (partid == builtinsUniform.nwg.x - 1) {
           for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
             /* warning: u32-specific */
             keys[k] = select(0xffffffffu, keysIn[i], i < sortParameters.size);
@@ -336,8 +418,8 @@ export class OneSweepSort extends BaseSort {
         }
       }
 
-      /** each key gets an offset for future placement
-       * Note the call to WLMS changes wg_warpHist
+      /** each key computes an offset for future placement
+       * Note the call to WLMS also populates wg_warpHist
        */
       var offsets = array<u32, KEYS_PER_THREAD>();
       {
@@ -351,16 +433,24 @@ export class OneSweepSort extends BaseSort {
       workgroupBarrier();
 
       var local_reduction = 0u;
-      /* diagnostic is UNSAFE: this relies on RADIX being a multiple of (or equal to) subgroup size */
+      /* diagnostic is UNSAFE: this relies on
+       * - RADIX being a multiple of (or equal to) subgroup size
+       * - Workgroup size is 1D (it is)
+       * - Subgroups are guaranteed to be laid out linearly within the
+       *   workgroup (probably (?))
+       */
       @diagnostic(off, subgroup_uniformity)
       if (builtinsNonuniform.lidx < RADIX) {
+        /* activate only RADIX threads */
         local_reduction = atomicLoad(&wg_warpHist[builtinsNonuniform.lidx]);
         for (var i = builtinsNonuniform.lidx + RADIX; i < warp_hists_size; i += RADIX) {
           local_reduction += atomicLoad(&wg_warpHist[i]);
           atomicStore(&wg_warpHist[i], local_reduction - atomicLoad(&wg_warpHist[i]));
         }
 
+        /* last workgroup does nothing because no other workgroup needs its data */
         if (partid < sortParameters.thread_blocks - 1u) {
+          /* update the spine */
           let pass_index = builtinsNonuniform.lidx + (partid + 1u) * RADIX +
             sortParameters.thread_blocks * (sortParameters.shift >> 3u) * RADIX;
           atomicStore(&passHist[pass_index], (local_reduction & ~FLAG_MASK) | FLAG_REDUCTION);
@@ -389,15 +479,15 @@ export class OneSweepSort extends BaseSort {
       }
       workgroupBarrier();
 
-      if (builtinsNonuniform.lidx >= sgsz) {
+      if (isSubgroupZero(builtinsNonuniform.lidx, sgsz)) {
+        for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
+          offsets[k] += wg_localHist[(keys[k] >> sortParameters.shift) & RADIX_MASK];
+        }
+      } else { /* subgroup 1+ */
         let s_offset = sid * RADIX;
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
           let t = (keys[k] >> sortParameters.shift) & RADIX_MASK;
           offsets[k] += wg_localHist[t] + atomicLoad(&wg_warpHist[t + s_offset]);
-        }
-      } else {
-        for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
-          offsets[k] += wg_localHist[(keys[k] >> sortParameters.shift) & RADIX_MASK];
         }
       }
       workgroupBarrier();
