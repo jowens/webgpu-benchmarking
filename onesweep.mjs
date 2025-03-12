@@ -509,10 +509,10 @@ export class OneSweepSort extends BaseSort {
         }
         /* local_reduction for thread i now contains the total number of seen digits with value i */
         /* now wg_warpHist[i,i+RADIX,i+2*RADIX,...] contains [a,a,a+b,a+b+c,...] */
-        /* this seems odd, but we'll use this below when we do the circular shift */
+        /* this seems odd, but we'll use these values below when we do a circular shift */
 
         /* last workgroup does nothing because no other workgroup needs its data */
-        if (partid < sortParameters.thread_blocks - 1u) {
+        if (partid < sortParameters.thread_blocks - 1u) { /* not the last workgroup */
           /* update the spine with local_reduction */
           /* the sortParameters.thread_blocks ... picks the right digit within passHist */
           /* then the partid + 1u is indexing into the thread-block local histograms */
