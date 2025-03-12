@@ -111,11 +111,16 @@ export class BasePrimitive {
             break;
           default:
             this.__buffers[bufferObj.label] = new Buffer(bufferObj);
-            if (this.__buffers[bufferObj.label]?.datatype == undefined) {
+            if (
+              this.__buffers[bufferObj.label]?.datatype === undefined &&
+              this?.datatype
+            ) {
+              /* assign a datatype from primitive if buffer doesn't have one */
               this.__buffers[bufferObj.label].datatype = this.datatype;
             }
             break;
         }
+        break;
     }
   }
 
