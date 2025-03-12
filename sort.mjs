@@ -34,23 +34,44 @@ export class BaseSort extends BasePrimitive {
       args.outputKeys?.cpuBuffer ??
       args.outputKeys ??
       this.getBuffer("keysOut").cpuBuffer;
-    console.log(memsrc);
-    console.log(memdest);
     let referenceOutput;
-    if (args?.outputKeys?.label === "hist") {
-      referenceOutput = new Uint32Array(1024);
-      for (let i = 0; i < memsrc.length; i++) {
+    switch (args?.outputKeys?.label) {
+      case "hist":
+      case "passHist": {
+        const hist = new Uint32Array(1024);
+        for (let i = 0; i < memsrc.length; i++) {
+          for (let j = 0; j < 4; j++) {
+            const histOffset = j * 256;
+            const bucket = (memsrc[i] >>> (j * 8)) & 0xff;
+            hist[histOffset + bucket]++;
+          }
+        }
+        if (args?.outputKeys?.label === "hist") {
+          referenceOutput = hist;
+          break;
+        }
+        const passHist = new Uint32Array(memdest.length);
+        const FLAG_INCLUSIVE = 2 << 30;
+        /* divide into 4 pieces (4 passes), write only first RADIX (256) elements of each */
         for (let j = 0; j < 4; j++) {
           const histOffset = j * 256;
-          const bucket = (memsrc[i] >>> (j * 8)) & 0xff;
-          referenceOutput[histOffset + bucket]++;
-          // console.log(histOffset, bucket, referenceOutput[histOffset + bucket]);
+          const passHistOffset = j * (memdest.length / 4);
+          let acc = 0;
+          for (let bucket = 0; bucket < 256; bucket++) {
+            passHist[passHistOffset + bucket] = acc | FLAG_INCLUSIVE;
+            acc += hist[histOffset + bucket];
+          }
         }
+        if (args?.outputKeys?.label === "passHist") {
+          referenceOutput = passHist;
+          break;
+        }
+        break;
       }
-    } else if (args?.outputKeys?.label === "passHist") {
-      referenceOutput = new Uint32Array(memdest.length);
-    } else {
-      referenceOutput = memsrc.slice().sort();
+      case undefined:
+      default:
+        referenceOutput = memsrc.slice().sort();
+        break;
     }
     function validates(args) {
       return args.cpu == args.gpu;
@@ -93,6 +114,7 @@ export class BaseSort extends BasePrimitive {
         "with input",
         memsrc,
         "should validate to (reference)",
+        args?.outputKeys?.label ?? "",
         referenceOutput,
         "and actually validates to (GPU output)",
         memdest,

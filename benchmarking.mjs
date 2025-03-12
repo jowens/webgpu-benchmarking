@@ -4,6 +4,7 @@ import {
   delay,
   download,
   datatypeToBytes,
+  divRoundUp,
 } from "./util.mjs";
 import { Buffer } from "./buffer.mjs";
 
@@ -214,12 +215,26 @@ async function main(navigator) {
             })
           );
           /* this is just to make "hist" visible to the CPU */
+          /* can be deleted once onepass sort is working */
           primitive.registerBuffer(
             new Buffer({
               device,
               datatype: "u32",
               length: 256 * 4,
               label: "hist",
+              createCPUBuffer: true,
+              createMappableGPUBuffer: true,
+              createGPUBuffer: true,
+            })
+          );
+          /* this is just to make "passHist" visible to the CPU */
+          /* can be deleted once onepass sort is working */
+          primitive.registerBuffer(
+            new Buffer({
+              device,
+              datatype: "u32",
+              length: 256 * 4 * divRoundUp(primitive.inputLength, 15 * 256),
+              label: "passHist",
               createCPUBuffer: true,
               createMappableGPUBuffer: true,
               createGPUBuffer: true,
@@ -249,11 +264,17 @@ async function main(navigator) {
           if (testDebugBuffer) {
             await testDebugBuffer.copyGPUToCPU();
           }
+          /* the next two are for debugging onesweep scan */
           if (primitive.getBuffer("hist")) {
-            console.log(primitive.getBuffer("hist"));
             await primitive.getBuffer("hist").copyGPUToCPU();
           }
-          const errorstr = primitive.validate();
+          if (primitive.getBuffer("passHist")) {
+            await primitive.getBuffer("passHist").copyGPUToCPU();
+          }
+          const errorstr = primitive.validate({
+            /* this is just for sort testing, validate vs. a different buffer */
+            outputKeys: primitive.getBuffer("passHist"),
+          });
           if (errorstr == "") {
             // console.info("Validation passed", params);
           } else {
@@ -338,10 +359,7 @@ async function main(navigator) {
       } // end of running all combinations for this testSuite
       if (validationsDone > 0) {
         console.info(
-          validationsDone,
-          "validations complete,",
-          validationErrors,
-          "errors."
+          `${validationsDone} validations complete, ${validationErrors} errors.`
         );
       }
 
