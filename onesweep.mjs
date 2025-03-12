@@ -331,7 +331,13 @@ export class OneSweepSort extends BaseSort {
     /* more portable version, HLSL:
      * https://github.com/b0nes164/GPUSorting/blob/09a6081d964b682bbb58838b83ab75aebe7f4e05/GPUSortingD3D12/Shaders/SortCommon.hlsl#L400-L424
      * https://github.com/b0nes164/GPUSorting/blob/09a6081d964b682bbb58838b83ab75aebe7f4e05/GPUSortingD3D12/Shaders/SortCommon.hlsl#L359-L375
-     */
+     * Thomas: "I should also note that in my HLSL implementation, and I definitely think
+     * this is the way to do this, I ended splitting the implementation into a 'big subgroup size' 16+
+     * and 'small subgroup size < 16'" ... "The defining issue, is that the number of histograms is
+     * inversely proportional to the subgroup size. At that low of a subgroup size, you have to start
+     * doing more exotic techniques to prevent losing occupancy. Because basically you want a shared
+     * mem histogram per warp."
+    */
     fn WLMS(key: u32, shift: u32, sgid: u32, sgsz: u32, lane_mask_lt: u32, s_offset: u32) -> u32 {
       var eq_mask = 0xffffffffu;
       /* loop through the bits in this digit place */
@@ -356,8 +362,11 @@ export class OneSweepSort extends BaseSort {
          * subgroup ID when we allocated it into KEYS_PER_THREAD blocks
          * perhaps we are assuming KEYS_PER_THREAD > number of subgroups */
         pre_inc = atomicAdd(&wg_warpHist[((key >> shift) & RADIX_MASK) + s_offset], out + 1u);
-        /* pre_inc now reflects the number of threads seen to date that have my digit (even
-         * from previous calls to WLMS) ...*/
+        /* wg_warpHist[s_offset:s_offset+RADIX] is now a per-digit histogram up to and including
+         * all digits seen so far by this subgroup */
+        /* pre_inc now reflects the number of threads seen to date that have MY digit
+         * (including previous digits seen by this subgroup that were accumulated from previous
+         * calls to WLMS) ...*/
       }
 
       workgroupBarrier();
@@ -400,10 +409,14 @@ export class OneSweepSort extends BaseSort {
 
       let sid = builtinsNonuniform.lidx / sgsz;  // Caution 1D workgroup ONLY! Ok, but technically not in HLSL spec
 
+      /** how many RADIX-sized blocks do we allocate within wg_warpHist?
+       * minimum of KEYS_PER_THREAD and number of subgroups
+       * it would seem like min() would be a better approach here
+       * but secretly I think it's max() not min()
+       */
+      // let warp_hists_size = clamp(BLOCK_DIM / sgsz * RADIX, 0u, PART_SIZE); // clamped to [0, PART_SIZE]
+      let warp_hists_size = min(BLOCK_DIM / sgsz * RADIX, PART_SIZE);
       /* set all of wg_warpHist to 0 */
-      /* PART_SIZE = 256 * 15 */
-      /* BLOCK_DIM = 256; 256 / 32 * 256 */
-      let warp_hists_size = clamp(BLOCK_DIM / sgsz * RADIX, 0u, PART_SIZE); // clamped to [0, PART_SIZE]
       for (var i = builtinsNonuniform.lidx; i < warp_hists_size; i += BLOCK_DIM) {
         atomicStore(&wg_warpHist[i], 0u);
       }
@@ -439,8 +452,7 @@ export class OneSweepSort extends BaseSort {
         }
       }
 
-      /** each key computes an offset for future placement
-       * We are computing a histogram per subgroup
+      /** We are computing a histogram per subgroup
        * Note the call to WLMS also populates wg_warpHist
        */
       var offsets = array<u32, KEYS_PER_THREAD>();
@@ -449,6 +461,8 @@ export class OneSweepSort extends BaseSort {
         let lane_mask_lt = (1u << builtinsNonuniform.sgid) - 1u;
         let s_offset = sid * RADIX;
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
+          /* offsets[k] reflects the number of digits seen by this subgroup
+           * to date that match MY digit */
           offsets[k] = WLMS(keys[k], shift, builtinsNonuniform.sgid, sgsz, lane_mask_lt, s_offset);
         }
       }
@@ -464,11 +478,19 @@ export class OneSweepSort extends BaseSort {
       @diagnostic(off, subgroup_uniformity)
       if (builtinsNonuniform.lidx < RADIX) {
         /* activate only RADIX threads */
+        /** let's look at the counts for thread i of wg_warpHist[i,i+RADIX,i+2*RADIX,...]
+         * and call them [a,b,c,...]
+         */
         local_reduction = atomicLoad(&wg_warpHist[builtinsNonuniform.lidx]);
+        /* local_reduction now equals a */
+        /* this for loop walks through the results of different subgroup histograms */
         for (var i = builtinsNonuniform.lidx + RADIX; i < warp_hists_size; i += RADIX) {
           local_reduction += atomicLoad(&wg_warpHist[i]);
           atomicStore(&wg_warpHist[i], local_reduction - atomicLoad(&wg_warpHist[i]));
         }
+        /* local_reduction for thread i now contains the total number of seen digits with value i */
+        /* now wg_warpHist[i,i+RADIX,i+2*RADIX,...] contains [a,a,a+b,a+b+c,...] */
+        /* this is really weird because it's neither an inclusive nor exclusive scan */
 
         /* last workgroup does nothing because no other workgroup needs its data */
         if (partid < sortParameters.thread_blocks - 1u) {
@@ -486,7 +508,7 @@ export class OneSweepSort extends BaseSort {
       workgroupBarrier();
 
       @diagnostic(off, subgroup_uniformity)
-      /* diagnostic off because this code is "am I subgroup 0" */
+      /* diagnostic off because this code is "am I subgroup 0" and thus uniform */
       if (isSubgroupZero(builtinsNonuniform.lidx, sgsz)) {
         let pred = builtinsNonuniform.lidx < RADIX / sgsz;
         let t = subgroupExclusiveAdd(select(0u, wg_localHist[builtinsNonuniform.lidx * sgsz], pred));
