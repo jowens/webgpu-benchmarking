@@ -66,10 +66,10 @@ export class OneSweepSort extends BaseSort {
     const MIN_SUBGROUP_SIZE = 4u;
     const MAX_REDUCE_SIZE = BLOCK_DIM / MIN_SUBGROUP_SIZE;
 
-    const FLAG_NOT_READY = 0u;
-    const FLAG_REDUCTION = 1u;
-    const FLAG_INCLUSIVE = 2u;
-    const FLAG_MASK = 3u;
+    const FLAG_NOT_READY = 0u << 30;
+    const FLAG_REDUCTION = 1u << 30;
+    const FLAG_INCLUSIVE = 2u << 30;
+    const FLAG_MASK = 3u << 30;
 
     /** NOTE kernel code below requires that RADIX is multiple of subgroup size
      * there's a diagnostic that asserts subgroup uniformity that depends on this
@@ -181,9 +181,12 @@ export class OneSweepSort extends BaseSort {
      *   - [512, 768) ...                      keysIn[23:16] ...             2
      *   - [768, 1024) ...                     keysIn[31:24] ...             3
      * Output: global passHist[]
+     *   - this is overallocated; we only use 1/nth of its space in this kernel,
+     *     where n is the number of sort passes
      * Launch parameters: SORT_PASSES workgroups (32b keys / 8b radix = 4 wkgps)
      * Action: Compute the global bin offset for every digit in each digit place.
      *         Each workgroup computes a different digit place.
+     *         This is just an exclusive prefix-sum of each digit-place's hist bucket.
      */
     @compute @workgroup_size(BLOCK_DIM, 1, 1)
     fn onesweep_scan(builtinsUniform: BuiltinsUniform,
@@ -237,9 +240,12 @@ export class OneSweepSort extends BaseSort {
 
       /** passHist[] now contains the global bin offset for every digit in each digit place,
        * tagged with FLAG_INCLUSIVE */
+      /* TODO: What is the "constant" (1) on the next line? */
+      /* TODO:     let pass_index = threadid.x + info.thread_blocks * wgid.x * RADIX; */
+      /* 1) Yes we are using the number of threadblocks for the previous kernel. The reason for this is because, we need to make 4 8-bit passes to sort a 32-bit key, and we want don't want to waste precious bind space. So we make one 4x long array. We do the exclusive scan on our global histogram kernel results, then we place these results at the beginning of each section with the inclusive flag. This makes the logic later on a little easier because we know for sure the inclusive flag exists. */
       let pass_index = builtinsNonuniform.lidx + sortParameters.thread_blocks * builtinsUniform.wgid.x * RADIX;
       atomicStore(&passHist[pass_index], ((subgroupExclusiveAdd(scan) +
-        select(0u, wg_scan[sid - 1u], builtinsNonuniform.lidx >= sgsz)) << 2u) | FLAG_INCLUSIVE);
+        select(0u, wg_scan[sid - 1u], builtinsNonuniform.lidx >= sgsz)) & ~FLAG_MASK) | FLAG_INCLUSIVE);
     }
 
     var<workgroup> wg_warpHist: array<atomic<u32>, PART_SIZE>;
@@ -277,6 +283,16 @@ export class OneSweepSort extends BaseSort {
      * Action:
      */
     /* this is called 4 times, once for each digit-place. sortParameters.shift is {0,8,16,24}. */
+    /** algorithmic flow:
+     * Load Keys
+     * Warp Level Multisplit->Make a per warp histogram
+     * Exclusive Scan Circular Shift up the warp histograms
+     * Exclusive Scan across the histogram total
+     * Update the in register offsets so you can scatter to shared memory
+     * Lookback
+     * Scatter to shared memory
+     * Scatter from shared to global
+     */
     @compute @workgroup_size(BLOCK_DIM, 1, 1)
     fn onesweep_pass(builtinsUniform: BuiltinsUniform,
         builtinsNonuniform: BuiltinsNonuniform) {
@@ -347,7 +363,7 @@ export class OneSweepSort extends BaseSort {
         if (partid < sortParameters.thread_blocks - 1u) {
           let pass_index = builtinsNonuniform.lidx + (partid + 1u) * RADIX +
             sortParameters.thread_blocks * (sortParameters.shift >> 3u) * RADIX;
-          atomicStore(&passHist[pass_index], (local_reduction << 2u) | FLAG_REDUCTION);
+          atomicStore(&passHist[pass_index], (local_reduction & ~FLAG_MASK) | FLAG_REDUCTION);
         }
 
         let lane_mask = sgsz - 1u;
@@ -401,7 +417,7 @@ export class OneSweepSort extends BaseSort {
             if ((flagPayload & FLAG_MASK) == FLAG_INCLUSIVE) {
               if (partid < sortParameters.thread_blocks - 1u) {
                 atomicStore(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
-                  ((prev_reduction + local_reduction) << 2u) | FLAG_INCLUSIVE);
+                  ((prev_reduction + local_reduction) & ~FLAG_MASK) | FLAG_INCLUSIVE);
               }
               wg_localHist[builtinsNonuniform.lidx] = prev_reduction - wg_localHist[builtinsNonuniform.lidx];
               break;
@@ -464,7 +480,7 @@ export class OneSweepSort extends BaseSort {
     ]);
     this.sortBumpSize = 4 * 4; // size: (4usize * std::mem::size_of::<u32>())
     this.histSize = this.SORT_PASSES * this.RADIX * 4; // (((SORT_PASSES * RADIX) as usize) * std::mem::size_of::<u32>())
-    this.passHistSize = this.passWorkgroupCount * this.histSize; // ((thread_blocks * (RADIX * SORT_PASSES) as usize) * std::mem::size_of::<u32>())
+    this.passHistSize = this.passWorkgroupCount * this.histSize; // ((pass_thread_blocks * (RADIX * SORT_PASSES) as usize) * std::mem::size_of::<u32>())
   }
   compute() {
     this.finalizeRuntimeParameters();
@@ -524,10 +540,21 @@ export class OneSweepSort extends BaseSort {
         entryPoint: "global_hist",
         bufferTypes,
         bindings,
-        label: `OneSweep sort (${this.type}) global_hist with decoupled lookback/decoupled fallback [subgroups: ${this.useSubgroups}]`,
+        label: `OneSweep sort (${this.type}) global_hist [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
           return [this.reduceWorkgroupCount];
+        },
+      }),
+      new Kernel({
+        kernel: this.sortOneSweepWGSL,
+        entryPoint: "onesweep_scan",
+        bufferTypes,
+        bindings,
+        label: `OneSweep sort (${this.type}) onesweep_scan [subgroups: ${this.useSubgroups}]`,
+        logKernelCodeToConsole: false,
+        getDispatchGeometry: () => {
+          return [this.SORT_PASSES];
         },
       }),
     ];
