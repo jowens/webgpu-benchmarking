@@ -427,14 +427,14 @@ export class OneSweepSort extends BaseSort {
 
       let sid = builtinsNonuniform.lidx / sgsz;  // Caution 1D workgroup ONLY! Ok, but technically not in HLSL spec
 
-      /** how many RADIX-sized blocks do we allocate within wg_warpHist?
-       * minimum of KEYS_PER_THREAD and number of subgroups
-       * it would seem like min() would be a better approach here
-       * but secretly I think it's max() not min()
+      /** Q: how many RADIX-sized blocks do we allocate within wg_warpHist?
+       * A: Minimum of KEYS_PER_THREAD and number of subgroups
+       * The size of our histograms will typically be less than the size of the partition
+       * tile. We only need to clear the shared mem for those hists, not the entire partition size.
+       * The purpose of the warpHists variable is to hold the total size of histograms across the workgroup.
        */
-      // let warp_hists_size = clamp(BLOCK_DIM / sgsz * RADIX, 0u, PART_SIZE); // clamped to [0, PART_SIZE]
       let warp_hists_size = min(BLOCK_DIM / sgsz * RADIX, PART_SIZE);
-      /* set all of wg_warpHist to 0 */
+      /* set the histogram portion of wg_warpHist to 0 */
       for (var i = builtinsNonuniform.lidx; i < warp_hists_size; i += BLOCK_DIM) {
         atomicStore(&wg_warpHist[i], 0u);
       }
@@ -464,7 +464,7 @@ export class OneSweepSort extends BaseSort {
         if (partid == builtinsUniform.nwg.x - 1) {
           for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
             /* warning: u32-specific */
-            keys[k] = select(0xffffffffu, keysIn[i], i < sortParameters.length);
+            keys[k] = select(0xffffffffu, keysIn[i], i < arrayLength(&keysIn));
             i += sgsz;
           }
         }
@@ -512,7 +512,7 @@ export class OneSweepSort extends BaseSort {
         /* this seems odd, but we'll use these values below when we do a circular shift */
 
         /* last workgroup does nothing because no other workgroup needs its data */
-        if (partid < sortParameters.thread_blocks - 1u) { /* not the last workgroup */
+        if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
           /* update the spine with local_reduction */
           /* the sortParameters.thread_blocks ... picks the right digit within passHist */
           /* then the partid + 1u is indexing into the thread-block local histograms */
@@ -523,7 +523,7 @@ export class OneSweepSort extends BaseSort {
            * So posting the digit counts HAS to happen there.
           */
           let pass_index = builtinsNonuniform.lidx + (partid + 1u) * RADIX +
-            sortParameters.thread_blocks * (sortParameters.shift >> 3u) * RADIX;
+          builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
           atomicStore(&passHist[pass_index], (local_reduction & ~FLAG_MASK) | FLAG_REDUCTION);
         }
         /**
@@ -550,12 +550,15 @@ export class OneSweepSort extends BaseSort {
         let pred = builtinsNonuniform.lidx < RADIX / sgsz; /* activate threads = number of subgroups */
         let t = subgroupExclusiveAdd(select(0u, wg_localHist[builtinsNonuniform.lidx * sgsz], pred));
         if (pred) {
+          /* this populates the local spine */
           wg_localHist[builtinsNonuniform.lidx * sgsz] = t;
         }
       }
       workgroupBarrier();
 
       if (builtinsNonuniform.lidx < RADIX && builtinsNonuniform.sgid != 0u) {
+        /* if I'm not the first thread in my subgroup, add the value from the local spine to my local val */
+        /* this completes the scan */
         wg_localHist[builtinsNonuniform.lidx] += wg_localHist[builtinsNonuniform.lidx / sgsz * sgsz];
       }
       workgroupBarrier();
@@ -563,10 +566,10 @@ export class OneSweepSort extends BaseSort {
 
       /**
        * Next: we update the per key offsets to get the correct scattering locations into shared memory.
-       * Idiomatically thats: "Add my warp-private result, to the result at my warp histogram, to the
-       * result across the whole workgroup (which we stored at warp histogram 0)."
-       * The trick here is that for warpid 0, the result at my warp histogram is the result across
-       * the workgroup so that all works out.
+       * Idiomatically that's: "Add my subgroup-private result, to the result at my subgroup histogram, to the
+       * result across the whole workgroup (which we stored in subgroup histogram 0)."
+       * The trick here is that for sgid 0, the result at my subgroup histogram is the result across
+       * the workgroup.
        */
       if (isSubgroupZero(builtinsNonuniform.lidx, sgsz)) {
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
@@ -581,7 +584,8 @@ export class OneSweepSort extends BaseSort {
       }
       workgroupBarrier();
 
-      /* Warp histograms are no longer needed; scatter keys into shared memory. */
+      /** Warp histograms are no longer needed; now warpHist stores keys.
+       * Scatter keys into shared memory. */
       for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
         atomicStore(&wg_warpHist[offsets[k]], keys[k]);
       }
@@ -591,13 +595,13 @@ export class OneSweepSort extends BaseSort {
       if (builtinsNonuniform.lidx < RADIX) {
         var prev_reduction = 0u;
         var lookbackid = partid;
-        let part_offset = sortParameters.thread_blocks * (sortParameters.shift >> 3u) * RADIX;
+        let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
         while (true) {
           let flagPayload = atomicLoad(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX]);
           if ((flagPayload & FLAG_MASK) > FLAG_NOT_READY) {
             prev_reduction += flagPayload >> 2u;
             if ((flagPayload & FLAG_MASK) == FLAG_INCLUSIVE) {
-              if (partid < sortParameters.thread_blocks - 1u) { /* not the last workgroup */
+              if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
                 atomicStore(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
                   ((prev_reduction + local_reduction) & ~FLAG_MASK) | FLAG_INCLUSIVE);
               }
@@ -615,7 +619,7 @@ export class OneSweepSort extends BaseSort {
 
       /** Scatter keys from shared memory to global memory. Getting the correct scattering location
        * is dependent on the curious-looking line above. */
-      if (partid < sortParameters.thread_blocks - 1u) { /* not the last workgroup */
+      if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
         var i = builtinsNonuniform.lidx;
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
           var whi = atomicLoad(&wg_warpHist[i]);
@@ -624,8 +628,8 @@ export class OneSweepSort extends BaseSort {
         }
       }
 
-      if (partid == sortParameters.thread_blocks - 1u) { /* last workgroup */
-        let final_size = sortParameters.length - partid * PART_SIZE;
+      if (partid == builtinsUniform.nwg.x - 1u) { /* last workgroup */
+        let final_size = arrayLength(&keysIn) - partid * PART_SIZE;
         for (var i = builtinsNonuniform.lidx; i < final_size; i += BLOCK_DIM) {
           var whi = atomicLoad(&wg_warpHist[i]);
           keysOut[wg_localHist[(whi >> sortParameters.shift) & RADIX_MASK] + i] = whi;
@@ -741,6 +745,87 @@ export class OneSweepSort extends BaseSort {
         logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
           return [this.SORT_PASSES];
+        },
+      }),
+      /* todo: add loop construct */
+      new WriteGPUBuffer({
+        label: "sortParameters",
+        cpuSource: new Uint32Array([
+          this.inputLength,
+          0 /* each pass: {0,8,16,24} */,
+          this.passWorkgroupCount,
+          0 /* currently unused */,
+        ]),
+      }),
+      new Kernel({
+        kernel: this.sortOneSweepWGSL,
+        entryPoint: "onesweep_pass",
+        bufferTypes,
+        bindings,
+        label: `OneSweep sort (${this.type}) pass shift 0 [subgroups: ${this.useSubgroups}]`,
+        logKernelCodeToConsole: false,
+        getDispatchGeometry: () => {
+          return [this.passWorkgroupCount];
+        },
+      }),
+      new WriteGPUBuffer({
+        label: "sortParameters",
+        cpuSource: new Uint32Array([
+          this.inputLength,
+          8 /* each pass: {0,8,16,24} */,
+          this.passWorkgroupCount,
+          0 /* currently unused */,
+        ]),
+      }),
+      new Kernel({
+        kernel: this.sortOneSweepWGSL,
+        entryPoint: "onesweep_pass",
+        bufferTypes,
+        bindings,
+        label: `OneSweep sort (${this.type}) pass shift 8 [subgroups: ${this.useSubgroups}]`,
+        logKernelCodeToConsole: false,
+        getDispatchGeometry: () => {
+          return [this.passWorkgroupCount];
+        },
+      }),
+      new WriteGPUBuffer({
+        label: "sortParameters",
+        cpuSource: new Uint32Array([
+          this.inputLength,
+          16 /* each pass: {0,8,16,24} */,
+          this.passWorkgroupCount,
+          0 /* currently unused */,
+        ]),
+      }),
+      new Kernel({
+        kernel: this.sortOneSweepWGSL,
+        entryPoint: "onesweep_pass",
+        bufferTypes,
+        bindings,
+        label: `OneSweep sort (${this.type}) pass shift 16 [subgroups: ${this.useSubgroups}]`,
+        logKernelCodeToConsole: false,
+        getDispatchGeometry: () => {
+          return [this.passWorkgroupCount];
+        },
+      }),
+      new WriteGPUBuffer({
+        label: "sortParameters",
+        cpuSource: new Uint32Array([
+          this.inputLength,
+          24 /* each pass: {0,8,16,24} */,
+          this.passWorkgroupCount,
+          0 /* currently unused */,
+        ]),
+      }),
+      new Kernel({
+        kernel: this.sortOneSweepWGSL,
+        entryPoint: "onesweep_pass",
+        bufferTypes,
+        bindings,
+        label: `OneSweep sort (${this.type}) pass shift 24 [subgroups: ${this.useSubgroups}]`,
+        logKernelCodeToConsole: false,
+        getDispatchGeometry: () => {
+          return [this.passWorkgroupCount];
         },
       }),
     ];
