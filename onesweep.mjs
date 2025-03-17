@@ -651,7 +651,6 @@ export class OneSweepSort extends BaseSort {
     this.BLOCK_DIM = 256;
     this.KEYS_PER_THREAD = 15;
     this.PART_SIZE = this.KEYS_PER_THREAD * this.BLOCK_DIM;
-    this.REDUCE_KEYS_PER_THREAD = 30;
     this.REDUCE_BLOCK_DIM = 128;
     this.REDUCE_KEYS_PER_THREAD = 30;
     this.REDUCE_PART_SIZE = this.REDUCE_KEYS_PER_THREAD * this.REDUCE_BLOCK_DIM;
@@ -830,6 +829,147 @@ export class OneSweepSort extends BaseSort {
       }),
     ];
   }
+  validate = (args = {}) => {
+    /** if we pass in buffers, use them, otherwise use the named buffers
+     * that are stored in the primitive */
+    /* assumes that cpuBuffers are populated with useful data */
+    const memsrc =
+      args.inputKeys?.cpuBuffer ??
+      args.inputKeys ??
+      this.getBuffer("keysIn").cpuBuffer;
+    const memdest =
+      args.outputKeys?.cpuBuffer ??
+      args.outputKeys ??
+      this.getBuffer("keysOut").cpuBuffer;
+    let referenceOutput;
+    switch (args?.outputKeys?.label) {
+      case "hist":
+      case "passHist": {
+        const hist = new Uint32Array(
+          this.histSize / Uint32Array.BYTES_PER_ELEMENT
+        );
+        for (let i = 0; i < memsrc.length; i++) {
+          for (let j = 0; j < this.SORT_PASSES; j++) {
+            const histOffset = j * this.RADIX;
+            const bucket =
+              (memsrc[i] >>> (j * this.RADIX_BITS)) & (this.RADIX - 1);
+            hist[histOffset + bucket]++;
+          }
+        }
+        if (args?.outputKeys?.label === "hist") {
+          referenceOutput = hist;
+          break;
+        }
+        const passHist = new Uint32Array(
+          this.passHistSize / Uint32Array.BYTES_PER_ELEMENT
+        );
+        const FLAG_INCLUSIVE = 2 << 30;
+        /* divide into 4 pieces (4 passes), write only first RADIX (256) elements of each */
+        for (let j = 0; j < this.SORT_PASSES; j++) {
+          const histOffset = j * this.RADIX;
+          const passHistOffset = j * (passHist.length / this.SORT_PASSES);
+          let acc = 0;
+          for (let bucket = 0; bucket < this.RADIX; bucket++) {
+            passHist[passHistOffset + bucket] = acc | FLAG_INCLUSIVE;
+            acc += hist[histOffset + bucket];
+          }
+        }
+        if (args?.outputKeys?.label === "passHist") {
+          referenceOutput = passHist;
+          break;
+        }
+        break;
+      }
+      case undefined:
+      default:
+        referenceOutput = memsrc.slice().sort();
+        break;
+    }
+    const isValidComparison = (args = {}) => {
+      /* skip some comparisons if validation is not meaningful */
+      switch (args.label) {
+        case "passHist": {
+          const passHistLength =
+            this.passHistSize / Uint32Array.BYTES_PER_ELEMENT;
+          for (let j = 0; j < this.SORT_PASSES; j++) {
+            const passHistOffset = j * (passHistLength / this.SORT_PASSES);
+            if (
+              args.i >= passHistOffset &&
+              args.i < passHistOffset + this.RADIX
+            ) {
+              return true;
+            }
+          }
+          return false;
+        }
+        default:
+          return true;
+      }
+    };
+    function validates(args) {
+      return args.cpu == args.gpu;
+    }
+    let returnString = "";
+    let allowedErrors = 5;
+    for (let i = 0; i < memdest.length; i++) {
+      if (allowedErrors == 0) {
+        break;
+      }
+      const compare = {
+        cpu: referenceOutput[i],
+        gpu: memdest[i],
+        datatype: this.datatype,
+        i,
+        label: args?.outputKeys?.label,
+      };
+      if (isValidComparison(compare) && !validates(compare)) {
+        returnString += `\nElement ${i}: expected ${
+          referenceOutput[i]
+        }, instead saw ${memdest[i]} (diff: ${Math.abs(
+          (referenceOutput[i] - memdest[i]) / referenceOutput[i]
+        )}).`;
+        if (this.getBuffer("debugBuffer")) {
+          returnString += ` debug[${i}] = ${
+            this.getBuffer("debugBuffer").cpuBuffer[i]
+          }.`;
+        }
+        if (this.getBuffer("debug2Buffer")) {
+          returnString += ` debug2[${i}] = ${
+            this.getBuffer("debug2Buffer").cpuBuffer[i]
+          }.`;
+        }
+        allowedErrors--;
+      }
+    }
+    if (returnString !== "") {
+      console.log(
+        this.label,
+        this.type,
+        "with input",
+        memsrc,
+        "should validate to (reference)",
+        args?.outputKeys?.label ?? "",
+        referenceOutput,
+        "and actually validates to (GPU output)",
+        memdest,
+        this.getBuffer("debugBuffer") ? "\ndebugBuffer" : "",
+        this.getBuffer("debugBuffer")
+          ? this.getBuffer("debugBuffer").cpuBuffer
+          : "",
+        this.getBuffer("debug2Buffer") ? "\ndebug2Buffer" : "",
+        this.getBuffer("debug2Buffer")
+          ? this.getBuffer("debug2Buffer").cpuBuffer
+          : "",
+        "length is",
+        memsrc.length,
+        "memsrc[",
+        memsrc.length - 1,
+        "] is",
+        memsrc[memsrc.length - 1]
+      );
+    }
+    return returnString;
+  };
 }
 
 /* fn set_compute_pass(
