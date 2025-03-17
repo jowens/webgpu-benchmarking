@@ -57,6 +57,7 @@ async function main(navigator) {
     requiredLimits: {
       maxBufferSize: 4294967296,
       maxStorageBufferBindingSize: 4294967292,
+      maxComputeWorkgroupStorageSize: 32768,
     },
     requiredFeatures: [
       ...(hasTimestampQuery ? ["timestamp-query"] : []),
