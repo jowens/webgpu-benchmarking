@@ -57,8 +57,8 @@ export class Buffer {
       this.#cpuBuffer = new (datatypeToTypedArray(this.datatype))(this.length);
       if (this.args.initializeCPUBuffer) {
         for (let i = 0; i < this.length; i++) {
+          let val;
           if (this.datatype == "f32") {
-            let val;
             switch (this.args.initializeCPUBuffer) {
               case "randomizeMinusOneToOne":
                 /* [-1, 1] */
@@ -77,7 +77,15 @@ export class Buffer {
             }
             this.#cpuBuffer[i] = val;
           } else if (this.datatype == "u32") {
-            this.#cpuBuffer[i] = i == 0 ? 0 : this.#cpuBuffer[i - 1] + 1; // trying to get u32s
+            switch (this.args.initializeCPUBuffer) {
+              case "xor-beef":
+                val = i ^ 0xbeef;
+                break;
+              default:
+                val = i == 0 ? 0 : this.#cpuBuffer[i - 1] + 1; // trying to get u32s
+                break;
+            }
+            this.#cpuBuffer[i] = val;
           }
           // otherwise, initialize nothing
         }

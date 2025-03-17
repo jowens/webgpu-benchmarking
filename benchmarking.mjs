@@ -154,6 +154,7 @@ async function main(navigator) {
             createCPUBuffer: true,
             // initializeCPUBuffer: true /* fill with default data */,
             initializeCPUBuffer:
+              testSuite.initializeCPUBuffer ??
               "randomizeAbsUnder1024" /* fill with default data */,
             createGPUBuffer: true,
             initializeGPUBuffer: true /* with CPU data */,
