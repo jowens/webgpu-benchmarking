@@ -110,7 +110,7 @@ async function main(navigator) {
   testSuites = [SortOneSweepRegressionSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
-  let validations = { done: 0, errors: 0, tested: undefined };
+  let validations = { done: 0, errors: 0 };
   for (const testSuite of testSuites) {
     console.log(testSuite);
     const lastTestSeen = {
@@ -120,7 +120,9 @@ async function main(navigator) {
     /* do we perform a computation? */
     if (testSuite?.primitive?.prototype.compute) {
       const uniqueRuns = new Set(); // if uniqueRuns is defined, don't run dups
-      let testInputBuffer;
+      let testInputBuffer, testOriginalInputBuffer, testOutputBuffer;
+      const inputBufferIsOutputBuffer =
+        testSuite.category == "sort" && testSuite.testSuite == "onesweep";
       for (const params of combinations(testSuite.params)) {
         if (params.binopbase && params.datatype && !params.binop) {
           /** we're iterating over both binopbase and datatype, which we can use
@@ -158,38 +160,52 @@ async function main(navigator) {
               "randomizeAbsUnder1024" /* fill with default data */,
             createGPUBuffer: true,
             initializeGPUBuffer: true /* with CPU data */,
+            createMappableGPUBuffer: inputBufferIsOutputBuffer,
           });
         }
         if (testSuite.category == "sort" && testSuite.testSuite == "onesweep") {
-          testInputBuffer.label = "keysIn"; /* sort wants a different name */
+          testInputBuffer.label = "keysInOut"; /* sort wants a different name */
+          testOriginalInputBuffer = testInputBuffer.cpuBuffer.slice(); // copy
         }
         primitive.registerBuffer(testInputBuffer);
 
-        const testOutputBuffer = new Buffer({
-          device,
-          datatype:
-            testSuite.category === "subgroups" &&
-            testSuite.testSuite === "subgroupBallot"
-              ? "vec4u"
-              : primitive.datatype,
-          length:
-            "type" in primitive && primitive.type == "reduce"
-              ? 1
-              : primitive.inputLength,
-          label: "outputBuffer",
-          createGPUBuffer: true,
-          createMappableGPUBuffer: true,
-        });
         if (testSuite.category == "sort" && testSuite.testSuite == "onesweep") {
-          testOutputBuffer.label = "keysOut"; /* sort wants a different name */
-        }
+          /* register the temp buffer */
+          primitive.registerBuffer(
+            new Buffer({
+              device,
+              datatype: primitive.datatype,
+              length: primitive.inputLength,
+              label: "keysTemp",
+              createCPUBuffer: true /* debugging */,
+              createGPUBuffer: true,
+              createMappableGPUBuffer: true /* debugging */,
+            })
+          );
+          testOutputBuffer = testInputBuffer; /* two names for same buffer */
+        } else {
+          testOutputBuffer = new Buffer({
+            device,
+            datatype:
+              testSuite.category === "subgroups" &&
+              testSuite.testSuite === "subgroupBallot"
+                ? "vec4u"
+                : primitive.datatype,
+            length:
+              "type" in primitive && primitive.type == "reduce"
+                ? 1
+                : primitive.inputLength,
+            label: "outputBuffer",
+            createGPUBuffer: true,
+            createMappableGPUBuffer: true,
+          });
 
-        primitive.registerBuffer(testOutputBuffer);
+          primitive.registerBuffer(testOutputBuffer);
+        }
 
         if (testSuite.category == "sort" && testSuite.testSuite == "onesweep") {
           /* these will eventually need to be named variables */
           /* if a key-only sort, initialize with epsilon length */
-          /* first payloadIn ... */
           const length =
             primitive.type == "keyvalue" ? testInputBuffer.length : 1;
           primitive.registerBuffer(
@@ -197,20 +213,19 @@ async function main(navigator) {
               device,
               datatype: primitive.datatype,
               length,
-              label: "payloadIn",
+              label: "payloadInOut",
               createCPUBuffer: true,
               initializeCPUBuffer: true /* fill with default data */,
               createGPUBuffer: true,
               initializeGPUBuffer: true /* with CPU data */,
             })
           );
-          /* ... then payloadOut */
           primitive.registerBuffer(
             new Buffer({
               device,
               datatype: primitive.datatype,
               length,
-              label: "payloadOut",
+              label: "payloadTemp",
               createCPUBuffer: true,
               createGPUBuffer: true,
             })
@@ -261,6 +276,8 @@ async function main(navigator) {
         if (testSuite.validate && primitive.validate) {
           // submit ONE run just for correctness
           await primitive.execute();
+          console.log(testInputBuffer);
+          console.log(testOutputBuffer);
           await testOutputBuffer.copyGPUToCPU();
           if (testDebugBuffer) {
             await testDebugBuffer.copyGPUToCPU();
@@ -272,11 +289,20 @@ async function main(navigator) {
           if (primitive.getBuffer("passHist")) {
             await primitive.getBuffer("passHist").copyGPUToCPU();
           }
-          validations.tested = "passHist";
-          const errorstr = primitive.validate({
-            /* this is just for sort testing, validate vs. a different buffer */
-            outputKeys: primitive.getBuffer(validations.tested),
-          });
+          if (primitive.getBuffer("keysTemp")) {
+            await primitive.getBuffer("keysTemp").copyGPUToCPU();
+          }
+          let validateArgs = {};
+          if (
+            testSuite.category == "sort" &&
+            testSuite.testSuite == "onesweep"
+          ) {
+            validateArgs = {
+              inputKeys: testOriginalInputBuffer,
+              outputKeys: primitive.getBuffer("keysTemp"),
+            };
+          }
+          const errorstr = primitive.validate(validateArgs);
           if (errorstr == "") {
             // console.info("Validation passed", params);
           } else {
