@@ -267,6 +267,7 @@ export class OneSweepSort extends BaseSort {
      *       in global_hist. These regions are completely unused in this kernel.
      *   - The global and local offsets are all in one memory region simply so we
      *     don't have to bind multiple memory regions
+     *   - passHist stores 30b values that are tagged (in the 2 MSBs) with FLAG_*
      * Launch parameters:
      *   - SORT_PASSES workgroups (32b keys / 8b radix = 4 wkgps)
      *   - Each workgroup has BLOCK_DIM threads == RADIX
@@ -526,29 +527,32 @@ export class OneSweepSort extends BaseSort {
 
         /* last workgroup does nothing because no other workgroup needs its data */
         if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
-          /* update the spine with local_reduction */
-          /* the sortParameters.thread_blocks ... picks the right digit within passHist */
-          /* then the partid + 1u is indexing into the thread-block local histograms */
+          /* update the spine with local_reduction. The address within the spine is
+           * the sum of which digit, which thread-block-local histogram within that
+           * digit, and which of the RADIX buckets within that t-b-l histogram */
           /** For the purpose of the lookback, we need to post the total count per digit
            *    into the mega-spine.
            * However, for the correct shared memory offsets, we need to do that second,
            *    workgroup-wide exclusive scan over the total count per digit.
            * So posting the digit counts HAS to happen there.
           */
-          let pass_index = builtinsNonuniform.lidx + (partid + 1u) * RADIX +
-          builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
+          let pass_index =
+            builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX + /* which digit */
+            (partid + 1u) * RADIX + /* which thread-block-local histogram within that digit */
+            builtinsNonuniform.lidx; /* which of the RADIX buckets within that t-b-l histogram */
           atomicStore(&passHist[pass_index], (local_reduction & ~FLAG_MASK) | FLAG_REDUCTION);
         }
         /**
          * XXX figure out where to put this comment
          * First we scan "up" the histograms. Each thread does a inclusive circular shift
          * scan per digit, up the warp histograms, which at this point in the algorithm
-         * contain the results from WLMS." Instead of rotating around the subgroup, we
+         * contain the results from WLMS. Instead of rotating around the subgroup, we
          * rotate around the histograms. The histogram in shared memory at the subgroupID 0
          * position now contains the total count, per digit of the tile.
          */
 
-        /* Once posted, we do a standard workgroup-wide exclusive scan, which follows. */
+        /* Once posted, we do a standard workgroup-wide exclusive scan over RADIX threads,
+         * which starts here. */
         let lane_mask = sgsz - 1u;
         let circular_lane_shift = (builtinsNonuniform.sgid + lane_mask) & lane_mask;
         let t = subgroupInclusiveAdd(local_reduction);
@@ -570,19 +574,20 @@ export class OneSweepSort extends BaseSort {
       workgroupBarrier();
 
       if (builtinsNonuniform.lidx < RADIX && builtinsNonuniform.sgid != 0u) {
-        /* if I'm not the first thread in my subgroup, add the value from the local spine to my local val */
-        /* this completes the scan */
+        /* If I'm not the first thread in my subgroup, add the value from the local
+         * spine to my local val. This completes the scan. */
         wg_localHist[builtinsNonuniform.lidx] += wg_localHist[builtinsNonuniform.lidx / sgsz * sgsz];
       }
       workgroupBarrier();
       /* end workgroup-wide exclusive scan */
 
       /**
-       * Next: we update the per key offsets to get the correct scattering locations into shared memory.
-       * Idiomatically that's: "Add my subgroup-private result, to the result at my subgroup histogram, to the
+       * Next: we update the per key offsets to get the correct scattering
+       * locations into shared memory. Idiomatically that's: "Add my
+       * subgroup-private result, to the result at my subgroup histogram, to the
        * result across the whole workgroup (which we stored in subgroup histogram 0)."
-       * The trick here is that for sgid 0, the result at my subgroup histogram is the result across
-       * the workgroup.
+       * The trick here is that for sgid 0, the result at my subgroup histogram
+       * is the result across the workgroup.
        */
       if (isSubgroupZero(builtinsNonuniform.lidx, sgsz)) {
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
@@ -597,8 +602,8 @@ export class OneSweepSort extends BaseSort {
       }
       workgroupBarrier();
 
-      /** Warp histograms are no longer needed; now warpHist stores keys.
-       * Scatter keys into shared memory. */
+      /** Warp histograms are no longer needed; let's now use warpHist
+       * to store keys instead. Scatter keys into warpHist. */
       for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
         atomicStore(&wg_warpHist[offsets[k]], keys[k]);
       }
@@ -609,7 +614,7 @@ export class OneSweepSort extends BaseSort {
         var prev_reduction = 0u;
         var lookbackid = partid;
         let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
-        while (true) {
+        while (true) { /* spin until we get something better than FLAG_NOT_READY */
           let flagPayload = atomicLoad(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX]);
           if ((flagPayload & FLAG_MASK) > FLAG_NOT_READY) {
             prev_reduction += (flagPayload & ~FLAG_MASK);
@@ -622,7 +627,7 @@ export class OneSweepSort extends BaseSort {
                * code block. */
               wg_localHist[builtinsNonuniform.lidx] = prev_reduction - wg_localHist[builtinsNonuniform.lidx];
               break;
-            } else {
+            } else { /* FLAG_REDUCTION */
               lookbackid -= 1u;
             }
           }

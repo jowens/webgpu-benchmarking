@@ -276,8 +276,6 @@ async function main(navigator) {
         if (testSuite.validate && primitive.validate) {
           // submit ONE run just for correctness
           await primitive.execute();
-          console.log(testInputBuffer);
-          console.log(testOutputBuffer);
           await testOutputBuffer.copyGPUToCPU();
           if (testDebugBuffer) {
             await testDebugBuffer.copyGPUToCPU();
@@ -299,6 +297,7 @@ async function main(navigator) {
           ) {
             validateArgs = {
               inputKeys: testOriginalInputBuffer,
+              /* below is just temporary, in the end we get keysInOut */
               outputKeys: primitive.getBuffer("keysTemp"),
             };
           }
