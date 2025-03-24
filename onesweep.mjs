@@ -813,17 +813,20 @@ export class OneSweepSort extends BaseSort {
           if (builtinsNonuniform.lidx == 0) {
             wg_sgCompletionCount_nonatomic = atomicLoad(&wg_sgCompletionCount);
           }
+          workgroupBarrier();
 
-          // Post results into shared memory
-          if (builtinsNonuniform.lidx < RADIX) {
-            /** This curious-looking line is necessary to get the right scattering location in the next
-             * code block. */
-            wg_localHist[builtinsNonuniform.lidx] = lookbackAccumulate - wg_localHist[builtinsNonuniform.lidx];
-          }
+
+          break;
         } /* end if (wg_sgCompletionCount < subgroup_size) */
-      } /* end code block */
 
-      workgroupBarrier();
+        // Post results into shared memory
+        if (builtinsNonuniform.lidx < RADIX) {
+          /** This curious-looking line is necessary to get the right scattering location in the next
+            * code block. */
+          wg_localHist[builtinsNonuniform.lidx] = lookbackAccumulate - wg_localHist[builtinsNonuniform.lidx];
+        }
+        workgroupBarrier();
+      } /* end code block */
 
       /** Scatter keys from shared memory to global memory. Getting the correct scattering location
        * is dependent on the curious-looking line above. */
