@@ -706,6 +706,8 @@ export class OneSweepSort extends BaseSort {
         while (atomicLoad(&wg_sgCompletionCount) < sgsz) { /* loop until every subgroup is done */
           // Read the preceding histogram from the spine
           var flagPayload = 0u;
+          /* turning off diagnostic for sgLookbackComplete is safe; it's only updated an entire subgroup at a time */
+          @diagnostic(off, subgroup_uniformity)
           if (!sgLookbackComplete) {
             if (!lookbackComplete) {
               while (spinCount < MAX_SPIN_COUNT) { /* spin until we get something better than FLAG_NOT_READY */
@@ -794,6 +796,8 @@ export class OneSweepSort extends BaseSort {
               }
               lookbackIndex -= RADIX; // This workgroup looks back in lockstep
               // Have all digits completed their lookbacks?
+              /* turning off diagnostic for sgLookbackComplete is safe; it's only updated an entire subgroup at a time */
+              @diagnostic(off, subgroup_uniformity)
               if (!sgLookbackComplete) {
                 sgLookbackComplete = subgroupAll(lookbackComplete);
                 if (sgLookbackComplete && (sgid == 0)) {
