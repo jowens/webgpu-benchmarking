@@ -426,10 +426,9 @@ export class OneSweepSort extends BaseSort {
 
     var<workgroup> wg_localHist: array<u32, RADIX>;
     var<workgroup> wg_broadcast_tile_id: u32;
-    var<workgroup> wg_control: u32; /* control flag for lookback/fallback */
     /* the next two could be folded into wg_warpHist but are separate for now */
     var<workgroup> wg_sgCompletionCount: atomic<u32>; /* have all our subgroups succeeded? */
-    var<workgroup> wg_incomplete: atomic<u32>; /* did anyone see a thread that didn't complete? */
+    var<workgroup> wg_incomplete: u32; /* did anyone see a thread that didn't complete? */
     var<workgroup> wg_fallback: array<atomic<u32>, RADIX>; /* we can probably find another place to put this that doesn't require a separate allocation */
 
     /* warp-level multisplit function */
@@ -524,9 +523,8 @@ export class OneSweepSort extends BaseSort {
       /* get unique ID for my workgroup (stored in partid) */
       if (builtinsNonuniform.lidx == 0u) {
         wg_broadcast_tile_id = atomicAdd(&sortBump[sortParameters.shift >> 3u], 1u);
-        wg_control = LOCKED; /* lookback/fallback control */
         atomicStore(&wg_sgCompletionCount, 0);
-        atomicStore(&wg_incomplete, 0);
+        wg_incomplete = 0;
       }
       let partid = workgroupUniformLoad(&wg_broadcast_tile_id);
 
@@ -720,7 +718,7 @@ export class OneSweepSort extends BaseSort {
               }
               // Did we find anything with FLAG_NOT_READY? Subgroup thread 0 posts it.
               if (subgroupAll(spinCount == MAX_SPIN_COUNT) && (sgid == 0)) {
-                atomicOr(&wg_incomplete, 1);
+                wg_incomplete = 1; // possibly a race?
               }
             }
 
@@ -728,14 +726,14 @@ export class OneSweepSort extends BaseSort {
             var mustFallback = workgroupUniformLoad(&wg_incomplete);
 
             /* Yes, we have at least one thread that saw FLAG_NOT_READY. Must fallback. */
-            if (mustFallback) {
+            if (mustFallback != 0) {
               /* clear wg_fallback array ... */
               if (builtinsNonuniform.lidx < RADIX) {
                 atomicStore(&wg_fallback[builtinsNonuniform.lidx], 0);
               }
               /* ... and reset wg_incomplete */
               if (builtinsNonuniform.lidx == 0) {
-                atomicStore(&wg_incomplete, 0);
+                wg_incomplete = 0;
               }
               workgroupBarrier();
               /* now let's build a local histogram of this tile in wg_fallback */
