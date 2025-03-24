@@ -428,6 +428,7 @@ export class OneSweepSort extends BaseSort {
     var<workgroup> wg_broadcast_tile_id: u32;
     /* the next two could be folded into wg_warpHist but are separate for now */
     var<workgroup> wg_sgCompletionCount: atomic<u32>; /* have all our subgroups succeeded? */
+    var<workgroup> wg_sgCompletionCount_nonatomic: u32; /* shadows wg_sgCompletionCount, necessary b/c no workgroupUniformAtomicLoad */
     var<workgroup> wg_incomplete: u32; /* did anyone see a thread that didn't complete? */
     var<workgroup> wg_fallback: array<atomic<u32>, RADIX>; /* we can probably find another place to put this that doesn't require a separate allocation */
 
@@ -524,6 +525,7 @@ export class OneSweepSort extends BaseSort {
       if (builtinsNonuniform.lidx == 0u) {
         wg_broadcast_tile_id = atomicAdd(&sortBump[sortParameters.shift >> 3u], 1u);
         atomicStore(&wg_sgCompletionCount, 0);
+        wg_sgCompletionCount_nonatomic = 0;
         wg_incomplete = 0;
       }
       let partid = workgroupUniformLoad(&wg_broadcast_tile_id);
@@ -703,7 +705,7 @@ export class OneSweepSort extends BaseSort {
         let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
         var lookbackIndex = (builtinsNonuniform.lidx & RADIX_MASK) + part_offset + lookbackid * RADIX;
 
-        while (atomicLoad(&wg_sgCompletionCount) < sgsz) { /* loop until every subgroup is done */
+        while (workgroupUniformLoad(&wg_sgCompletionCount_nonatomic) < num_subgroups) { /* loop until every subgroup is done */
           // Read the preceding histogram from the spine
           var flagPayload = 0u;
           /* turning off diagnostic for sgLookbackComplete is safe; it's only updated an entire subgroup at a time */
@@ -759,13 +761,6 @@ export class OneSweepSort extends BaseSort {
               /* atomicMax will do this! */
               /* record what was already there in currentSpine */
               currentSpine = atomicMax(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX], (myFBHistogramEntry & ~FLAG_MASK) | FLAG_REDUCTION);
-
-              // Atomically compares the value referenced by dest with compare_value, stores value in the location referenced by dest if the
-              // values match, returns the original value of dest in original_value.
-              // InterlockedCompareExchange(b_passHist[gtid + PassHistOffset((lookbackIndex >> RADIX_LOG) - e_threadBlocks * CurrentPass())], // dest
-              //                            0, // compare_value
-              //                            FLAG_REDUCTION | g_d[gtid + RADIX] << 2, // value
-              //                            reduceOut); // originalValue
             }
             if (!lookbackComplete) {
               if ((currentSpine & FLAG_MASK) == FLAG_INCLUSIVE) { /* we already had INCLUSIVE in the spine */
@@ -808,6 +803,10 @@ export class OneSweepSort extends BaseSort {
             }
           }
           workgroupBarrier();
+          if (builtinsNonuniform.lidx == 0) {
+            wg_sgCompletionCount_nonatomic = atomicLoad(&wg_sgCompletionCount);
+          }
+
           // Post results into shared memory
           if (builtinsNonuniform.lidx < RADIX) {
             /** This curious-looking line is necessary to get the right scattering location in the next
@@ -1165,7 +1164,7 @@ export class OneSweepSort extends BaseSort {
         }*/
 
 const SortOneSweepRegressionParams = {
-  inputLength: [2048],
+  inputLength: [2048, 4096],
   // inputLength: range(12, 25).map((i) => 2 ** i),
   datatype: ["u32"],
   type: ["keysonly" /* "keyvalue", */],
