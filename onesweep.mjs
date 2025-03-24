@@ -799,6 +799,7 @@ export class OneSweepSort extends BaseSort {
             }
           } /* end check if we need to fallback */
           lookbackIndex -= RADIX; // This workgroup looks back in lockstep
+          lookbackid--;
           // Have all digits completed their lookbacks?
           /* turning off diagnostic for sgLookbackComplete is safe; it's only updated an entire subgroup at a time */
           @diagnostic(off, subgroup_uniformity)
@@ -814,9 +815,6 @@ export class OneSweepSort extends BaseSort {
             wg_sgCompletionCount_nonatomic = atomicLoad(&wg_sgCompletionCount);
           }
           workgroupBarrier();
-
-
-          break;
         } /* end if (wg_sgCompletionCount < subgroup_size) */
 
         // Post results into shared memory
@@ -985,6 +983,27 @@ export class OneSweepSort extends BaseSort {
         bufferTypes,
         bindings,
         label: `OneSweep sort (${this.type}) onesweep_pass shift 0 [subgroups: ${this.useSubgroups}]`,
+        logKernelCodeToConsole: false,
+        logLaunchParameters: true,
+        getDispatchGeometry: () => {
+          return [this.passWorkgroupCount];
+        },
+      }),
+      new WriteGPUBuffer({
+        label: "sortParameters",
+        cpuSource: new Uint32Array([
+          this.inputLength,
+          8 /* each pass: {0,8,16,24} */,
+          this.passWorkgroupCount,
+          0 /* currently unused */,
+        ]),
+      }),
+      new Kernel({
+        kernel: this.sortOneSweepWGSL,
+        entryPoint: "onesweep_pass",
+        bufferTypes,
+        bindings,
+        label: `OneSweep sort (${this.type}) onesweep_pass shift 1 [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         logLaunchParameters: true,
         getDispatchGeometry: () => {
