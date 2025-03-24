@@ -41,6 +41,44 @@ export class OneSweepSort extends BaseSort {
   }
 
   sortOneSweepWGSL = () => {
+    /** Big picture OneSweep algorithm.
+     * We wish to compute a permutation of all keys. This permutation orders
+     *   the keys by the value of a particular digit in that key. We loop through
+     *   the digits starting with the least significant digit. For concreteness,
+     *   the code is focused on 32b keys and 4 passes, each focusing on one 8-bit
+     *   digit. With 8-bit digits, there are 256 digit values, so on each pass,
+     *   we classify each key into one of 256 buckets (radix 256). We perform a
+     *   permutation with each sorting pass.
+     *
+     * For this permutation, we have to compute a destination address for each
+     *   key. That address is the sum of:
+     * (1) The number of keys that fall into a bucket before my bucket
+     * (2) The number of keys that are in my bucket and are processed by a previous
+     *    workgroup
+     * (3) The number of keys that are in my bucket and are processed earlier than
+     *    my key within my workgroup
+     *
+     * We compute (1) by constructing a global histogram of all bucket sizes
+     *   (kernel: global_hist, which constructs a separate histogram for each
+     *   digit) and then running exclusive-sum-scan on these histograms (kernel:
+     *   onesweep_scan).
+     * We compute (2) by first computing the number of keys per bucket within my
+     *   histogram and then using a chained sum scan to retrieve the sum of the
+     *   sizes of the previous workgroup's buckets (kernel: onesweep_pass). We
+     *   add in (1) at the start of this chained scan, so we actually chained-scan
+     *   (1) + (2). The chained scan requires lookback to look at the results of
+     *   this scan, and if the hardware does not offer forward progress guarantees,
+     *   the chained scan also requires fallback to redundantly compute this value.
+     * We compute (3) in (kernel: onesweep_pass) as well, but it is workgroup-
+     *   local only; it does not participate in the chained-scan.
+     *
+     * Given this computed address per key, we could directly scatter each key
+     *   to its location in global memory. However, to improve memory coaclescing,
+     *   we first write keys into workgroup memory and scatter from there. This puts
+     *   neighboring keys next to each other in workgroup memory and significantly
+     *   improves the throughput of the global scatter.
+     */
+
     let kernel = /* wgsl */ `
     /* enables subgroups ONLY IF it was requested when creating device */
     /* WGSL requires this declaration is first in the shader */
@@ -72,6 +110,14 @@ export class OneSweepSort extends BaseSort {
 
     @group(0) @binding(6)
     var<storage, read_write> hist: array<atomic<u32>>;
+    /**
+     * hist keeps NUM_PASSES histograms, one per digit, each having RADIX entries
+     * Structure of hist:
+     *   hist[  0,  256) has 256 buckets that count keysInOut[7:0]
+     *   hist[256,  512) has 256 buckets that count keysInOut[15:8]
+     *   hist[512,  768) has 256 buckets that count keysInOut[23:16]
+     *   hist[768, 1024) has 256 buckets that count keysInOut[31:24]
+     */
 
     @group(0) @binding(7)
     var<storage, read_write> passHist: array<atomic<u32>>;
@@ -79,25 +125,38 @@ export class OneSweepSort extends BaseSort {
      * Structure of passHist:
      * (note we don't store anything for the last workgroup
      *  because no other workgroup needs it)
+     * - We have NUM_PASSES segments, one per digit-place
+     * - Each segment has:
+     *   - One global histogram for its digit-place
+     *   - One local histogram for each thread block. We chained-scan
+     *     through these histograms.
+     * - We compute the global histogram in onesweep_scan
+     *   and tag it with FLAG_INCLUSIVE.
+     * Why is it structured like this? In chained-scan, we look at
+     *   the previous workgroup's result. Workgroup 0 instead looks
+     *   back at the _global_ histogram, which it must add into the
+     *   per-key address anyway. Thus the global histogram is placed
+     *   in memory directly before workgroup 0's local histogram.
+     *   Control is simpler because we need not specialize workgroup 0.
      *
      * Global Hist Post Scan*** SORT PASS_0:
      * +------------------------------------------+
      * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
      * |   ?    |   ?    |   ?    | ... |   ?     |
      * +------------------------------------------+
-     * Thread_Block 0 SORT_PASS_0:
+     * Workgroup 0 SORT_PASS_0:
      * +------------------------------------------+
      * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
      * |   ?    |   ?    |   ?    | ... |   ?     |
      * +------------------------------------------+
-     * ...
+     * ... (repeat up to Workgroup last-1)
      *
      * Global Hist Post Scan*** SORT PASS_1:
      * +------------------------------------------+
      * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
      * |   ?    |   ?    |   ?    | ... |   ?     |
      * +------------------------------------------+
-     * Thread_Block 0 SORT_PASS_1:
+     * Workgroup 0 SORT_PASS_1:
      * +------------------------------------------+
      * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
      * |   ?    |   ?    |   ?    | ... |   ?     |
@@ -108,7 +167,7 @@ export class OneSweepSort extends BaseSort {
      * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
      * |   ?    |   ?    |   ?    | ... |   ?     |
      * +------------------------------------------+
-     * Thread_Block 0 SORT_PASS_2:
+     * Workgroup 0 SORT_PASS_2:
      * +------------------------------------------+
      * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
      * |   ?    |   ?    |   ?    | ... |   ?     |
@@ -119,7 +178,7 @@ export class OneSweepSort extends BaseSort {
      * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
      * |   ?    |   ?    |   ?    | ... |   ?     |
      * +------------------------------------------+
-     * Thread_Block 0 SORT_PASS_3:
+     * Workgroup 0 SORT_PASS_3:
      * +------------------------------------------+
      * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
      * |   ?    |   ?    |   ?    | ... |   ?     |
@@ -165,6 +224,10 @@ export class OneSweepSort extends BaseSort {
 
     var<workgroup> wg_globalHist: array<atomic<u32>, REDUCE_HIST_SIZE>;
 
+    fn passNumber() -> u32 {
+    }
+
+
     /** If we're making subgroup calls and we don't have subgroup hardware,
      * this sets up necessary declarations (workgroup memory, subgroup vars) */
     ${this.fnDeclarations.subgroupEmulation}
@@ -172,7 +235,7 @@ export class OneSweepSort extends BaseSort {
 
     /**
      * Input: global keysInOut[]
-     * Output: global hist[1024]
+     * Output: global hist[SORT_PASSES * RADIX = 1024]
      * Configuration:
      *   - REDUCE_BLOCK_DIM (128) threads per workgroup
      *   - Each thread handles REDUCE_KEYS_PER_THREAD (30)
@@ -188,7 +251,8 @@ export class OneSweepSort extends BaseSort {
      *   -              [512, 768) ...                      keysInOut[23:16]
      *   -              [768, 1024) ...                     keysInOut[31:24]
      * - Segment 1 (threads 64-127) writes into wg_globalHist[1024, 2048)
-     * - Final step adds the two segments together and adds them to hist[]
+     * - Final step adds the two segments together and atomic-adds them to hist[]
+     * - hist[0:1024] has the same structure as wg_globalHist[0:1024]
      */
     @compute @workgroup_size(REDUCE_BLOCK_DIM, 1, 1)
     fn global_hist(builtinsUniform: BuiltinsUniform,
@@ -198,7 +262,7 @@ export class OneSweepSort extends BaseSort {
       let sid = builtinsNonuniform.lidx / sgsz;  //Caution 1D workgroup ONLY! Ok, but technically not in HLSL spec
 
       // Reset histogram to zero
-      // this may be unnecessary in WGSL (vars are zero-initialized)
+      // this may be unnecessary in WGSL? (vars are zero-initialized)
       for (var i = builtinsNonuniform.lidx; i < REDUCE_HIST_SIZE; i += REDUCE_BLOCK_DIM) {
         atomicStore(&wg_globalHist[i], 0u);
       }
@@ -331,11 +395,14 @@ export class OneSweepSort extends BaseSort {
       }
       workgroupBarrier();
 
-      /** passHist[] now contains the global bin offset for every digit in each digit place,
-       *   tagged with FLAG_INCLUSIVE. ("This makes the logic later on a little easier because
-       *   we know for sure the inclusive flag exists.")
+      /** after the store below, passHist[] contains the global bin offset for every digit
+       *   in each digit place, tagged with FLAG_INCLUSIVE. ("This makes the logic later
+       *   on a little easier because we know for sure the inclusive flag exists.")
+       * In this kernel, passHist[] only stores into the Global Hist Post Scan tables (see
+       *   top). We don't use the other segments.
        * sortParameters.thread_blocks is the expansion factor that leaves room for
-       *   all the local per-thread-block offsets
+       *   all the local per-thread-block offsets. We will run chained-scan later on these
+       *   local per-thread-block offsets.
        */
       let pass_index = builtinsNonuniform.lidx + sortParameters.thread_blocks * builtinsUniform.wgid.x * RADIX;
       atomicStore(&passHist[pass_index], ((subgroupExclusiveAdd(scan) +
@@ -345,18 +412,18 @@ export class OneSweepSort extends BaseSort {
     var<workgroup> wg_warpHist: array<atomic<u32>, PART_SIZE>; /* KEYS_PER_THREAD * BLOCK_DIM */
     /* wg_warpHist has two roles:
      * 1) Initially, for the WLMS phase, each subgroup requires its own, radixDigit-sized portion
-     *    of the shared memory to histogram with. That's how you get subgroupID * RADIX_DIGIT.
-     *    Idiomatically: "Histogramming to my subgroup's histogram in shared memory."
+     *    of the workgroup memory to histogram with. That's how you get subgroupID * RADIX_DIGIT.
+     *    Idiomatically: "Histogramming to my subgroup's histogram in workgroup memory."
      * 2) After the local scatter locations have been computed, we scatter the keys/values
-     *    into shared memory. Shared memory scattering significantly improves the speed of the
+     *    into workgroup memory. Workgroup memory scattering significantly improves the speed of the
      *    global scattering, because the keys/values are much more likely to share the same
      *    cache-line. Super important.
      * Size: It needs to be large enough to hold all histograms across the whole workgroup.
      * Challenge: What if subgroup size is small? That requires a LOT of storage. So:
-     * - 1) manually bit-pack the shared mem to u16.
+     * - 1) manually bit-pack the workgroup mem to u16.
      * - 2) We use a technique Thomas calls "serial warp histogramming," where warps share
      *      histograms forcing some operations to go in serial. (Beats losing occupancy though).
-     * - In this case, we completely max out the shared mem, whatever the size is. So we
+     * - In this case, we completely max out the workgroup mem, whatever the size is. So we
      *   know the total size of the histograms must be the partition tile size.
      * Given the above, the use of "min" to set warp_hists_size below is correct.
      */
@@ -364,6 +431,10 @@ export class OneSweepSort extends BaseSort {
     var<workgroup> wg_localHist: array<u32, RADIX>;
     var<workgroup> wg_broadcast_tile_id: u32;
     var<workgroup> wg_control: u32; /* control flag for lookback/fallback */
+    /* the next two could be folded into wg_warpHist but are separate for now */
+    var<workgroup> wg_sgCompletionCount: atomic<u32>; /* have all our subgroups succeeded? */
+    var<workgroup> wg_incomplete: atomic<u32>; /* did anyone see a thread that didn't complete? */
+    var<workgroup> wg_fallback: array<u32, RADIX>; /* we can probably find another place to put this that doesn't require a separate allocation */
 
     /* warp-level multisplit function */
     /* this appears to be limited to subgroup sizes <= 32 */
@@ -396,9 +467,6 @@ export class OneSweepSort extends BaseSort {
         /* add to wg_warpHist for my digit value: total number of threads with my digit value */
         /* since I'm the highest rank peer, that's the number of threads ranked below me with
          * my digit value, plus one for me */
-        /* also puzzled why we are now dividing wg_warpHist into different blocks based on
-         * subgroup ID when we allocated it into KEYS_PER_THREAD blocks
-         * perhaps we are assuming KEYS_PER_THREAD > number of subgroups */
         pre_inc = atomicAdd(&wg_warpHist[((key >> shift) & RADIX_MASK) + s_offset], out + 1u);
         /* pre_inc now reflects the number of threads seen to date that have MY digit
          * from previous calls to WLMS */
@@ -408,26 +476,24 @@ export class OneSweepSort extends BaseSort {
 
       workgroupBarrier();
       /** out is a unique and densely packed index [0...n] for each thread with the same digit
+       * out means "This is the nth instance of this digit I have seen so far in my warp"
        * it is the sum of "count of this digit for all previous subgroups" (pre_inc from
-       * highest rank peer) and "number of threads below me with this digit"
+       * highest rank peer) and "number of threads below me in my subgroup with this digit"
        * */
       out += subgroupShuffle(pre_inc, highest_rank_peer);
       return out;
     }
 
-    fn fake_wlms(key: u32, shift: u32, sgid: u32, sgsz: u32, lane_mask_lt: u32, s_offset: u32) -> u32 {
-      return 0u;
-    }
-
     /**
-     * * FIX
      * Input: global keysInOut[]
      * Output: global keysTemp[]
+     *   (input/output bindings switch on odd calls)
      * Launch parameters:
      * - Workgroup size: BLOCK_DIM == 256
      * - Each workgroup is responsible for PART_SIZE = KEYS_PER_THREAD (15) * BLOCK_DIM (256) keys
      * - Launch enough workgroups to cover all input keys (divRoundUp(inputLength, PART_SIZE))
-     * Call this kernel 4 times, once for each digit-place. sortParameters.shift is {0,8,16,24}.
+     * Call this kernel 4 times, once for each digit-place.
+     *   sortParameters.shift has to be set {0,8,16,24}.
      * Compute steps in this kernel:
      * - Load keys
      * - Warp level multisplit -> Make a per-warp histogram
@@ -452,7 +518,8 @@ export class OneSweepSort extends BaseSort {
        * tile. We only need to clear the shared mem for those hists, not the entire partition size.
        * The purpose of the warpHists variable is to hold the total size of histograms across the workgroup.
        */
-      let warp_hists_size = min(BLOCK_DIM / sgsz * RADIX, PART_SIZE);
+      let num_subgroups = BLOCK_DIM / sgsz;
+      let warp_hists_size = min(num_subgroups * RADIX, PART_SIZE);
       /* set the histogram portion of wg_warpHist to 0 */
       for (var i = builtinsNonuniform.lidx; i < warp_hists_size; i += BLOCK_DIM) {
         atomicStore(&wg_warpHist[i], 0u);
@@ -462,6 +529,8 @@ export class OneSweepSort extends BaseSort {
       if (builtinsNonuniform.lidx == 0u) {
         wg_broadcast_tile_id = atomicAdd(&sortBump[sortParameters.shift >> 3u], 1u);
         wg_control = LOCKED; /* lookback/fallback control */
+        atomicStore(&wg_sgCompletionCount, 0);
+        atomicStore(&wg_incomplete, 0);
       }
       let partid = workgroupUniformLoad(&wg_broadcast_tile_id);
 
@@ -510,8 +579,7 @@ export class OneSweepSort extends BaseSort {
       /* diagnostic is UNSAFE: this relies on
        * - RADIX being a multiple of (or equal to) subgroup size
        * - Workgroup size is 1D (it is)
-       * - Subgroups are guaranteed to be laid out linearly within the
-       *   workgroup (probably (?))
+       * - Subgroups are guaranteed to be laid out linearly within the workgroup (probably (?))
        */
       @diagnostic(off, subgroup_uniformity)
       if (builtinsNonuniform.lidx < RADIX) {
@@ -533,7 +601,7 @@ export class OneSweepSort extends BaseSort {
 
         /* last workgroup does nothing because no other workgroup needs its data */
         if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
-          /* update the spine with local_reduction. The address within the spine is
+          /* Update the spine with local_reduction. The address within the spine is
            * the sum of which digit, which thread-block-local histogram within that
            * digit, and which of the RADIX buckets within that t-b-l histogram */
           /** For the purpose of the lookback, we need to post the total count per digit
@@ -546,10 +614,10 @@ export class OneSweepSort extends BaseSort {
             builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX + /* which digit */
             (partid + 1u) * RADIX + /* which thread-block-local histogram within that digit */
             builtinsNonuniform.lidx; /* which of the RADIX buckets within that t-b-l histogram */
+          /* this next RADIX-sized store is what is being chain-scanned in this kernel */
           atomicStore(&passHist[pass_index], (local_reduction & ~FLAG_MASK) | FLAG_REDUCTION);
         }
         /**
-         * XXX figure out where to put this comment
          * First we scan "up" the histograms. Each thread does a inclusive circular shift
          * scan per digit, up the warp histograms, which at this point in the algorithm
          * contain the results from WLMS. Instead of rotating around the subgroup, we
@@ -606,6 +674,7 @@ export class OneSweepSort extends BaseSort {
           offsets[k] += wg_localHist[t] + atomicLoad(&wg_warpHist[t + s_offset]);
         }
       }
+      /* we no longer need the data in wg_warpHist */
       workgroupBarrier();
 
       /** Warp histograms are no longer needed; let's now use warpHist
@@ -614,11 +683,191 @@ export class OneSweepSort extends BaseSort {
         atomicStore(&wg_warpHist[offsets[k]], keys[k]);
       }
 
+      /** Lookback/fallback strategy.
+       *
+       * For performance reasons, we would like to use the entire workgroup to look back.
+       * However, any thread in the lookback may find a value that is not ready. Our
+       * lookback only succeeds if _every_ thread finds a ready value. So we must ensure
+       * that all threads find a ready value before concluding that the lookback has
+       * succeeded. If any of them are not successful, we (must) drop into fallback.
+       *
+       * How do we determine if they have succeeded? We keep track of completion both
+       * per-thread (lookbackComplete) and per-subgroup (sgLookbackComplete).
+       *
+       * In workgroup memory, we use
+       * - wg_sgCompletionCount: counts number of successful subgroups
+       * - wg_incomplete: did anyone see a thread that didn't complete?
+       * both initialized to zero at the top of the kernel
+       */
+
+      {
+        var spinCount = 0;
+        var lookbackReduction = 0;
+        var lookbackComplete = select(true, false, builtinsNonuniform.lidx < RADIX);
+        var sgLookbackComplete = select(true, false, builtinsNonuniform.lidx < RADIX);
+        var lookbackid = partid;
+        let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
+        var lookbackIndex = (builtinsNonuniform.lidx & RADIX_MASK) + part_offset + lookbackid * RADIX;
+
+        while (wg_sgCompletionCount < subgroup_size) { /* loop until every subgroup is done */
+          // Read the preceding histogram from the spine
+          var flagPayload;
+          if (!sgLookbackComplete) {
+            if (!lookbackComplete) {
+              while (spinCount < MAX_SPIN_COUNT) { /* spin until we get something better than FLAG_NOT_READY */
+                flagPayload = atomicLoad(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX]);
+                if ((flagPayload & FLAG_MASK) > FLAG_NOT_READY)
+                  break;
+                } else {
+                  spinCount++;
+                }
+              }
+              // Did we find anything with FLAG_NOT_READY? Subgroup thread 0 posts it.
+              if (subgroupAll(spinCount == MAX_SPIN_COUNT) && (sgid == 0)) {
+                atomicOr(&wg_incomplete, 1);
+              }
+            }
+
+            workgroupBarrier(); /* all subgroups reach this point before next check */
+            let mustFallback = workgroupUniformLoad(&wg_incomplete);
+
+            /* Yes, we have at least one thread that saw FLAG_NOT_READY. Must fallback. */
+            if (mustFallback) {
+              /* clear wg_fallback array ... */
+              if (builtinsNonuniform.lidx < RADIX) {
+                wg_fallback[builtinsNonuniform.lidx] = 0;
+              }
+              /* ... and reset wg_incomplete */
+              if (builtinsNonuniform.lidx == 0) {
+                wg_incomplete = 0;
+              }
+              workgroupBarrier();
+              /* now let's build a local histogram of this tile in wg_fallback */
+              /* fallbackStart and fallbackEnd bound the region of interest in keysInOut[] */
+              const fallbackStart = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u) - 1);
+              const fallbackEnd = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u));
+              for (var i = builtinsNonuniform.lidx + fallbackStart; i < fallbackEnd; i += BLOCK_DIM) {
+                const key = keysInOut[i];
+                const digit = (key >> sortParameters.shift) & RADIX_MASK;
+                atomicAdd(&wg_fallback[digit], 1u);
+                /* if we're ever doing something other than u32, here's where to change that */
+                /* see FallbackHistogram in SweepCommon.hlsl */
+              }
+              workgroupBarrier();
+              /* now post the result back to the spine */
+              var currentSpine;
+              if (builtinsNonuniform.lidx < RADIX) {
+                var myFBHistogramEntry = wg_fallback[builtinsNonuniform.lidx];
+                /* I would like to UPDATE the value that is already there, but only if it's better */
+                /* atomicMax will do this! */
+                /* record what was already there in currentSpine */
+                currentSpine = atomicMax(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX], (myFBHistogramEntry & ~FLAG_MASK) | FLAG_REDUCTION);
+
+                // Atomically compares the value referenced by dest with compare_value, stores value in the location referenced by dest if the
+                // values match, returns the original value of dest in original_value.
+                // InterlockedCompareExchange(b_passHist[gtid + PassHistOffset((lookbackIndex >> RADIX_LOG) - e_threadBlocks * CurrentPass())], // dest
+                //                            0, // compare_value
+                //                            FLAG_REDUCTION | g_d[gtid + RADIX] << 2, // value
+                //                            reduceOut); // originalValue
+              }
+              if (!lookbackComplete) {
+                if ((currentSpine & FLAG_MASK) == FLAG_INCLUSIVE) { /* we already had INCLUSIVE in the spine */
+                   lookbackReduction += oldHistogramEntry & ~FLAG_MASK;
+                   if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
+                    /* update my spine entry */
+                     atomicAdd(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
+                               lookbackReduction | FLAG_REDUCTION);
+                     lookbackComplete = true;
+                   } else { /* last workgroup, don't need to post, just add in my local fallback value */
+                     lookbackReduction += wg_fallback[builtinsNonuniform.lidx];
+                   }
+                }
+                spinCount = 0;
+            } else { /* no fallback needed */
+              if (!lookbackComplete) {
+                lookbackReduction += flagPayload & ~FLAG_MASK;
+                if ((flagPayload & FLAG_MASK) == FLAG_INCLUSIVE) {
+                  if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
+                    /* update my spine entry */
+                     atomicAdd(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
+                               lookbackReduction | FLAG_REDUCTION);
+                     lookbackComplete = true;
+                  } else {
+                    spinCount = 0;
+                  }
+                }
+              }
+              lookbackIndex -= RADIX; // This workgroup looks back in lockstep
+              // Have all digits completed their lookbacks?
+              if (!warpLookbackComplete) {
+                warpLookbackComplete = subgroupAll(lookbackComplete);
+                if (warpLookbackComplete && (sgid == 0)) {
+                  /* tell the outermost loop "my subgroup is done" */
+                  atomicAdd(&wg_sgCompletionCount, 1);
+                }
+              }
+              workgroupBarrier();
+            } /* end check if we need to fallback */
+            // Post results into shared memory
+            if (builtinsNonuniform.lidx < RADIX) {
+              /** This curious-looking line is necessary to get the right scattering location in the next
+               * code block. */
+              wg_localHist[builtinsNonuniform.lidx] = lookbackReduction - wg_localHist[builtinsNonuniform.lidx];
+            }
+          } /* end if (!sgLookbackComplete) */
+        } /* end if (wg_sgCompletionCount < subgroup_size) */
+      } /* end code block */
+
+      {
+      bool lookbackComplete = false;
+      bool sgLookbackComplete = false;
+      var lookbackid = partid;
+      let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
+      while (wg_sgCompletionCount < subgroup_size) {
+        if (builtinsNonuniform.lidx < RADIX) {
+          var flagPayload;
+          if (!sgLookbackComplete) {
+            if (!lookbackComplete) {
+              var spin_count = 0;
+              while (spin_count < MAX_SPIN_COUNT) { /* spin until we get something better than FLAG_NOT_READY */
+                flagPayload = atomicLoad(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX]);
+                if ((flagPayload & FLAG_MASK) > FLAG_NOT_READY) {
+                  lookbackComplete = true;
+                  break;
+                } else {
+                  spin_count++;
+                }
+              }
+              /* all of our threads have tried to fetch a READY value, have they succeeded? */
+              sgLookbackComplete = subgroupAll(lookbackComplete);
+              if (sgid == 0) {
+                if (sgLookbackComplete) {
+                  /* our subgroup is done */
+                  atomicAdd(&wg_sgCompletionCount, 1u);
+                } else {
+                  atomicAdd(&wg_incomplete, 1u);
+                }
+              }
+            }
+            /*
+            }
+          }
+
+
+
+          var prev_reduction = 0u;
+          var lookbackid = partid;
+          let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
+          let flagPayload = atomicLoad(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX]);
+
+        }
+      }
+
+
       /** Next: lookback: one digit value per thread. We store the results
        * in a separate shared memory location, wg_local_hist. */
       var control_flag = workgroupUniformLoad(&wg_control);
       while (control_flag == LOCKED) {
-        if (builtinsNonuniform.lidx < RADIX) {
           var prev_reduction = 0u;
           var lookbackid = partid;
           let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
