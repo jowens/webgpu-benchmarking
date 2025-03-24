@@ -138,6 +138,9 @@ export class OneSweepSort extends BaseSort {
      *   per-key address anyway. Thus the global histogram is placed
      *   in memory directly before workgroup 0's local histogram.
      *   Control is simpler because we need not specialize workgroup 0.
+     * Consequence: When we start looking back, we look back at our
+     *   own partition ID, because that corresponds to the block
+     *   written by the previous workgroup.
      *
      * Global Hist Post Scan*** SORT PASS_0:
      * +------------------------------------------+
@@ -682,7 +685,7 @@ export class OneSweepSort extends BaseSort {
       /** Lookback/fallback strategy.
        *
        * For performance reasons, we would like to use the entire workgroup to look back.
-       * However, any thread in the lookback may find a value that is not ready. Our
+       * However, any thread in the lookback may find a value that is NOT_READY. Our
        * lookback only succeeds if _every_ thread finds a ready value. So we must ensure
        * that all threads find a ready value before concluding that the lookback has
        * succeeded. If any of them are not successful, we (must) drop into fallback.
@@ -692,21 +695,22 @@ export class OneSweepSort extends BaseSort {
        *
        * In workgroup memory, we use
        * - wg_sgCompletionCount: counts number of successful subgroups
+       *   - wg_sgCompletionCount_nonatomic: shadows wg_sgCompletionCount
        * - wg_incomplete: did anyone see a thread that didn't complete?
        * both initialized to zero at the top of the kernel
        */
 
       {
-        var spinCount = 0u;
-        var lookbackReduction = 0u;
-        var lookbackComplete = select(true, false, builtinsNonuniform.lidx < RADIX);
-        var sgLookbackComplete = select(true, false, builtinsNonuniform.lidx < RADIX);
-        var lookbackid = partid;
+        var lookbackAccumulate = 0u; /* we will update our spine with this value. No flags. */
+        var lookbackComplete = select(true, false, builtinsNonuniform.lidx < RADIX); /* thread-local */
+        var sgLookbackComplete = select(true, false, builtinsNonuniform.lidx < RADIX); /* uniform per workgroup */
+        var lookbackid = partid; /* passHist is shifted by 1 so we are actually "looking back" to our own partid */
         let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
-        var lookbackIndex = (builtinsNonuniform.lidx & RADIX_MASK) + part_offset + lookbackid * RADIX;
+        var lookbackIndex = (builtinsNonuniform.lidx & RADIX_MASK) + part_offset + lookbackid * RADIX; /* ptr into passHist */
 
         while (workgroupUniformLoad(&wg_sgCompletionCount_nonatomic) < num_subgroups) { /* loop until every subgroup is done */
-          // Read the preceding histogram from the spine
+          var spinCount = 0u;
+          // Read the preceding histogram from the spine (stored in passHist)
           var flagPayload = 0u;
           /* turning off diagnostic for sgLookbackComplete is safe; it's only updated an entire subgroup at a time */
           @diagnostic(off, subgroup_uniformity)
@@ -721,7 +725,7 @@ export class OneSweepSort extends BaseSort {
                 }
               }
               // Did we find anything with FLAG_NOT_READY? Subgroup thread 0 posts it.
-              if (subgroupAll(spinCount == MAX_SPIN_COUNT) && (sgid == 0)) {
+              if (subgroupAny(spinCount == MAX_SPIN_COUNT) && (sgid == 0)) {
                 wg_incomplete = 1; // possibly a race?
               }
             }
@@ -730,7 +734,7 @@ export class OneSweepSort extends BaseSort {
           workgroupBarrier(); /* all subgroups reach this point before next check */
           var mustFallback = workgroupUniformLoad(&wg_incomplete);
 
-          /* Yes, we have at least one thread that saw FLAG_NOT_READY. Must fallback. */
+          /* At least one thread saw FLAG_NOT_READY. Must fallback. */
           if (mustFallback != 0) {
             /* clear wg_fallback array ... */
             if (builtinsNonuniform.lidx < RADIX) {
@@ -753,42 +757,45 @@ export class OneSweepSort extends BaseSort {
               /* see FallbackHistogram in SweepCommon.hlsl */
             }
             workgroupBarrier();
-            /* now post the result back to the spine */
-            var currentSpine = 0u;
+            /* Local histogram is complete in wg_fallback. Now let's use that to make progress. */
+            var lookbackSpine = 0u;
             if (builtinsNonuniform.lidx < RADIX) {
               var myFBHistogramEntry = atomicLoad(&wg_fallback[builtinsNonuniform.lidx]);
-              /* I would like to UPDATE the value that is already there, but only if it's better */
-              /* atomicMax will do this! */
-              /* record what was already there in currentSpine */
-              currentSpine = atomicMax(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX], (myFBHistogramEntry & ~FLAG_MASK) | FLAG_REDUCTION);
+              /* I would like to UPDATE the value at lookbackid that is already there, but only
+               * if our computed fallback value is better. atomicMax will do this! Also store
+               * what was already there in lookbackSpine */
+              lookbackSpine = atomicMax(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX],
+                                       (myFBHistogramEntry & ~FLAG_MASK) | FLAG_REDUCTION);
             }
             if (!lookbackComplete) {
-              if ((currentSpine & FLAG_MASK) == FLAG_INCLUSIVE) { /* we already had INCLUSIVE in the spine */
-                lookbackReduction += currentSpine & ~FLAG_MASK;
+              if ((lookbackSpine & FLAG_MASK) == FLAG_INCLUSIVE) { /** oh cool, someone else already
+                                                                   * updated the spine to INCLUSIVE.
+                                                                   * let's finish the lookback! */
+                /* this is the end of our lookback */
+                lookbackAccumulate += lookbackSpine & ~FLAG_MASK;
                 if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
-                 /* update my spine entry */
+                 /** update MY spine entry, which has FLAG_REDUCTION already, thus when we add
+                  * another FLAG_REDUCTION to it, we get FLAG_INCLUSIVE */
                   atomicAdd(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
-                            lookbackReduction | FLAG_REDUCTION);
-                }
+                            lookbackAccumulate | FLAG_REDUCTION);
+                } /* last workgroup doesn't need to post to spine, no one needs that value */
                 lookbackComplete = true;
-              } else { /* last workgroup, don't need to post, just add in my local fallback value */
-                lookbackReduction += atomicLoad(&wg_fallback[builtinsNonuniform.lidx]);
+              } else { /* use the fallback we just computed */
+                lookbackAccumulate += atomicLoad(&wg_fallback[builtinsNonuniform.lidx]);
               }
             }
-            spinCount = 0;
-          } else { /* no fallback needed */
+          } else { /* no fallback needed, all flags are either REDUCTION or INCLUSIVE */
             if (!lookbackComplete) {
-              lookbackReduction += flagPayload & ~FLAG_MASK;
+              lookbackAccumulate += flagPayload & ~FLAG_MASK; /* accumulate no matter what */
               if ((flagPayload & FLAG_MASK) == FLAG_INCLUSIVE) {
                 if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
-                  /* update my spine entry */
+                  /** update my spine entry, which has FLAG_REDUCTION already, thus when we add
+                   * another FLAG_REDUCTION to it, we get FLAG_INCLUSIVE */
                    atomicAdd(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
-                             lookbackReduction | FLAG_REDUCTION);
-                }
+                             lookbackAccumulate | FLAG_REDUCTION);
+                } /* last workgroup doesn't need to post to spine, no one needs that value */
                 lookbackComplete = true;
-              } else {
-                spinCount = 0;
-              }
+              } /* do nothing extra for FLAG_REDUCTION */
             }
           } /* end check if we need to fallback */
           lookbackIndex -= RADIX; // This workgroup looks back in lockstep
@@ -811,7 +818,7 @@ export class OneSweepSort extends BaseSort {
           if (builtinsNonuniform.lidx < RADIX) {
             /** This curious-looking line is necessary to get the right scattering location in the next
              * code block. */
-            wg_localHist[builtinsNonuniform.lidx] = lookbackReduction - wg_localHist[builtinsNonuniform.lidx];
+            wg_localHist[builtinsNonuniform.lidx] = lookbackAccumulate - wg_localHist[builtinsNonuniform.lidx];
           }
         } /* end if (wg_sgCompletionCount < subgroup_size) */
       } /* end code block */
