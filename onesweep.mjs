@@ -224,10 +224,6 @@ export class OneSweepSort extends BaseSort {
 
     var<workgroup> wg_globalHist: array<atomic<u32>, REDUCE_HIST_SIZE>;
 
-    fn passNumber() -> u32 {
-    }
-
-
     /** If we're making subgroup calls and we don't have subgroup hardware,
      * this sets up necessary declarations (workgroup memory, subgroup vars) */
     ${this.fnDeclarations.subgroupEmulation}
@@ -434,7 +430,7 @@ export class OneSweepSort extends BaseSort {
     /* the next two could be folded into wg_warpHist but are separate for now */
     var<workgroup> wg_sgCompletionCount: atomic<u32>; /* have all our subgroups succeeded? */
     var<workgroup> wg_incomplete: atomic<u32>; /* did anyone see a thread that didn't complete? */
-    var<workgroup> wg_fallback: array<u32, RADIX>; /* we can probably find another place to put this that doesn't require a separate allocation */
+    var<workgroup> wg_fallback: array<atomic<u32>, RADIX>; /* we can probably find another place to put this that doesn't require a separate allocation */
 
     /* warp-level multisplit function */
     /* this appears to be limited to subgroup sizes <= 32 */
@@ -701,22 +697,22 @@ export class OneSweepSort extends BaseSort {
        */
 
       {
-        var spinCount = 0;
-        var lookbackReduction = 0;
+        var spinCount = 0u;
+        var lookbackReduction = 0u;
         var lookbackComplete = select(true, false, builtinsNonuniform.lidx < RADIX);
         var sgLookbackComplete = select(true, false, builtinsNonuniform.lidx < RADIX);
         var lookbackid = partid;
         let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
         var lookbackIndex = (builtinsNonuniform.lidx & RADIX_MASK) + part_offset + lookbackid * RADIX;
 
-        while (wg_sgCompletionCount < subgroup_size) { /* loop until every subgroup is done */
+        while (atomicLoad(&wg_sgCompletionCount) < sgsz) { /* loop until every subgroup is done */
           // Read the preceding histogram from the spine
-          var flagPayload;
+          var flagPayload = 0u;
           if (!sgLookbackComplete) {
             if (!lookbackComplete) {
               while (spinCount < MAX_SPIN_COUNT) { /* spin until we get something better than FLAG_NOT_READY */
                 flagPayload = atomicLoad(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX]);
-                if ((flagPayload & FLAG_MASK) > FLAG_NOT_READY)
+                if ((flagPayload & FLAG_MASK) > FLAG_NOT_READY) {
                   break;
                 } else {
                   spinCount++;
@@ -729,35 +725,35 @@ export class OneSweepSort extends BaseSort {
             }
 
             workgroupBarrier(); /* all subgroups reach this point before next check */
-            let mustFallback = workgroupUniformLoad(&wg_incomplete);
+            var mustFallback = workgroupUniformLoad(&wg_incomplete);
 
             /* Yes, we have at least one thread that saw FLAG_NOT_READY. Must fallback. */
             if (mustFallback) {
               /* clear wg_fallback array ... */
               if (builtinsNonuniform.lidx < RADIX) {
-                wg_fallback[builtinsNonuniform.lidx] = 0;
+                atomicStore(&wg_fallback[builtinsNonuniform.lidx], 0);
               }
               /* ... and reset wg_incomplete */
               if (builtinsNonuniform.lidx == 0) {
-                wg_incomplete = 0;
+                atomicStore(&wg_incomplete, 0);
               }
               workgroupBarrier();
               /* now let's build a local histogram of this tile in wg_fallback */
               /* fallbackStart and fallbackEnd bound the region of interest in keysInOut[] */
-              const fallbackStart = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u) - 1);
-              const fallbackEnd = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u));
+              var fallbackStart = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u) - 1);
+              var fallbackEnd = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u));
               for (var i = builtinsNonuniform.lidx + fallbackStart; i < fallbackEnd; i += BLOCK_DIM) {
-                const key = keysInOut[i];
-                const digit = (key >> sortParameters.shift) & RADIX_MASK;
+                var key = keysInOut[i];
+                var digit = (key >> sortParameters.shift) & RADIX_MASK;
                 atomicAdd(&wg_fallback[digit], 1u);
                 /* if we're ever doing something other than u32, here's where to change that */
                 /* see FallbackHistogram in SweepCommon.hlsl */
               }
               workgroupBarrier();
               /* now post the result back to the spine */
-              var currentSpine;
+              var currentSpine = 0u;
               if (builtinsNonuniform.lidx < RADIX) {
-                var myFBHistogramEntry = wg_fallback[builtinsNonuniform.lidx];
+                var myFBHistogramEntry = atomicLoad(&wg_fallback[builtinsNonuniform.lidx]);
                 /* I would like to UPDATE the value that is already there, but only if it's better */
                 /* atomicMax will do this! */
                 /* record what was already there in currentSpine */
@@ -772,17 +768,18 @@ export class OneSweepSort extends BaseSort {
               }
               if (!lookbackComplete) {
                 if ((currentSpine & FLAG_MASK) == FLAG_INCLUSIVE) { /* we already had INCLUSIVE in the spine */
-                   lookbackReduction += oldHistogramEntry & ~FLAG_MASK;
-                   if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
-                    /* update my spine entry */
-                     atomicAdd(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
-                               lookbackReduction | FLAG_REDUCTION);
-                     lookbackComplete = true;
-                   } else { /* last workgroup, don't need to post, just add in my local fallback value */
-                     lookbackReduction += wg_fallback[builtinsNonuniform.lidx];
-                   }
+                  lookbackReduction += currentSpine & ~FLAG_MASK;
+                  if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
+                   /* update my spine entry */
+                    atomicAdd(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
+                              lookbackReduction | FLAG_REDUCTION);
+                  }
+                  lookbackComplete = true;
+                } else { /* last workgroup, don't need to post, just add in my local fallback value */
+                  lookbackReduction += atomicLoad(&wg_fallback[builtinsNonuniform.lidx]);
                 }
-                spinCount = 0;
+              }
+              spinCount = 0;
             } else { /* no fallback needed */
               if (!lookbackComplete) {
                 lookbackReduction += flagPayload & ~FLAG_MASK;
@@ -799,9 +796,9 @@ export class OneSweepSort extends BaseSort {
               }
               lookbackIndex -= RADIX; // This workgroup looks back in lockstep
               // Have all digits completed their lookbacks?
-              if (!warpLookbackComplete) {
-                warpLookbackComplete = subgroupAll(lookbackComplete);
-                if (warpLookbackComplete && (sgid == 0)) {
+              if (!sgLookbackComplete) {
+                sgLookbackComplete = subgroupAll(lookbackComplete);
+                if (sgLookbackComplete && (sgid == 0)) {
                   /* tell the outermost loop "my subgroup is done" */
                   atomicAdd(&wg_sgCompletionCount, 1);
                 }
@@ -817,108 +814,6 @@ export class OneSweepSort extends BaseSort {
           } /* end if (!sgLookbackComplete) */
         } /* end if (wg_sgCompletionCount < subgroup_size) */
       } /* end code block */
-
-      {
-      bool lookbackComplete = false;
-      bool sgLookbackComplete = false;
-      var lookbackid = partid;
-      let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
-      while (wg_sgCompletionCount < subgroup_size) {
-        if (builtinsNonuniform.lidx < RADIX) {
-          var flagPayload;
-          if (!sgLookbackComplete) {
-            if (!lookbackComplete) {
-              var spin_count = 0;
-              while (spin_count < MAX_SPIN_COUNT) { /* spin until we get something better than FLAG_NOT_READY */
-                flagPayload = atomicLoad(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX]);
-                if ((flagPayload & FLAG_MASK) > FLAG_NOT_READY) {
-                  lookbackComplete = true;
-                  break;
-                } else {
-                  spin_count++;
-                }
-              }
-              /* all of our threads have tried to fetch a READY value, have they succeeded? */
-              sgLookbackComplete = subgroupAll(lookbackComplete);
-              if (sgid == 0) {
-                if (sgLookbackComplete) {
-                  /* our subgroup is done */
-                  atomicAdd(&wg_sgCompletionCount, 1u);
-                } else {
-                  atomicAdd(&wg_incomplete, 1u);
-                }
-              }
-            }
-            /*
-            }
-          }
-
-
-
-          var prev_reduction = 0u;
-          var lookbackid = partid;
-          let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
-          let flagPayload = atomicLoad(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX]);
-
-        }
-      }
-
-
-      /** Next: lookback: one digit value per thread. We store the results
-       * in a separate shared memory location, wg_local_hist. */
-      var control_flag = workgroupUniformLoad(&wg_control);
-      while (control_flag == LOCKED) {
-          var prev_reduction = 0u;
-          var lookbackid = partid;
-          let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
-          var spin_count = 0u;
-          while (spin_count < MAX_SPIN_COUNT) { /* spin until we get something better than FLAG_NOT_READY */
-            let flagPayload = atomicLoad(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX]);
-            if ((flagPayload & FLAG_MASK) > FLAG_NOT_READY) {
-              prev_reduction += (flagPayload & ~FLAG_MASK); /* definitely accumulate this */
-              if ((flagPayload & FLAG_MASK) == FLAG_INCLUSIVE) {
-                if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
-                  atomicStore(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
-                    ((prev_reduction + local_reduction) & ~FLAG_MASK) | FLAG_INCLUSIVE);
-                }
-                /** This curious-looking line is necessary to get the right scattering location in the next
-                 * code block. */
-                wg_localHist[builtinsNonuniform.lidx] = prev_reduction - wg_localHist[builtinsNonuniform.lidx];
-                /* lookback complete! */
-                if (builtinsNonuniform.lidx == 0u) {
-                  wg_control = UNLOCKED;
-                }
-                break; /* out of spin_count loop */
-              } else { /* FLAG_REDUCTION */
-                lookbackid -= 1u;
-                spin_count = 0u;
-              }
-            } else {
-              /* FLAG_NOT_READY, spin again */
-              spin_count += 1u;
-            }
-          } /* end while spin_count */
-          if (builtinsNonuniform.lidx == 0 && spin_count == MAX_SPIN_COUNT) {
-            wg_broadcast_tile_id = lookback_id;
-          }
-        } /* end enable only RADIX threads */
-
-        /* We are in one of two states here:
-         * (1) We completed lookback, in which case control_flag is UNLOCKED.
-         *     We posted all our results already to passHist and wg_localHist.
-         *     We skip the next code block.
-         * (2) We exceeded the spin count, in which case we have to fall back.
-         *     control_flag will be LOCKED. wg_broadcast_tile_id has the
-         *     stalled tile. We enter the next code block.
-         */
-        control_flag = workgroupUniformLoad(&wg_control); // this is also a workgroup barrier
-        if (control_flag == LOCKED) {
-          /* begin fallback */
-          let fallback_id = wg_broadcast_tile_id;
-        } /* end fallback */
-      } /* control_flag is LOCKED */
-
-
 
       workgroupBarrier();
 
