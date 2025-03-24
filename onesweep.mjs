@@ -723,97 +723,97 @@ export class OneSweepSort extends BaseSort {
                 wg_incomplete = 1; // possibly a race?
               }
             }
+          }
 
-            workgroupBarrier(); /* all subgroups reach this point before next check */
-            var mustFallback = workgroupUniformLoad(&wg_incomplete);
+          workgroupBarrier(); /* all subgroups reach this point before next check */
+          var mustFallback = workgroupUniformLoad(&wg_incomplete);
 
-            /* Yes, we have at least one thread that saw FLAG_NOT_READY. Must fallback. */
-            if (mustFallback != 0) {
-              /* clear wg_fallback array ... */
-              if (builtinsNonuniform.lidx < RADIX) {
-                atomicStore(&wg_fallback[builtinsNonuniform.lidx], 0);
-              }
-              /* ... and reset wg_incomplete */
-              if (builtinsNonuniform.lidx == 0) {
-                wg_incomplete = 0;
-              }
-              workgroupBarrier();
-              /* now let's build a local histogram of this tile in wg_fallback */
-              /* fallbackStart and fallbackEnd bound the region of interest in keysInOut[] */
-              var fallbackStart = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u) - 1);
-              var fallbackEnd = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u));
-              for (var i = builtinsNonuniform.lidx + fallbackStart; i < fallbackEnd; i += BLOCK_DIM) {
-                var key = keysInOut[i];
-                var digit = (key >> sortParameters.shift) & RADIX_MASK;
-                atomicAdd(&wg_fallback[digit], 1u);
-                /* if we're ever doing something other than u32, here's where to change that */
-                /* see FallbackHistogram in SweepCommon.hlsl */
-              }
-              workgroupBarrier();
-              /* now post the result back to the spine */
-              var currentSpine = 0u;
-              if (builtinsNonuniform.lidx < RADIX) {
-                var myFBHistogramEntry = atomicLoad(&wg_fallback[builtinsNonuniform.lidx]);
-                /* I would like to UPDATE the value that is already there, but only if it's better */
-                /* atomicMax will do this! */
-                /* record what was already there in currentSpine */
-                currentSpine = atomicMax(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX], (myFBHistogramEntry & ~FLAG_MASK) | FLAG_REDUCTION);
-
-                // Atomically compares the value referenced by dest with compare_value, stores value in the location referenced by dest if the
-                // values match, returns the original value of dest in original_value.
-                // InterlockedCompareExchange(b_passHist[gtid + PassHistOffset((lookbackIndex >> RADIX_LOG) - e_threadBlocks * CurrentPass())], // dest
-                //                            0, // compare_value
-                //                            FLAG_REDUCTION | g_d[gtid + RADIX] << 2, // value
-                //                            reduceOut); // originalValue
-              }
-              if (!lookbackComplete) {
-                if ((currentSpine & FLAG_MASK) == FLAG_INCLUSIVE) { /* we already had INCLUSIVE in the spine */
-                  lookbackReduction += currentSpine & ~FLAG_MASK;
-                  if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
-                   /* update my spine entry */
-                    atomicAdd(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
-                              lookbackReduction | FLAG_REDUCTION);
-                  }
-                  lookbackComplete = true;
-                } else { /* last workgroup, don't need to post, just add in my local fallback value */
-                  lookbackReduction += atomicLoad(&wg_fallback[builtinsNonuniform.lidx]);
-                }
-              }
-              spinCount = 0;
-            } else { /* no fallback needed */
-              if (!lookbackComplete) {
-                lookbackReduction += flagPayload & ~FLAG_MASK;
-                if ((flagPayload & FLAG_MASK) == FLAG_INCLUSIVE) {
-                  if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
-                    /* update my spine entry */
-                     atomicAdd(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
-                               lookbackReduction | FLAG_REDUCTION);
-                     lookbackComplete = true;
-                  } else {
-                    spinCount = 0;
-                  }
-                }
-              }
-              lookbackIndex -= RADIX; // This workgroup looks back in lockstep
-              // Have all digits completed their lookbacks?
-              /* turning off diagnostic for sgLookbackComplete is safe; it's only updated an entire subgroup at a time */
-              @diagnostic(off, subgroup_uniformity)
-              if (!sgLookbackComplete) {
-                sgLookbackComplete = subgroupAll(lookbackComplete);
-                if (sgLookbackComplete && (sgid == 0)) {
-                  /* tell the outermost loop "my subgroup is done" */
-                  atomicAdd(&wg_sgCompletionCount, 1);
-                }
-              }
-              workgroupBarrier();
-            } /* end check if we need to fallback */
-            // Post results into shared memory
+          /* Yes, we have at least one thread that saw FLAG_NOT_READY. Must fallback. */
+          if (mustFallback != 0) {
+            /* clear wg_fallback array ... */
             if (builtinsNonuniform.lidx < RADIX) {
-              /** This curious-looking line is necessary to get the right scattering location in the next
-               * code block. */
-              wg_localHist[builtinsNonuniform.lidx] = lookbackReduction - wg_localHist[builtinsNonuniform.lidx];
+              atomicStore(&wg_fallback[builtinsNonuniform.lidx], 0);
             }
-          } /* end if (!sgLookbackComplete) */
+            /* ... and reset wg_incomplete */
+            if (builtinsNonuniform.lidx == 0) {
+              wg_incomplete = 0;
+            }
+            workgroupBarrier();
+            /* now let's build a local histogram of this tile in wg_fallback */
+            /* fallbackStart and fallbackEnd bound the region of interest in keysInOut[] */
+            var fallbackStart = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u) - 1);
+            var fallbackEnd = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u));
+            for (var i = builtinsNonuniform.lidx + fallbackStart; i < fallbackEnd; i += BLOCK_DIM) {
+              var key = keysInOut[i];
+              var digit = (key >> sortParameters.shift) & RADIX_MASK;
+              atomicAdd(&wg_fallback[digit], 1u);
+              /* if we're ever doing something other than u32, here's where to change that */
+              /* see FallbackHistogram in SweepCommon.hlsl */
+            }
+            workgroupBarrier();
+            /* now post the result back to the spine */
+            var currentSpine = 0u;
+            if (builtinsNonuniform.lidx < RADIX) {
+              var myFBHistogramEntry = atomicLoad(&wg_fallback[builtinsNonuniform.lidx]);
+              /* I would like to UPDATE the value that is already there, but only if it's better */
+              /* atomicMax will do this! */
+              /* record what was already there in currentSpine */
+              currentSpine = atomicMax(&passHist[builtinsNonuniform.lidx + part_offset + lookbackid * RADIX], (myFBHistogramEntry & ~FLAG_MASK) | FLAG_REDUCTION);
+
+              // Atomically compares the value referenced by dest with compare_value, stores value in the location referenced by dest if the
+              // values match, returns the original value of dest in original_value.
+              // InterlockedCompareExchange(b_passHist[gtid + PassHistOffset((lookbackIndex >> RADIX_LOG) - e_threadBlocks * CurrentPass())], // dest
+              //                            0, // compare_value
+              //                            FLAG_REDUCTION | g_d[gtid + RADIX] << 2, // value
+              //                            reduceOut); // originalValue
+            }
+            if (!lookbackComplete) {
+              if ((currentSpine & FLAG_MASK) == FLAG_INCLUSIVE) { /* we already had INCLUSIVE in the spine */
+                lookbackReduction += currentSpine & ~FLAG_MASK;
+                if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
+                 /* update my spine entry */
+                  atomicAdd(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
+                            lookbackReduction | FLAG_REDUCTION);
+                }
+                lookbackComplete = true;
+              } else { /* last workgroup, don't need to post, just add in my local fallback value */
+                lookbackReduction += atomicLoad(&wg_fallback[builtinsNonuniform.lidx]);
+              }
+            }
+            spinCount = 0;
+          } else { /* no fallback needed */
+            if (!lookbackComplete) {
+              lookbackReduction += flagPayload & ~FLAG_MASK;
+              if ((flagPayload & FLAG_MASK) == FLAG_INCLUSIVE) {
+                if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
+                  /* update my spine entry */
+                   atomicAdd(&passHist[builtinsNonuniform.lidx + part_offset + (partid + 1u) * RADIX],
+                             lookbackReduction | FLAG_REDUCTION);
+                }
+                lookbackComplete = true;
+              } else {
+                spinCount = 0;
+              }
+            }
+          } /* end check if we need to fallback */
+          lookbackIndex -= RADIX; // This workgroup looks back in lockstep
+          // Have all digits completed their lookbacks?
+          /* turning off diagnostic for sgLookbackComplete is safe; it's only updated an entire subgroup at a time */
+          @diagnostic(off, subgroup_uniformity)
+          if (!sgLookbackComplete) {
+            sgLookbackComplete = subgroupAll(lookbackComplete);
+            if (sgLookbackComplete && (sgid == 0)) {
+              /* tell the outermost loop "my subgroup is done" */
+              atomicAdd(&wg_sgCompletionCount, 1);
+            }
+          }
+          workgroupBarrier();
+          // Post results into shared memory
+          if (builtinsNonuniform.lidx < RADIX) {
+            /** This curious-looking line is necessary to get the right scattering location in the next
+             * code block. */
+            wg_localHist[builtinsNonuniform.lidx] = lookbackReduction - wg_localHist[builtinsNonuniform.lidx];
+          }
         } /* end if (wg_sgCompletionCount < subgroup_size) */
       } /* end code block */
 
