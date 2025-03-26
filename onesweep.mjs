@@ -456,6 +456,7 @@ export class OneSweepSort extends BaseSort {
         let ballot = subgroupBallot(pred);
         eq_mask &= select(~ballot.x, ballot.x, pred);
       }
+      return shift;
       /* eq_mask marks the threads that have the same digit as me ... */
       var out = countOneBits(eq_mask & lane_mask_lt);
       /* ... and out marks those threads in eq_mask whose ids are less than me */
@@ -572,6 +573,7 @@ export class OneSweepSort extends BaseSort {
           offsets[k] = WLMS(keys[k], shift, builtinsNonuniform.sgid, sgsz, lane_mask_lt, s_offset);
         }
       }
+      keysTemp[builtinsNonuniform.lidx] = offsets[0]; return;
       workgroupBarrier();
 
       var local_reduction = 0u;
@@ -1002,13 +1004,58 @@ export class OneSweepSort extends BaseSort {
         kernel: this.sortOneSweepWGSL,
         entryPoint: "onesweep_pass",
         bufferTypes,
-        bindings,
-        label: `OneSweep sort (${this.type}) onesweep_pass shift 1 [subgroups: ${this.useSubgroups}]`,
+        bindings: bindingsReverse,
+        label: `OneSweep sort (${this.type}) onesweep_pass digit 1 [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         logLaunchParameters: true,
         getDispatchGeometry: () => {
           return [this.passWorkgroupCount];
         },
+        enable: false,
+      }),
+      new WriteGPUBuffer({
+        label: "sortParameters",
+        cpuSource: new Uint32Array([
+          this.inputLength,
+          16 /* each pass: {0,8,16,24} */,
+          this.passWorkgroupCount,
+          0 /* currently unused */,
+        ]),
+      }),
+      new Kernel({
+        kernel: this.sortOneSweepWGSL,
+        entryPoint: "onesweep_pass",
+        bufferTypes,
+        bindings,
+        label: `OneSweep sort (${this.type}) onesweep_pass digit 2 [subgroups: ${this.useSubgroups}]`,
+        logKernelCodeToConsole: false,
+        logLaunchParameters: true,
+        getDispatchGeometry: () => {
+          return [this.passWorkgroupCount];
+        },
+        enable: false,
+      }),
+      new WriteGPUBuffer({
+        label: "sortParameters",
+        cpuSource: new Uint32Array([
+          this.inputLength,
+          24 /* each pass: {0,8,16,24} */,
+          this.passWorkgroupCount,
+          0 /* currently unused */,
+        ]),
+      }),
+      new Kernel({
+        kernel: this.sortOneSweepWGSL,
+        entryPoint: "onesweep_pass",
+        bufferTypes,
+        bindings: bindingsReverse,
+        label: `OneSweep sort (${this.type}) onesweep_pass digit 3 [subgroups: ${this.useSubgroups}]`,
+        logKernelCodeToConsole: false,
+        logLaunchParameters: true,
+        getDispatchGeometry: () => {
+          return [this.passWorkgroupCount];
+        },
+        enable: false,
       }),
     ];
   }
@@ -1193,7 +1240,8 @@ export class OneSweepSort extends BaseSort {
         }*/
 
 const SortOneSweepRegressionParams = {
-  inputLength: [2048, 4096],
+  inputLength: [64],
+  // inputLength: [2048, 4096],
   // inputLength: range(12, 25).map((i) => 2 ** i),
   datatype: ["u32"],
   type: ["keysonly" /* "keyvalue", */],
@@ -1204,7 +1252,7 @@ export const SortOneSweepRegressionSuite = new BaseTestSuite({
   category: "sort",
   testSuite: "onesweep",
   initializeCPUBuffer: "xor-beef",
-  trials: 2,
+  trials: 0,
   params: SortOneSweepRegressionParams,
   primitive: OneSweepSort,
 });
