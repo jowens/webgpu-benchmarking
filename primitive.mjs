@@ -127,6 +127,48 @@ export class BasePrimitive {
     return this.__buffers[label];
   }
 
+  getBufferResource(args) {
+    /** Converts a name of a buffer to a buffer
+     * Used for the "resource" argument of createBindGroup()
+     * Works in the context of a GPUBufferBinding, which is either
+     * - buffer_name => buffer
+     * - { buffer: buffer_name, offset: o, size: s } => { buffer: buffer, offset: o, size: s }
+     */
+    switch (typeof args) {
+      case "string":
+        return this.getBuffer(args).buffer;
+      default:
+        if (args.buffer) {
+          /** this will probably fail if args specify offset or size AND the
+           * buffer in getBuffer ALSO has offset or size, but we haven't seen
+           * a case like that yet and figure out the right behavior when we do */
+          if (typeof args.buffer !== "string") {
+            throw new Error(
+              "Primitive::getBufferResource: 'buffer' argument must be a string naming a buffer"
+            );
+          }
+          /** this.getBuffer(args.buffer) returns a Buffer object
+           * this.getBuffer(args.buffer).buffer returns a GPUBufferBinding
+           *   that object certainly has a buffer member, but also possibly has offset and size
+           * Current behavior is to ignore the GPUBufferBinding's offset/size, and use
+           *   offset/size if specified in args, but we have no use case for what the correct
+           *   behavior should be. The return below is where it should change if we want
+           *   different behavior.
+           */
+          return {
+            ...args,
+            buffer: this.getBuffer(args.buffer).buffer.buffer,
+          };
+        } else {
+          throw new Error(
+            "Primitive::getBufferResource: argument",
+            args,
+            "must be either a string that names a known buffer or a GPUBuffer object with a buffer member that is a string that names a known buffer"
+          );
+        }
+    }
+  }
+
   getDispatchGeometry() {
     /* call this from a subclass instead */
     throw new Error(
@@ -380,11 +422,13 @@ export class BasePrimitive {
             );
           }
 
-          for (const binding of action.bindings) {
-            for (const element of binding) {
-              if (!(element in this.__buffers)) {
+          for (const bindingGroup of action.bindings) {
+            for (const binding of bindingGroup) {
+              if (
+                !(binding in this.__buffers || binding.buffer in this.__buffers)
+              ) {
                 console.error(
-                  `Primitive ${this.label} has no registered buffer ${element}.`
+                  `Primitive ${this.label} has no registered buffer ${binding}.`
                 );
               }
             }
@@ -403,18 +447,18 @@ export class BasePrimitive {
 
           kernelPass.setPipeline(kernelPipeline);
 
-          for (const [bindgroupIndex, bindgroup] of action.bindings.entries()) {
+          for (const [bindGroupIndex, bindGroup] of action.bindings.entries()) {
             const kernelBindGroup = this.device.createBindGroup({
-              label: `bindGroup ${bindgroupIndex} for ${this.label} ${
+              label: `bindGroup ${bindGroupIndex} for ${this.label} ${
                 action.entryPoint && action.entryPoint
               } kernel`,
-              layout: kernelPipeline.getBindGroupLayout(bindgroupIndex),
-              entries: bindgroup.map((element, index) => ({
-                binding: index,
-                resource: this.getBuffer(element).buffer,
+              layout: kernelPipeline.getBindGroupLayout(bindGroupIndex),
+              entries: bindGroup.map((binding, bindingIndex) => ({
+                binding: bindingIndex,
+                resource: this.getBufferResource(binding),
               })),
             });
-            kernelPass.setBindGroup(bindgroupIndex, kernelBindGroup);
+            kernelPass.setBindGroup(bindGroupIndex, kernelBindGroup);
           }
 
           /* For binding geometry:
@@ -437,6 +481,10 @@ export class BasePrimitive {
           }
 
           if (action.logLaunchParameters) {
+            /** "size of bindings" must be updated to handle
+             * - multiple binding groups
+             * - any binding that is not just a buffer name ({name, offset, size})
+             */
             console.info(`${this.label} | ${action.label}
 size of bindings: ${action.bindings[0].map(
               (e) => this.getBuffer(e).buffer.buffer.size
