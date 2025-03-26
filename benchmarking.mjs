@@ -297,8 +297,7 @@ async function main(navigator) {
           ) {
             validateArgs = {
               inputKeys: testOriginalInputBuffer,
-              /* below is just temporary, in the end we get keysInOut */
-              outputKeys: primitive.getBuffer("keysTemp"),
+              outputKeys: primitive.getBuffer("keysInOut"),
             };
           }
           const errorstr = primitive.validate(validateArgs);
