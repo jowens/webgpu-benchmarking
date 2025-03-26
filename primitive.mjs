@@ -32,7 +32,6 @@ export class BasePrimitive {
     if (!("label" in args)) {
       this.label = this.constructor.name;
     }
-
     /* required arguments, and handled next */
     for (const requiredField of ["device"]) {
       if (!(requiredField in args)) {
@@ -332,7 +331,10 @@ export class BasePrimitive {
           } else {
             /* first build up bindGroupLayouts, then create a pipeline layout */
             const bindGroupLayouts = [];
-            for (const bufferTypesGroup of action.bufferTypes) {
+            for (const [
+              bufferTypesGroupIndex,
+              bufferTypesGroup,
+            ] of action.bufferTypes.entries()) {
               /* could also cache bind groups */
               const entries = [];
               bufferTypesGroup.forEach((element, index) => {
@@ -346,6 +348,7 @@ export class BasePrimitive {
                 }
               });
               const bindGroupLayout = this.device.createBindGroupLayout({
+                label: `${this.label} bindGroupLayout[${bufferTypesGroupIndex}]`,
                 entries,
               });
               bindGroupLayouts.push(bindGroupLayout);
@@ -370,30 +373,22 @@ export class BasePrimitive {
             },
           });
 
-          if (action.bindings.size > 1) {
+          if (action?.bindings?.length === undefined) {
             console.error(
-              "Primitive::execute::Kernel currently only supports one bind group",
+              "Primitive::execute::Kernel: must specify a bindings argument",
               action.bindings
             );
           }
 
-          for (const element of action.bindings[0]) {
-            if (!(element in this.__buffers)) {
-              console.error(
-                `Primitive ${this.label} has no registered buffer ${element}.`
-              );
+          for (const binding of action.bindings) {
+            for (const element of binding) {
+              if (!(element in this.__buffers)) {
+                console.error(
+                  `Primitive ${this.label} has no registered buffer ${element}.`
+                );
+              }
             }
           }
-
-          const kernelBindGroup = this.device.createBindGroup({
-            label: `bindGroup for ${this.label} kernel`,
-            layout: kernelPipeline.getBindGroupLayout(0),
-            /* the [0] below is because we only support 1 bind group */
-            entries: action.bindings[0].map((element, index) => ({
-              binding: index,
-              resource: this.__buffers[element].buffer,
-            })),
-          });
 
           const kernelDescriptor = {
             label: `${this.label} compute pass`,
@@ -407,7 +402,21 @@ export class BasePrimitive {
             : encoder.beginComputePass(kernelDescriptor);
 
           kernelPass.setPipeline(kernelPipeline);
-          kernelPass.setBindGroup(0, kernelBindGroup);
+
+          for (const [bindgroupIndex, bindgroup] of action.bindings.entries()) {
+            const kernelBindGroup = this.device.createBindGroup({
+              label: `bindGroup ${bindgroupIndex} for ${this.label} ${
+                action.entryPoint && action.entryPoint
+              } kernel`,
+              layout: kernelPipeline.getBindGroupLayout(bindgroupIndex),
+              entries: bindgroup.map((element, index) => ({
+                binding: index,
+                resource: this.getBuffer(element).buffer,
+              })),
+            });
+            kernelPass.setBindGroup(bindgroupIndex, kernelBindGroup);
+          }
+
           /* For binding geometry:
            *     Look in kernel first, then to primitive if nothing in kernel
            * There was some binding wonkiness with using ?? to pick the gDG call
@@ -430,7 +439,7 @@ export class BasePrimitive {
           if (action.logLaunchParameters) {
             console.info(`${this.label} | ${action.label}
 size of bindings: ${action.bindings[0].map(
-              (e) => this.__buffers[e].buffer.buffer.size
+              (e) => this.getBuffer(e).buffer.buffer.size
             )}
 workgroupCount: ${this.workgroupCount}
 workgroupSize: ${this.workgroupSize}
