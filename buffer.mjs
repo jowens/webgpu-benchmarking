@@ -81,6 +81,9 @@ export class Buffer {
               case "xor-beef":
                 val = i ^ 0xbeef;
                 break;
+              case "constant":
+                val = 42;
+                break;
               default:
                 val = i == 0 ? 0 : this.#cpuBuffer[i - 1] + 1; // trying to get u32s
                 break;
