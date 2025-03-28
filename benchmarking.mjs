@@ -380,6 +380,7 @@ async function main(navigator) {
                 timing: "CPU",
                 bandwidth: result.bandwidthCPU,
               });
+              console.log(expts);
             });
         } // end of TEST FOR PERFORMANCE
       } // end of running all combinations for this testSuite
@@ -395,7 +396,9 @@ async function main(navigator) {
       // almost certainly the timer->then clause above should be written in a way
       //   that lets me wait on it instead
     }
+
     if (expts.length > 0) {
+      await delay(5000);
       console.info(expts);
     }
 
