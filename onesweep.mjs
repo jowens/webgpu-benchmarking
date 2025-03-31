@@ -188,8 +188,12 @@ export class OneSweepSort extends BaseSort {
     @group(1) @binding(0)
     var<uniform> sortParameters : SortParameters;
 
-    const SORT_PASSES = 4u;
-    const BLOCK_DIM = 256u;
+    /** Constants are mostly set in finalizeRuntimeParameters and
+     * pasted in here; this is mostly to make sure they don't get
+     * out of sync.
+     */
+    const SORT_PASSES = ${this.SORT_PASSES}u;
+    const BLOCK_DIM = ${this.BLOCK_DIM}u;
     const MIN_SUBGROUP_SIZE = 4u;
     const MAX_REDUCE_SIZE = BLOCK_DIM / MIN_SUBGROUP_SIZE;
 
@@ -212,16 +216,16 @@ export class OneSweepSort extends BaseSort {
      *    higher-order bits to store status, with the remaining 30 bits storing
      *    value."
      */
-    const RADIX = 256u;
+    const RADIX = ${this.RADIX}u;
     const ALL_RADIX = RADIX * SORT_PASSES;
-    const RADIX_MASK = 255u;
-    const RADIX_LOG = 8u;
+    const RADIX_MASK = RADIX - 1u;
+    const RADIX_LOG = ${this.RADIX_LOG}u;
 
-    const KEYS_PER_THREAD = 15u;
+    const KEYS_PER_THREAD = ${this.KEYS_PER_THREAD}u;
     const PART_SIZE = KEYS_PER_THREAD * BLOCK_DIM;
 
-    const REDUCE_BLOCK_DIM = 128u;
-    const REDUCE_KEYS_PER_THREAD = 30u;
+    const REDUCE_BLOCK_DIM = ${this.REDUCE_BLOCK_DIM}u;
+    const REDUCE_KEYS_PER_THREAD = ${this.REDUCE_KEYS_PER_THREAD}u;
     const REDUCE_HIST_SIZE = REDUCE_BLOCK_DIM / 64u * ALL_RADIX;
     const REDUCE_PART_SIZE = REDUCE_KEYS_PER_THREAD * REDUCE_BLOCK_DIM;
 
@@ -310,7 +314,7 @@ export class OneSweepSort extends BaseSort {
         atomicAdd(&hist[i + 512u], atomicLoad(&wg_globalHist[i + 512u]) + atomicLoad(&wg_globalHist[i + 512u + ALL_RADIX]));
         atomicAdd(&hist[i + 768u], atomicLoad(&wg_globalHist[i + 768u]) + atomicLoad(&wg_globalHist[i + 768u + ALL_RADIX]));
       }
-    }
+    } /* end kernel global_hist */
 
     // Assumes block dim 256
     const SCAN_MEM_SIZE = RADIX / MIN_SUBGROUP_SIZE;
@@ -406,7 +410,7 @@ export class OneSweepSort extends BaseSort {
       let pass_index = builtinsNonuniform.lidx + sortParameters.thread_blocks * builtinsUniform.wgid.x * RADIX;
       atomicStore(&passHist[pass_index], ((subgroupExclusiveAdd(scan) +
         select(0u, wg_scan[sid - 1u], builtinsNonuniform.lidx >= sgsz)) & ~FLAG_MASK) | FLAG_INCLUSIVE);
-    }
+    } /* end kernel onesweep_scan */
 
     var<workgroup> wg_warpHist: array<atomic<u32>, PART_SIZE>; /* KEYS_PER_THREAD * BLOCK_DIM */
     /* wg_warpHist has two roles:
@@ -815,7 +819,7 @@ export class OneSweepSort extends BaseSort {
             wg_sgCompletionCount_nonatomic = atomicLoad(&wg_sgCompletionCount);
           }
           workgroupBarrier();
-        } /* end if (wg_sgCompletionCount < subgroup_size) */
+        } /* end while (wg_sgCompletionCount < subgroup_size) */
 
         // Post results into shared memory
         if (builtinsNonuniform.lidx < RADIX) {
@@ -844,7 +848,7 @@ export class OneSweepSort extends BaseSort {
           keysOut[wg_localHist[(whi >> sortParameters.shift) & RADIX_MASK] + i] = whi;
         }
       }
-    }`;
+    } /* end kernel onesweep_pass */`;
     return kernel;
   };
 
@@ -852,9 +856,9 @@ export class OneSweepSort extends BaseSort {
     const inputSize = this.getBuffer("keysInOut").size; // bytes
     this.inputLength = inputSize / 4; /* 4 is size of key */
     this.RADIX = 256;
-    this.RADIX_BITS = 8;
+    this.RADIX_LOG = 8;
     this.KEY_BITS = 32;
-    this.SORT_PASSES = this.KEY_BITS / this.RADIX_BITS;
+    this.SORT_PASSES = this.KEY_BITS / this.RADIX_LOG;
 
     /* the following better match what's in the shader! */
     this.BLOCK_DIM = 256;
@@ -893,7 +897,7 @@ export class OneSweepSort extends BaseSort {
     for (var i = 0; i < this.SORT_PASSES + 1; i++) {
       const offset = i * this.uniformBufferOffsetLength;
       this.sortParameters[offset] = this.inputLength;
-      this.sortParameters[offset + 1] = Math.max(i - 1, 0) * this.RADIX_BITS;
+      this.sortParameters[offset + 1] = Math.max(i - 1, 0) * this.RADIX_LOG;
       this.sortParameters[offset + 2] =
         i == 0 ? this.reduceWorkgroupCount : this.passWorkgroupCount;
       this.sortParameters[offset + 3] = 0;
@@ -1059,7 +1063,7 @@ export class OneSweepSort extends BaseSort {
           for (let j = 0; j < this.SORT_PASSES; j++) {
             const histOffset = j * this.RADIX;
             const bucket =
-              (memsrc[i] >>> (j * this.RADIX_BITS)) & (this.RADIX - 1);
+              (memsrc[i] >>> (j * this.RADIX_LOG)) & (this.RADIX - 1);
             hist[histOffset + bucket]++;
           }
         }
