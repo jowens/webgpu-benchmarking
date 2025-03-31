@@ -249,7 +249,7 @@ export const NoAtomicPKReduceTestSuite = new BaseTestSuite({
   params: PKReduceParams,
   uniqueRuns: ["inputLength", "workgroupCount", "workgroupSize"],
   primitive: NoAtomicPKReduce,
-  primitiveConfig: {
+  primitiveArgs: {
     datatype: "u32",
     binop: BinOpMaxU32,
     gputimestamps: true,

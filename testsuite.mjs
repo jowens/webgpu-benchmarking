@@ -37,10 +37,10 @@ export class BaseTestSuite {
   getPrimitive(deviceAndParams) {
     // factory
     // arg to primitive is a single object, so what's below combines device and params
-    // we also need to add any primitive-specific configuration info, specified in this.primitiveConfig
+    // we also need to add any primitive-specific configuration info, specified in this.primitiveArgs
     const primitive = new this.primitive({
       ...deviceAndParams,
-      ...this.primitiveConfig,
+      ...this.primitiveArgs,
     });
     /* original design: copy all string fields from TestSuite -> Primitive */
     /* no longer do this -- unnecessary complexity */

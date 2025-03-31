@@ -638,7 +638,7 @@ export const DLDFScanTestSuite = new BaseTestSuite({
   params: DLDFScanParams,
   uniqueRuns: ["inputLength", "workgroupSize"],
   primitive: DLDFScan,
-  primitiveConfig: {
+  primitiveArgs: {
     datatype: "u32",
     type: "inclusive",
     binop: BinOpMaxU32,
@@ -654,7 +654,7 @@ export const DLDFReduceTestSuite = new BaseTestSuite({
   params: DLDFScanParams,
   uniqueRuns: ["inputLength", "workgroupSize"],
   primitive: DLDFScan,
-  primitiveConfig: {
+  primitiveArgs: {
     datatype: "f32",
     type: "reduce",
     binop: BinOpAddF32,

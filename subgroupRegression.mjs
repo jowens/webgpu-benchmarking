@@ -154,7 +154,7 @@ const seeds = [
     /* swap with your neighbor, even <-> odd */
     testSuite: "subgroupShuffle neighbor",
     primitive: SubgroupRegression,
-    primitiveConfig: {
+    primitiveArgs: {
       wgslOp: (env) => {
         return /* wgsl */ `outputBuffer[gid] = bitcast<${env.datatype}>(subgroupShuffle(bitcast<u32>(inputBuffer[gid]), (gid ^ 1) & (sgsz - 1)));`;
       },
@@ -170,7 +170,7 @@ const seeds = [
     /* rotate +1, within a subgroup */
     testSuite: "subgroupShuffle rotate +1",
     primitive: SubgroupRegression,
-    primitiveConfig: {
+    primitiveArgs: {
       wgslOp: (env) => {
         return /* wgsl */ `outputBuffer[gid] = bitcast<${env.datatype}>(subgroupShuffle(bitcast<u32>(inputBuffer[gid]), (gid + 1) & (sgsz - 1)));`;
       },
@@ -188,7 +188,7 @@ const seeds = [
     /* rotate -1, within a subgroup */
     testSuite: "subgroupShuffle rotate -1",
     primitive: SubgroupRegression,
-    primitiveConfig: {
+    primitiveArgs: {
       wgslOp: (env) => {
         return /* wgsl */ `outputBuffer[gid] = bitcast<${env.datatype}>(subgroupShuffle(bitcast<u32>(inputBuffer[gid]), (gid + sgsz - 1) & (sgsz - 1)));`;
       },
@@ -207,7 +207,7 @@ const seeds = [
     testSuite: "subgroupReduce",
     primitive: SubgroupRegression,
     params: SubgroupBinOpParams,
-    primitiveConfig: {
+    primitiveArgs: {
       wgslOp: /* wgsl */ `outputBuffer[gid] = subgroupReduce(inputBuffer[gid]);`,
       computeReference: function ({ referenceOutput, memsrc, sgsz }) {
         /* compute reference output */
@@ -229,7 +229,7 @@ const seeds = [
     /* ballot */
     testSuite: "subgroupBallot",
     primitive: SubgroupRegression,
-    primitiveConfig: {
+    primitiveArgs: {
       wgslOp: /* wgsl */ `outputBuffer[gid] = subgroupBallot((bitcast<u32>(inputBuffer[gid]) & 1) != 0);`,
       computeReference: function ({ referenceOutput, memsrc, sgsz }) {
         /* compute reference output */
@@ -269,7 +269,7 @@ const seeds = [
     testSuite: "subgroupInclusiveOpScan",
     primitive: SubgroupRegression,
     params: SubgroupBinOpParams,
-    primitiveConfig: {
+    primitiveArgs: {
       wgslOp: /* wgsl */ `outputBuffer[gid] = subgroupInclusiveOpScan(inputBuffer[gid], sgid, sgsz);`,
       computeReference: function ({ referenceOutput, memsrc, sgsz }) {
         /* compute reference output */
@@ -291,7 +291,7 @@ function regressionGen(params) {
     trials: params.trials ?? 0,
     params: params.params ?? SubgroupParams,
     primitive: params.primitive ?? SubgroupRegression,
-    primitiveConfig: params.primitiveConfig,
+    primitiveArgs: params.primitiveArgs,
   });
 }
 

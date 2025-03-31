@@ -450,7 +450,7 @@ export const HierarchicalScanTestSuite = new BaseTestSuite({
   params: ScanParams,
   uniqueRuns: ["inputLength", "workgroupSize"],
   primitive: HierarchicalScan,
-  primitiveConfig: {
+  primitiveArgs: {
     datatype: "u32",
     binop: BinOpAddU32,
     gputimestamps: true,
