@@ -230,32 +230,8 @@ async function main(navigator) {
               createGPUBuffer: true,
             })
           );
-          /* this is just to make "hist" visible to the CPU */
-          /* can be deleted once onepass sort is working */
-          primitive.registerBuffer(
-            new Buffer({
-              device,
-              datatype: "u32",
-              length: 256 * 4,
-              label: "hist",
-              createCPUBuffer: true,
-              createMappableGPUBuffer: true,
-              createGPUBuffer: true,
-            })
-          );
-          /* this is just to make "passHist" visible to the CPU */
-          /* can be deleted once onepass sort is working */
-          primitive.registerBuffer(
-            new Buffer({
-              device,
-              datatype: "u32",
-              length: 256 * 4 * divRoundUp(primitive.inputLength, 15 * 256),
-              label: "passHist",
-              createCPUBuffer: true,
-              createMappableGPUBuffer: true,
-              createGPUBuffer: true,
-            })
-          );
+          /** if we wanted "hist" and "passHist" visible to the CPU,
+           * we would register them here */
         }
 
         let testDebugBuffer;
@@ -279,16 +255,6 @@ async function main(navigator) {
           await testOutputBuffer.copyGPUToCPU();
           if (testDebugBuffer) {
             await testDebugBuffer.copyGPUToCPU();
-          }
-          /* the next two are for debugging onesweep scan */
-          if (primitive.getBuffer("hist")) {
-            await primitive.getBuffer("hist").copyGPUToCPU();
-          }
-          if (primitive.getBuffer("passHist")) {
-            await primitive.getBuffer("passHist").copyGPUToCPU();
-          }
-          if (primitive.getBuffer("keysTemp")) {
-            await primitive.getBuffer("keysTemp").copyGPUToCPU();
           }
           let validateArgs = {};
           if (
