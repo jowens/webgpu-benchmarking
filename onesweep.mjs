@@ -858,7 +858,7 @@ export class OneSweepSort extends BaseSort {
     this.RADIX = 256;
     this.RADIX_LOG = 8;
     this.KEY_BITS = 32;
-    this.SORT_PASSES = this.KEY_BITS / this.RADIX_LOG;
+    this.SORT_PASSES = divRoundUp(this.KEY_BITS, this.RADIX_LOG);
 
     /* the following better match what's in the shader! */
     this.BLOCK_DIM = 256;
