@@ -1228,7 +1228,7 @@ const SortOneSweepRegressionParams = {
 export const SortOneSweepRegressionSuite = new BaseTestSuite({
   category: "sort",
   testSuite: "onesweep",
-  initializeCPUBuffer: "constant",
+  initializeCPUBuffer: "bitreverse",
   trials: 100,
   params: SortOneSweepRegressionParams,
   primitive: OneSweepSort,

@@ -1,4 +1,4 @@
-import { datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
+import { bitreverse, datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
 
 /** Buffer class
  * Goal: handles all buffer-related tasks
@@ -83,6 +83,9 @@ export class Buffer {
                 break;
               case "constant":
                 val = 42;
+                break;
+              case "bitreverse":
+                val = bitreverse(i);
                 break;
               default:
                 val = i == 0 ? 0 : this.#cpuBuffer[i - 1] + 1; // trying to get u32s

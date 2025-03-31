@@ -39,6 +39,21 @@ export function divRoundUp(x, y) {
   return Math.ceil(x / y);
 }
 
+export function bitreverse(i) {
+  // https://graphics.stanford.edu/~seander/bithacks.html#BitReverseObvious
+  let v = i >>> 0;
+  let r = i >>> 0;
+  let s = 31; // u32 -> 32 bits, minus 1
+
+  for (v >>= 1; v; v >>= 1) {
+    r <<= 1;
+    r |= v & 1;
+    s--;
+  }
+  r <<= s; // shift when v's highest bits are zero
+  return r >>> 0;
+}
+
 export function fail(msg) {
   alert(msg);
 }
