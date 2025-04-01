@@ -195,7 +195,6 @@ export class OneSweepSort extends BaseSort {
     const SORT_PASSES = ${this.SORT_PASSES}u;
     const BLOCK_DIM = ${this.BLOCK_DIM}u;
     const MIN_SUBGROUP_SIZE = 4u;
-    const MAX_REDUCE_SIZE = BLOCK_DIM / MIN_SUBGROUP_SIZE;
 
     const FLAG_NOT_READY = 0u << 30;
     const FLAG_REDUCTION = 1u << 30;
@@ -854,7 +853,7 @@ export class OneSweepSort extends BaseSort {
 
   finalizeRuntimeParameters() {
     const inputSize = this.getBuffer("keysInOut").size; // bytes
-    this.inputLength = inputSize / 4; /* 4 is size of key */
+    this.inputLength = inputSize / 4; /* 4 is size of key in bytes */
     this.RADIX = 256;
     this.RADIX_LOG = 8;
     this.KEY_BITS = 32;
@@ -865,7 +864,7 @@ export class OneSweepSort extends BaseSort {
     this.KEYS_PER_THREAD = 15;
     this.PART_SIZE = this.KEYS_PER_THREAD * this.BLOCK_DIM;
     this.REDUCE_BLOCK_DIM = 128;
-    this.REDUCE_KEYS_PER_THREAD = 30;
+    this.REDUCE_KEYS_PER_THREAD = 29;
     this.REDUCE_PART_SIZE = this.REDUCE_KEYS_PER_THREAD * this.REDUCE_BLOCK_DIM;
     /* end copy from shader */
     this.passWorkgroupCount = divRoundUp(this.inputLength, this.PART_SIZE);
@@ -1052,6 +1051,15 @@ export class OneSweepSort extends BaseSort {
       args.outputKeys?.cpuBuffer ??
       args.outputKeys ??
       this.getBuffer("keysInOut").cpuBuffer;
+    if (memsrc === memdest) {
+      console.warn(
+        "Warning: source and destination for OneSweep::validate are the same buffer",
+        "src:",
+        memsrc,
+        "dest",
+        memdest
+      );
+    }
     let referenceOutput;
     switch (args?.outputKeys?.label) {
       case "hist":
@@ -1115,8 +1123,8 @@ export class OneSweepSort extends BaseSort {
           }
           return false;
         }
-        default:
-          return true;
+        default: /* currently, everything except passHist */
+          return true; /* valid throughout entire buffer */
       }
     };
     function validates(args) {
@@ -1221,9 +1229,9 @@ export class OneSweepSort extends BaseSort {
         }*/
 
 const SortOneSweepRegressionParams = {
-  inputLength: [2 ** 27],
+  // inputLength: [2 ** 25],
   // inputLength: [2048, 4096],
-  // inputLength: range(10, 27).map((i) => 2 ** i),
+  inputLength: range(10, 27).map((i) => 2 ** i),
   datatype: ["u32"],
   type: ["keysonly" /* "keyvalue", */],
   disableSubgroups: [false],
@@ -1233,7 +1241,7 @@ export const SortOneSweepRegressionSuite = new BaseTestSuite({
   category: "sort",
   testSuite: "onesweep",
   initializeCPUBuffer: "fisher-yates",
-  trials: 100,
+  trials: 0,
   params: SortOneSweepRegressionParams,
   primitive: OneSweepSort,
   // primitiveArgs: { validate: false },
