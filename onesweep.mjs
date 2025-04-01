@@ -1242,13 +1242,23 @@ const SortOneSweepRegressionParams = {
   disableSubgroups: [false],
 };
 
-const SortOneSweepSensitivityParams = {
+const SortOneSweepKPTSensitivityParams = {
   inputLength: [2 ** 25],
   datatype: ["u32"],
   type: ["keysonly" /* "keyvalue", */],
   disableSubgroups: [false],
   KEYS_PER_THREAD: range(10, 25),
   REDUCE_KEYS_PER_THREAD: [15, 20, 25, 30, 35],
+};
+
+/* don't do this, it'll lock up your machine */
+const SortOneSweepBlockDimSensitivityParams = {
+  inputLength: [2 ** 25],
+  datatype: ["u32"],
+  type: ["keysonly" /* "keyvalue", */],
+  disableSubgroups: [false],
+  BLOCK_DIM: range(6, 9).map((i) => 2 ** i),
+  REDUCE_BLOCK_DIM: range(6, 9).map((i) => 2 ** i),
 };
 
 const OneSweepKeysPerThreadPlot = {
@@ -1265,7 +1275,7 @@ export const SortOneSweepRegressionSuite = new BaseTestSuite({
   initializeCPUBuffer: "fisher-yates",
   trials: 100,
   // params: SortOneSweepRegressionParams,
-  params: SortOneSweepSensitivityParams,
+  params: SortOneSweepKPTSensitivityParams,
   primitive: OneSweepSort,
   // primitiveArgs: { validate: false },
   plots: [OneSweepKeysPerThreadPlot],
