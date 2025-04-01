@@ -854,19 +854,21 @@ export class OneSweepSort extends BaseSort {
   };
 
   finalizeRuntimeParameters() {
+    /** Constant factors below can be overriden by constructor; anything
+     * marked as `this.FOO = this.FOO ?? val` uses 'val' as the default */
     const inputSize = this.getBuffer("keysInOut").size; // bytes
     this.inputLength = inputSize / 4; /* 4 is size of key in bytes */
-    this.RADIX = 256;
-    this.RADIX_LOG = 8;
-    this.KEY_BITS = 32;
+    this.RADIX = this.RADIX ?? 256;
+    this.RADIX_LOG = Math.log2(this.RADIX);
+    this.KEY_BITS = this.KEY_BITS ?? 32;
     this.SORT_PASSES = divRoundUp(this.KEY_BITS, this.RADIX_LOG);
 
     /* the following better match what's in the shader! */
-    this.BLOCK_DIM = 256;
-    this.KEYS_PER_THREAD = 15;
+    this.BLOCK_DIM = this.BLOCK_DIM ?? 256;
+    this.KEYS_PER_THREAD = this.KEYS_PER_THREAD ?? 15;
     this.PART_SIZE = this.KEYS_PER_THREAD * this.BLOCK_DIM;
-    this.REDUCE_BLOCK_DIM = 128;
-    this.REDUCE_KEYS_PER_THREAD = 30;
+    this.REDUCE_BLOCK_DIM = this.REDUCE_BLOCK_DIM ?? 128;
+    this.REDUCE_KEYS_PER_THREAD = this.REDUCE_KEYS_PER_THREAD ?? 30;
     this.REDUCE_PART_SIZE = this.REDUCE_KEYS_PER_THREAD * this.REDUCE_BLOCK_DIM;
     /* end copy from shader */
     this.passWorkgroupCount = divRoundUp(this.inputLength, this.PART_SIZE);
@@ -1232,20 +1234,39 @@ export class OneSweepSort extends BaseSort {
         }*/
 
 const SortOneSweepRegressionParams = {
-  // inputLength: [2 ** 25],
+  inputLength: [2 ** 25],
   // inputLength: [2048, 4096],
-  inputLength: range(10, 27).map((i) => 2 ** i),
+  // inputLength: range(10, 27).map((i) => 2 ** i),
   datatype: ["u32"],
   type: ["keysonly" /* "keyvalue", */],
   disableSubgroups: [false],
+};
+
+const SortOneSweepSensitivityParams = {
+  inputLength: [2 ** 25],
+  datatype: ["u32"],
+  type: ["keysonly" /* "keyvalue", */],
+  disableSubgroups: [false],
+  KEYS_PER_THREAD: range(10, 25),
+  REDUCE_KEYS_PER_THREAD: [15, 20, 25, 30, 35],
+};
+
+const OneSweepKeysPerThreadPlot = {
+  x: { field: "KEYS_PER_THREAD", label: "Keys per thread" },
+  y: { field: "cputime", label: "CPU time (ns)" },
+  stroke: { field: "REDUCE_KEYS_PER_THREAD" },
+  caption:
+    "CPU timing (performance.now). Colored lines are REDUCE_KEYS_PER_THREAD.",
 };
 
 export const SortOneSweepRegressionSuite = new BaseTestSuite({
   category: "sort",
   testSuite: "onesweep",
   initializeCPUBuffer: "fisher-yates",
-  trials: 0,
-  params: SortOneSweepRegressionParams,
+  trials: 100,
+  // params: SortOneSweepRegressionParams,
+  params: SortOneSweepSensitivityParams,
   primitive: OneSweepSort,
   // primitiveArgs: { validate: false },
+  plots: [OneSweepKeysPerThreadPlot],
 });
