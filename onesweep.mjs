@@ -125,8 +125,9 @@ export class OneSweepSort extends BaseSort {
      * - We have NUM_PASSES segments, one per digit-place
      * - Each segment has:
      *   - One global histogram for its digit-place
-     *   - One local histogram for each thread block. We chained-scan
-     *     through these histograms.
+     *   - One local histogram for each thread block in the
+     *     onesweep_pass kernel. We chained-scan through these
+     *     histograms.
      * - We compute the global histogram in onesweep_scan
      *   and tag it with FLAG_INCLUSIVE.
      * Why is it structured like this? In chained-scan, we look at
@@ -403,8 +404,9 @@ export class OneSweepSort extends BaseSort {
        * In this kernel, passHist[] only stores into the Global Hist Post Scan tables (see
        *   top). We don't use the other segments.
        * sortParameters.thread_blocks is the expansion factor that leaves room for
-       *   all the local per-thread-block offsets. We will run chained-scan later on these
-       *   local per-thread-block offsets.
+       *   all the local per-thread-block offsets. It is the number of thread blocks in
+       *   onesweep_pass. We will run chained-scan later on these local per-thread-block
+       *   offsets.
        */
       let pass_index = builtinsNonuniform.lidx + sortParameters.thread_blocks * builtinsUniform.wgid.x * RADIX;
       atomicStore(&passHist[pass_index], ((subgroupExclusiveAdd(scan) +
@@ -864,7 +866,7 @@ export class OneSweepSort extends BaseSort {
     this.KEYS_PER_THREAD = 15;
     this.PART_SIZE = this.KEYS_PER_THREAD * this.BLOCK_DIM;
     this.REDUCE_BLOCK_DIM = 128;
-    this.REDUCE_KEYS_PER_THREAD = 29;
+    this.REDUCE_KEYS_PER_THREAD = 30;
     this.REDUCE_PART_SIZE = this.REDUCE_KEYS_PER_THREAD * this.REDUCE_BLOCK_DIM;
     /* end copy from shader */
     this.passWorkgroupCount = divRoundUp(this.inputLength, this.PART_SIZE);
@@ -873,8 +875,9 @@ export class OneSweepSort extends BaseSort {
       this.REDUCE_PART_SIZE
     );
     /* let's pack all uniform buffers (sortParameters) into one buffer
-     * sortParameters[0]: for global_hist and onesweep_scan
-     * sortParameters[1,2,3,4]: for onesweep_pass[0,1,2,3]
+     * sortParameters[0]: for global_hist
+     * sortParameters[1]: for onesweep_scan
+     * sortParameters[2,3,4,5]: for onesweep_pass[0,1,2,3]
      * sortParameters is size, shift, thread_blocks, seed [all u32]
      *
      * In the below calculations, we are using _length_ (in elements)
@@ -891,12 +894,12 @@ export class OneSweepSort extends BaseSort {
       /* used in creating bindings below */
       this.uniformBufferOffsetLength * Uint32Array.BYTES_PER_ELEMENT;
     this.sortParameters = new Uint32Array(
-      (this.SORT_PASSES + 1) * this.uniformBufferOffsetLength
+      (this.SORT_PASSES + 2) * this.uniformBufferOffsetLength
     );
-    for (var i = 0; i < this.SORT_PASSES + 1; i++) {
+    for (var i = 0; i < this.SORT_PASSES + 2; i++) {
       const offset = i * this.uniformBufferOffsetLength;
       this.sortParameters[offset] = this.inputLength;
-      this.sortParameters[offset + 1] = Math.max(i - 1, 0) * this.RADIX_LOG;
+      this.sortParameters[offset + 1] = Math.max(i - 2, 0) * this.RADIX_LOG;
       this.sortParameters[offset + 2] =
         i == 0 ? this.reduceWorkgroupCount : this.passWorkgroupCount;
       this.sortParameters[offset + 3] = 0;
@@ -937,7 +940,7 @@ export class OneSweepSort extends BaseSort {
       "hist",
       "passHist",
     ];
-    const sortParameterBinding = new Array(this.SORT_PASSES + 1);
+    const sortParameterBinding = new Array(this.SORT_PASSES + 2);
     for (var i = 0; i < sortParameterBinding.length; i++) {
       sortParameterBinding[i] = {
         buffer: "sortParameters",
@@ -982,7 +985,7 @@ export class OneSweepSort extends BaseSort {
         kernel: this.sortOneSweepWGSL,
         entryPoint: "onesweep_scan",
         bufferTypes,
-        bindings: [bindings0Even, [sortParameterBinding[0]]],
+        bindings: [bindings0Even, [sortParameterBinding[1]]],
         label: `OneSweep sort (${this.type}) onesweep_scan [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
@@ -993,7 +996,7 @@ export class OneSweepSort extends BaseSort {
         kernel: this.sortOneSweepWGSL,
         entryPoint: "onesweep_pass",
         bufferTypes,
-        bindings: [bindings0Even, [sortParameterBinding[1]]],
+        bindings: [bindings0Even, [sortParameterBinding[2]]],
         label: `OneSweep sort (${this.type}) onesweep_pass shift 0 [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         logLaunchParameters: false,
@@ -1005,7 +1008,7 @@ export class OneSweepSort extends BaseSort {
         kernel: this.sortOneSweepWGSL,
         entryPoint: "onesweep_pass",
         bufferTypes,
-        bindings: [bindings0Odd, [sortParameterBinding[2]]],
+        bindings: [bindings0Odd, [sortParameterBinding[3]]],
         label: `OneSweep sort (${this.type}) onesweep_pass digit 1 [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         logLaunchParameters: false,
@@ -1017,7 +1020,7 @@ export class OneSweepSort extends BaseSort {
         kernel: this.sortOneSweepWGSL,
         entryPoint: "onesweep_pass",
         bufferTypes,
-        bindings: [bindings0Even, [sortParameterBinding[3]]],
+        bindings: [bindings0Even, [sortParameterBinding[4]]],
         label: `OneSweep sort (${this.type}) onesweep_pass digit 2 [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         logLaunchParameters: false,
@@ -1029,7 +1032,7 @@ export class OneSweepSort extends BaseSort {
         kernel: this.sortOneSweepWGSL,
         entryPoint: "onesweep_pass",
         bufferTypes,
-        bindings: [bindings0Odd, [sortParameterBinding[4]]],
+        bindings: [bindings0Odd, [sortParameterBinding[5]]],
         label: `OneSweep sort (${this.type}) onesweep_pass digit 3 [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         logLaunchParameters: false,
