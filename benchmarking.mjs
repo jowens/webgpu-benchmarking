@@ -346,7 +346,6 @@ async function main(navigator) {
                 timing: "CPU",
                 bandwidth: result.bandwidthCPU,
               });
-              console.log(expts);
             });
         } // end of TEST FOR PERFORMANCE
       } // end of running all combinations for this testSuite
