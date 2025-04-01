@@ -70,6 +70,7 @@ export class Buffer {
                 val = Math.floor(Math.random() * 2049.0 - 1024);
                 break;
               }
+              case "fisheryates":
               default:
                 /* roughly, range of 32b significand */
                 val = i & (2 ** 22 - 1);
@@ -87,6 +88,7 @@ export class Buffer {
               case "bitreverse":
                 val = bitreverse(i);
                 break;
+              case "fisheryates":
               default:
                 val = i == 0 ? 0 : this.#cpuBuffer[i - 1] + 1; // trying to get u32s
                 break;
@@ -94,6 +96,24 @@ export class Buffer {
             this.#cpuBuffer[i] = val;
           }
           // otherwise, initialize nothing
+        }
+        /* now post-process the array */
+        switch (this.args.initializeCPUBuffer) {
+          case "fisher-yates": {
+            const shuffleArray = function (array) {
+              for (let i = array.length - 1; i > 0; i--) {
+                // Generate a random index from 0 to i inclusive
+                const j = Math.floor(Math.random() * (i + 1));
+
+                // Swap elements at i and j
+                [array[i], array[j]] = [array[j], array[i]];
+              }
+            };
+            shuffleArray(this.#cpuBuffer);
+            break;
+          }
+          default:
+            break;
         }
       }
     }

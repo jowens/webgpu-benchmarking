@@ -1221,7 +1221,7 @@ export class OneSweepSort extends BaseSort {
         }*/
 
 const SortOneSweepRegressionParams = {
-  inputLength: [2 ** 25],
+  inputLength: [2 ** 27],
   // inputLength: [2048, 4096],
   // inputLength: range(10, 27).map((i) => 2 ** i),
   datatype: ["u32"],
@@ -1232,7 +1232,7 @@ const SortOneSweepRegressionParams = {
 export const SortOneSweepRegressionSuite = new BaseTestSuite({
   category: "sort",
   testSuite: "onesweep",
-  initializeCPUBuffer: "bitreverse",
+  initializeCPUBuffer: "fisher-yates",
   trials: 100,
   params: SortOneSweepRegressionParams,
   primitive: OneSweepSort,
