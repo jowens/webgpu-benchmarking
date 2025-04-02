@@ -9,10 +9,15 @@ import { Kernel, AllocateBuffer, WriteGPUBuffer } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import { divRoundUp } from "./util.mjs";
 import { BaseSort } from "./sort.mjs";
+import { Datatype } from "./datatype.mjs";
 
 export class OneSweepSort extends BaseSort {
   constructor(args) {
     super(args);
+
+    /** functions for converting between u32 and other key datatypes,
+     * and also defining MAX (largest possible key value) */
+    this.datatypeObject = new Datatype(this.datatype);
 
     this.knownBuffers = [
       "keysInOut",
@@ -91,10 +96,10 @@ export class OneSweepSort extends BaseSort {
     };
 
     @group(0) @binding(0)
-    var<storage, read> keysIn: array<u32>;
+    var<storage, read> keysIn: array<${this.datatype}>;
 
     @group(0) @binding(1)
-    var<storage, read_write> keysOut: array<u32>;
+    var<storage, read_write> keysOut: array<${this.datatype}>;
 
     @group(0) @binding(2)
     var<storage, read> payloadIn: array<u32>;
@@ -236,6 +241,12 @@ export class OneSweepSort extends BaseSort {
     ${this.fnDeclarations.subgroupEmulation}
     ${this.fnDeclarations.subgroupZero}
 
+    /** OneSweepSort sorts u32 keys
+     * The following functions convert {i32, f32} keys <-> u32 keys
+     */
+    ${this.datatypeObject.keyToU32}
+    ${this.datatypeObject.keyFromU32}
+
     /**
      * Input: global keysIn[]
      * Output: global hist[SORT_PASSES * RADIX = 1024]
@@ -281,7 +292,7 @@ export class OneSweepSort extends BaseSort {
         /* assumes nwg is [x, 1, 1] */
         if (builtinsUniform.wgid.x < builtinsUniform.nwg.x - 1) {
           for (var k = 0u; k < REDUCE_KEYS_PER_THREAD; k += 1u) {
-            let key = keysIn[i];
+            let key = keyToU32(keysIn[i]);
             atomicAdd(&wg_globalHist[(key & RADIX_MASK) + hist_offset], 1u);
             atomicAdd(&wg_globalHist[((key >> 8u) & RADIX_MASK) + hist_offset + 256u], 1u);
             atomicAdd(&wg_globalHist[((key >> 16u) & RADIX_MASK) + hist_offset + 512u], 1u);
@@ -294,7 +305,7 @@ export class OneSweepSort extends BaseSort {
         if (builtinsUniform.wgid.x == builtinsUniform.nwg.x - 1) {
           for (var k = 0u; k < REDUCE_KEYS_PER_THREAD; k += 1u) {
             if (i < arrayLength(&keysIn)) {
-              let key = keysIn[i];
+              let key = keyToU32(keysIn[i]);
               atomicAdd(&wg_globalHist[(key & RADIX_MASK) + hist_offset], 1u);
               atomicAdd(&wg_globalHist[((key >> 8u) & RADIX_MASK) + hist_offset + 256u], 1u);
               atomicAdd(&wg_globalHist[((key >> 16u) & RADIX_MASK) + hist_offset + 512u], 1u);
@@ -549,15 +560,24 @@ export class OneSweepSort extends BaseSort {
         var i = builtinsNonuniform.sgid + s_offset + dev_offset;
         if (partid < builtinsUniform.nwg.x - 1) {
           for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
-            keys[k] = keysIn[i];
+            keys[k] = keyToU32(keysIn[i]);
             i += sgsz;
           }
         }
 
         if (partid == builtinsUniform.nwg.x - 1) {
           for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
-            /* warning: u32-specific */
-            keys[k] = select(0xffffffffu, keysIn[i], i < arrayLength(&keysIn));
+            /* If we're off the end of the array, pick the largest
+             * possible key value. It will end up at the end of the
+             * output array and be dropped off the end.
+             * One might think that requires a bitcast from the max
+             * value of the datatype. But remember that in the core
+             * of the sort, we are sorting only u32s, so we should
+             * pick the largest u32 (0xffffffff).
+             */
+            keys[k] = select(0xffffffff,
+                             keyToU32(keysIn[i]),
+                             i < arrayLength(&keysIn));
             i += sgsz;
           }
         }
@@ -682,7 +702,8 @@ export class OneSweepSort extends BaseSort {
       workgroupBarrier();
 
       /** Warp histograms are no longer needed; let's now use warpHist
-       * to store keys instead. Scatter keys into warpHist. */
+       * to store keys instead. Scatter keys into warpHist.
+       **/
       for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
         atomicStore(&wg_warpHist[offsets[k]], keys[k]);
       }
@@ -755,7 +776,7 @@ export class OneSweepSort extends BaseSort {
             var fallbackStart = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u) - 1);
             var fallbackEnd = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u));
             for (var i = builtinsNonuniform.lidx + fallbackStart; i < fallbackEnd; i += BLOCK_DIM) {
-              var key = keysIn[i];
+              var key = keyToU32(keysIn[i]);
               var digit = (key >> sortParameters.shift) & RADIX_MASK;
               atomicAdd(&wg_fallback[digit], 1u);
               /* if we're ever doing something other than u32, here's where to change that */
@@ -837,7 +858,7 @@ export class OneSweepSort extends BaseSort {
         var i = builtinsNonuniform.lidx;
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
           var whi = atomicLoad(&wg_warpHist[i]);
-          keysOut[wg_localHist[(whi >> sortParameters.shift) & RADIX_MASK] + i] = whi;
+          keysOut[wg_localHist[(whi >> sortParameters.shift) & RADIX_MASK] + i] = keyFromU32(whi);
           i += BLOCK_DIM;
         }
       }
@@ -846,7 +867,7 @@ export class OneSweepSort extends BaseSort {
         let final_size = arrayLength(&keysIn) - partid * PART_SIZE;
         for (var i = builtinsNonuniform.lidx; i < final_size; i += BLOCK_DIM) {
           var whi = atomicLoad(&wg_warpHist[i]);
-          keysOut[wg_localHist[(whi >> sortParameters.shift) & RADIX_MASK] + i] = whi;
+          keysOut[wg_localHist[(whi >> sortParameters.shift) & RADIX_MASK] + i] = keyFromU32(whi);
         }
       }
     } /* end kernel onesweep_pass */`;
@@ -1237,13 +1258,13 @@ const SortOneSweepRegressionParams = {
   inputLength: [2 ** 25],
   // inputLength: [2048, 4096],
   // inputLength: range(10, 27).map((i) => 2 ** i),
-  datatype: ["u32"],
+  datatype: ["u32", "i32", "f32"],
   type: ["keysonly" /* "keyvalue", */],
   disableSubgroups: [false],
 };
 
 const SortOneSweepKPTSensitivityParams = {
-  inputLength: [2 ** 25],
+  inputLength: [2 ** 12],
   datatype: ["u32"],
   type: ["keysonly" /* "keyvalue", */],
   disableSubgroups: [false],
@@ -1273,10 +1294,11 @@ export const SortOneSweepRegressionSuite = new BaseTestSuite({
   category: "sort",
   testSuite: "onesweep",
   initializeCPUBuffer: "fisher-yates",
-  trials: 100,
-  // params: SortOneSweepRegressionParams,
-  params: SortOneSweepKPTSensitivityParams,
+  // initializeCPUBuffer: "randomizeAbsUnder1024",
+  trials: 0,
+  params: SortOneSweepRegressionParams,
+  // params: SortOneSweepKPTSensitivityParams,
   primitive: OneSweepSort,
   // primitiveArgs: { validate: false },
-  plots: [OneSweepKeysPerThreadPlot],
+  // plots: [OneSweepKeysPerThreadPlot],
 });
