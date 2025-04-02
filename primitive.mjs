@@ -477,6 +477,7 @@ export class BasePrimitive {
           }
           /* trials might be >1 so make sure additional runs are idempotent */
           for (let trial = 0; trial < (args.trials ?? 1); trial++) {
+            /* dispatchGeometry is a vector, so spread it to make it x,y,z */
             kernelPass.dispatchWorkgroups(...dispatchGeometry);
           }
 
@@ -546,7 +547,16 @@ dispatchGeometry: ${dispatchGeometry}`);
         case AllocateBuffer: {
           if (!("size" in action)) {
             console.error(
-              `Primitive::AllocateBuffer: Buffer ${action.label} must include a size (args are ${action})`
+              `Primitive::AllocateBuffer: Buffer ${action.label} must include a size (args are `,
+              action,
+              ")"
+            );
+          }
+          if (!Number.isFinite(action.size)) {
+            console.error(
+              `Primitive::AllocateBuffer: Buffer ${action.label} must specify a numerical size (args are `,
+              action,
+              ")"
             );
           }
           /** What if this buffer is already allocated?
