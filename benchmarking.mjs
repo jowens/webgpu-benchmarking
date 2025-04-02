@@ -67,10 +67,11 @@ async function main(navigator) {
   adapter.info.toJSON = function () {
     return {
       architecture: this.architecture,
-      backend: this.backend,
       description: this.description,
-      driver: this.driver,
       vendor: this.vendor,
+      subgroupMinSize: this.subgroupMinSize,
+      subgroupMaxSize: this.subgroupMaxSize,
+      isFallbackAdapter: this.isFallbackAdapter,
     };
   };
 
