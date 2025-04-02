@@ -58,44 +58,51 @@ export class Buffer {
       if (this.args.initializeCPUBuffer) {
         for (let i = 0; i < this.length; i++) {
           let val;
-          if (this.datatype == "f32") {
-            switch (this.args.initializeCPUBuffer) {
-              case "randomizeMinusOneToOne":
-                /* [-1, 1] */
-                val = Math.random() * 2.0 - 1.0;
-                break;
-              case "randomizeAbsUnder1024": {
-                // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random#getting_a_random_integer_between_two_values
-                /* [-1024, 1024], ints only */
-                val = Math.floor(Math.random() * 2049.0 - 1024);
-                break;
+          switch (this.datatype) {
+            case "f32":
+              switch (this.args.initializeCPUBuffer) {
+                case "randomizeMinusOneToOne":
+                  /* [-1, 1] */
+                  val = Math.random() * 2.0 - 1.0;
+                  break;
+                case "randomizeAbsUnder1024":
+                  // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random#getting_a_random_integer_between_two_values
+                  /* [-1024, 1024], ints only */
+                  val = Math.floor(Math.random() * 2049.0 - 1024);
+                  break;
+                case "fisheryates":
+                default:
+                  /* roughly, range of 32b significand */
+                  val = i & (2 ** 22 - 1);
+                  break;
               }
-              case "fisheryates":
-              default:
-                /* roughly, range of 32b significand */
-                val = i & (2 ** 22 - 1);
-                break;
-            }
-            this.#cpuBuffer[i] = val;
-          } else if (this.datatype == "u32") {
-            switch (this.args.initializeCPUBuffer) {
-              case "xor-beef":
-                val = i ^ 0xbeef;
-                break;
-              case "constant":
-                val = 42;
-                break;
-              case "bitreverse":
-                val = bitreverse(i);
-                break;
-              case "fisheryates":
-              default:
-                val = i == 0 ? 0 : this.#cpuBuffer[i - 1] + 1; // trying to get u32s
-                break;
-            }
-            this.#cpuBuffer[i] = val;
+              this.#cpuBuffer[i] = val;
+              break;
+            case "u32":
+            case "i32":
+              switch (this.args.initializeCPUBuffer) {
+                case "xor-beef":
+                  val = i ^ 0xbeef;
+                  break;
+                case "randomizeAbsUnder1024":
+                  // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random#getting_a_random_integer_between_two_values
+                  /* [-1024, 1024], ints only */
+                  val = Math.floor(Math.random() * 2049.0 - 1024);
+                  break;
+                case "constant":
+                  val = 42;
+                  break;
+                case "bitreverse":
+                  val = bitreverse(i);
+                  break;
+                case "fisheryates":
+                default:
+                  val = i == 0 ? 0 : this.#cpuBuffer[i - 1] + 1; // trying to get u32s
+                  break;
+              }
+              break;
           }
-          // otherwise, initialize nothing
+          this.#cpuBuffer[i] = val;
         }
         /* now post-process the array */
         switch (this.args.initializeCPUBuffer) {
