@@ -9,6 +9,7 @@ import { Kernel, AllocateBuffer, WriteGPUBuffer } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 import { divRoundUp } from "./util.mjs";
 import { BaseSort } from "./sort.mjs";
+import { BinOpAddU32 } from "./binop.mjs"; // used in emulated subgroupReduce/subgroupAdd
 import { Datatype } from "./datatype.mjs";
 
 export class OneSweepSort extends BaseSort {
@@ -30,6 +31,11 @@ export class OneSweepSort extends BaseSort {
       "passHist",
       "err",
     ];
+
+    /* we need a binary operator to do subgroup operations when they
+     * are being emulated. Fortunately throughout these kernels, the only
+     * operator we need is u32 / add. */
+    this.binop = BinOpAddU32;
 
     for (const knownBuffer of this.knownBuffers) {
       /* we passed an existing buffer into the constructor */
@@ -84,7 +90,7 @@ export class OneSweepSort extends BaseSort {
      *   improves the throughput of the global scatter.
      */
 
-    let kernel = /* wgsl */ `
+    const kernel = /* wgsl */ `
     /* enables subgroups ONLY IF it was requested when creating device */
     /* WGSL requires this declaration is first in the shader */
     ${this.fnDeclarations.enableSubgroupsIfAppropriate}
@@ -200,7 +206,7 @@ export class OneSweepSort extends BaseSort {
      */
     const SORT_PASSES = ${this.SORT_PASSES}u;
     const BLOCK_DIM = ${this.BLOCK_DIM}u;
-    const MIN_SUBGROUP_SIZE = 4u;
+    const MIN_SUBGROUP_SIZE = ${this.MIN_SUBGROUP_SIZE}u;
 
     const FLAG_NOT_READY = 0u << 30;
     const FLAG_REDUCTION = 1u << 30;
@@ -237,13 +243,23 @@ export class OneSweepSort extends BaseSort {
     var<workgroup> wg_globalHist: array<atomic<u32>, REDUCE_HIST_SIZE>;
 
     /** If we're making subgroup calls and we don't have subgroup hardware,
-     * this sets up necessary declarations (workgroup memory, subgroup vars) */
-    ${this.fnDeclarations.subgroupEmulation}
+      * this sets up necessary declarations (workgroup memory, subgroup vars) */
+    /** This is kludgey, because we need to use this declaration in two kernels:
+     *    onesweep_pass and onesweep_scan. We are lucky they both have the same
+     *    workgroup size and datatype. The challenge is not here (we can easily
+     *    name wg_sw_subgroups anything we want, and allocate more than one),
+     *    it's instead that the subgroup calls in each kernel assume a hardwired
+     *    name of wg_sw_subgroups, and that's hard to fix.
+     */
+    ${this.fnDeclarations.subgroupEmulationWith({
+      datatype: "u32",
+      workgroupSize: `${this.BLOCK_DIM}`,
+    })}
     ${this.fnDeclarations.subgroupZero}
 
-    /** OneSweepSort sorts u32 keys
-     * The following functions convert {i32, f32} keys <-> u32 keys
-     */
+    /** OneSweepSort internally sorts u32 keys
+     * The following functions convert ${this.datatype} keys <-> u32 keys
+     * If we are sorting u32 keys, this function does nothing */
     ${this.datatypeObject.keyToU32}
     ${this.datatypeObject.keyFromU32}
 
@@ -271,10 +287,6 @@ export class OneSweepSort extends BaseSort {
     @compute @workgroup_size(REDUCE_BLOCK_DIM, 1, 1)
     fn global_hist(builtinsUniform: BuiltinsUniform,
         builtinsNonuniform: BuiltinsNonuniform) {
-      ${this.fnDeclarations.initializeSubgroupVars}
-
-      let sid = builtinsNonuniform.lidx / sgsz;  //Caution 1D workgroup ONLY! Ok, but technically not in HLSL spec
-
       // Reset histogram to zero
       // this may be unnecessary in WGSL? (vars are zero-initialized)
       for (var i = builtinsNonuniform.lidx; i < REDUCE_HIST_SIZE; i += REDUCE_BLOCK_DIM) {
@@ -332,6 +344,7 @@ export class OneSweepSort extends BaseSort {
     var<workgroup> wg_scan: array<u32, SCAN_MEM_SIZE>;
 
     ${this.fnDeclarations.commonDefinitions}
+    ${this.binop.wgslfn}
 
     /**
      * Input: global hist[4*256]
@@ -369,7 +382,7 @@ export class OneSweepSort extends BaseSort {
       let index = builtinsNonuniform.lidx + builtinsUniform.wgid.x * RADIX;
       let scan = atomicLoad(&hist[index]);
       let red = subgroupAdd(scan);
-      if (builtinsNonuniform.sgid == 0u) {
+      if (sgid == 0u) {
         wg_scan[sid] = red;
       }
       /* wg_scan[sid] contains sum of histogram buckets across the subgroup */
@@ -885,7 +898,10 @@ export class OneSweepSort extends BaseSort {
     this.SORT_PASSES = divRoundUp(this.KEY_BITS, this.RADIX_LOG);
 
     /* the following better match what's in the shader! */
+    this.MIN_SUBGROUP_SIZE =
+      this.device.adapterInfo.subgroupMinSize ?? this.RADIX; // this is fragile, if RADIX changes, check it
     this.BLOCK_DIM = this.BLOCK_DIM ?? 256;
+    this.workgroupSize = this.BLOCK_DIM; // this is only for subgroup emulation
     this.KEYS_PER_THREAD = this.KEYS_PER_THREAD ?? 15;
     this.PART_SIZE = this.KEYS_PER_THREAD * this.BLOCK_DIM;
     this.REDUCE_BLOCK_DIM = this.REDUCE_BLOCK_DIM ?? 128;
@@ -1254,6 +1270,13 @@ export class OneSweepSort extends BaseSort {
             );
         }*/
 
+const SortOneSweepSizeParams = {
+  inputLength: range(10, 27).map((i) => 2 ** i),
+  datatype: ["u32"],
+  type: ["keysonly" /* "keyvalue", */],
+  disableSubgroups: [false],
+};
+
 const SortOneSweepRegressionParams = {
   inputLength: [2 ** 25],
   // inputLength: [2048, 4096],
@@ -1295,8 +1318,8 @@ export const SortOneSweepRegressionSuite = new BaseTestSuite({
   testSuite: "onesweep",
   initializeCPUBuffer: "fisher-yates",
   // initializeCPUBuffer: "randomizeAbsUnder1024",
-  trials: 0,
-  params: SortOneSweepRegressionParams,
+  trials: 5,
+  params: SortOneSweepSizeParams,
   // params: SortOneSweepKPTSensitivityParams,
   primitive: OneSweepSort,
   // primitiveArgs: { validate: false },

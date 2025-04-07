@@ -66,6 +66,10 @@ export class wgslFunctions {
   get subgroupEmulation() {
     return "";
   }
+  // eslint-disable-next-line no-unused-vars
+  subgroupEmulationWith(args) {
+    return "";
+  }
   get roundUpDivU32() {
     return /* wgsl */ `fn roundUpDivU32(a : u32, b : u32) -> u32 {
     return (a + b - 1) / b;
@@ -436,9 +440,21 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
   get enableSubgroupsIfAppropriate() {
     return "/* don't enable subgroups */\n";
   }
+  /* if this declaration works for you, put it at the top of your kernel file at module scope */
   get subgroupEmulation() {
     return /* wgsl */ `var<workgroup> wg_sw_subgroups: array<${this.env.datatype}, ${this.env.workgroupSize}>;
     const sgsz: u32 = ${this.env.workgroupSize};
+    var<private> sgid: u32;`;
+  }
+  /* if instead you need more specificity, use this one instead */
+  subgroupEmulationWith(
+    args = {
+      datatype: this.env.datatype,
+      workgroupSize: this.env.workgroupSize,
+    }
+  ) {
+    return /* wgsl */ `var<workgroup> wg_sw_subgroups: array<${args.datatype}, ${args.workgroupSize}>;
+    const sgsz: u32 = ${args.workgroupSize};
     var<private> sgid: u32;`;
   }
   get subgroupZero() {
@@ -520,6 +536,14 @@ fn subgroupReduce(in: ${this.env.datatype}) -> ${this.env.datatype} {
   }
   workgroupBarrier(); // possibly not necessary given the next line?
   return workgroupUniformLoad(&wg_sw_subgroups[0]);
+}`;
+  }
+  get subgroupBinopIsU32Add() {
+    return /* wgsl */ `fn binop(a : u32, b : u32) -> u32 {return a+b;}`;
+  }
+  get subgroupAdd() {
+    return /* wgsl */ `fn subgroupAdd(in: ${this.env.datatype}) -> ${this.env.datatype} {
+  return subgroupReduce(in);
 }`;
   }
   get subgroupInclusiveOpScan() {
