@@ -68,6 +68,8 @@ export class BasePrimitive {
     }
     if (this.useSubgroups) {
       this.fnDeclarations = new wgslFunctions(this);
+      this.SUBGROUP_MIN_SIZE = this.device.adapterInfo.subgroupMinSize;
+      this.SUBGROUP_MAX_SIZE = this.device.adapterInfo.subgroupMaxSize;
     } else {
       this.fnDeclarations = new wgslFunctionsWithoutSubgroupSupport(this);
     }
