@@ -148,6 +148,7 @@ ${this.fnDeclarations.subgroupInclusiveOpScan}
 ${this.fnDeclarations.subgroupReduce}
 ${this.fnDeclarations.subgroupShuffle}
 ${this.fnDeclarations.subgroupBallot}
+${this.fnDeclarations.wgReduce({ wgTempIsArgument: true })}
 
 @compute @workgroup_size(BLOCK_DIM, 1, 1)
 fn main(builtinsUniform: BuiltinsUniform,
@@ -423,48 +424,14 @@ fn main(builtinsUniform: BuiltinsUniform,
       if (control_flag == LOCKED) {
         /* begin fallback */
         let fallback_id = wg_broadcast_tile_id;
-        {
-          var t_red: ${this.datatype} = ${this.binop.identity};
-          var i = s_offset + fallback_id * VEC_TILE_SIZE;
-          for (var k = 0u; k < VEC4_SPT; k += 1u) {
-            t_red = binop(t_red, vec4Reduce(inputBuffer[i])); /* reduce the 4 members of inputBuffer[i] */
-            i += sgsz;
-          }
-
-          let s_red = subgroupReduce(t_red);
-          if (sgid == 0u) {
-            wg_fallback[sid] = s_red;
-          }
+        var t_red: ${this.datatype} = ${this.binop.identity};
+        var i = s_offset + fallback_id * VEC_TILE_SIZE;
+        for (var k = 0u; k < VEC4_SPT; k += 1u) {
+          t_red = binop(t_red, vec4Reduce(inputBuffer[i])); /* reduce the 4 members of inputBuffer[i] */
+          i += sgsz;
         }
-        workgroupBarrier();
-
-        // Non-divergent subgroup agnostic reduction across subgroup partial reductions (wg_fallback)
-        var f_red: ${this.datatype} = ${this.binop.identity};
-        {
-          var offset = 0u;
-          var top_offset = 0u;
-          let lane_pred = sgid == sgsz - 1u;
-          if (sgsz > aligned_size) {
-            /* don't enter the loop */
-            f_red = wg_fallback[builtinsNonuniform.lidx + top_offset];
-          } else {
-            for (var j = sgsz; j <= aligned_size; j <<= lane_log) {
-              let step = local_spine >> offset;
-              let pred = builtinsNonuniform.lidx < step;
-              //// EMU never enters this loop
-              f_red = subgroupReduce(select(${this.binop.identity},
-                                            wg_fallback[builtinsNonuniform.lidx + top_offset],
-                                            pred));
-              if (pred && lane_pred) {
-                wg_fallback[sid + step + top_offset] = f_red;
-              }
-              workgroupBarrier();
-              top_offset += step;
-              offset += lane_log;
-            }
-          }
-        }
-        // output of the above block is f_red
+        /* reduce t_red across entire subgroup */
+        var f_red: ${this.datatype} = wgReduce(t_red, &wg_fallback, builtinsUniform, builtinsNonuniform);
 
         var sg0: bool = isSubgroupZero(builtinsNonuniform.lidx, sgsz);
         if (sg0) { /* activate only subgroup 0 */
@@ -610,7 +577,7 @@ fn main(builtinsUniform: BuiltinsUniform,
           ],
         ],
         label: `Thomas Smith's scan (${this.type}) with decoupled lookback/decoupled fallback [subgroups: ${this.useSubgroups}]`,
-        logKernelCodeToConsole: false,
+        logKernelCodeToConsole: true,
         getDispatchGeometry: () => {
           return this.getSimpleDispatchGeometry();
         },
@@ -671,10 +638,26 @@ const DLDFRegressionParams = {
   disableSubgroups: [false, true],
 };
 
+const DLDFMiniParams = {
+  inputLength: [2 ** 20],
+  type: ["inclusive", "exclusive"],
+  datatype: ["f32", "u32"],
+  binopbase: [BinOpAdd],
+  disableSubgroups: [false],
+};
+
 export const DLDFScanAccuracyRegressionSuite = new BaseTestSuite({
   category: "scan",
   testSuite: "DLDF",
   trials: 2,
   params: DLDFRegressionParams,
+  primitive: DLDFScan,
+});
+
+export const DLDFScanMiniSuite = new BaseTestSuite({
+  category: "scan",
+  testSuite: "DLDF",
+  trials: 2,
+  params: DLDFMiniParams,
   primitive: DLDFScan,
 });

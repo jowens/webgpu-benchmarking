@@ -31,8 +31,8 @@
 import { BinOpAdd } from "./binop.mjs";
 
 export class wgslFunctions {
-  constructor(env) {
-    this.env = env;
+  constructor(args) {
+    this.env = args;
   }
   get commonDefinitions() {
     return /* wgsl */ `
@@ -235,65 +235,95 @@ export class wgslFunctions {
     }
     `;
   }
-  get workgroupReduce() {
-    return /* wgsl */ `
-    /**
-     * Function: Each workgroup's thread 0 returns the reduction of
-     *     numThreadsPerWorkgroup items from the input array
-     * Approach: Envision threads in a 2D array within workgroup, where
-     *     the "width" of that array is one subgroup. First reduce
-     *     left to right (within a subgroup), then reduce top to bottom
-     *     (across subgroups). Use shared memory to store per-subgroup
-     *     reductions.
-     * (1) Read one item per thread. If we don't have enough workgroups
-     *     to do that, read more. Reduce all those items per-thread.
-     *     (The usual case will be "one item per thread".)
-     * (2) Reduce within the subgroup. One thread in subgroup n writes
-     *     that reduction to temp[n] in shared memory.
-     * (3) Subgroup 0 reads that temp array and reduces it. Output is
-     *     returned from thread 0.
+  wgReduce(args = {}) {
+    args = { ...args, ...this.env };
+
+    /** The normal case would be that we only need one function of each type
+     * thus we can use the shortFnName for declaration and call, and can do
+     * everything within a template string
+     * But if we need more flexibility (here, more than one reduce call),
+     * we should do it outside the template string. Until that is necessary,
+     * this capability has not been used and is untested
      *
-     * This approach requires an associative reduction operator (this
-     * is necessary to take advantage of parallelism). If we read more than
-     * one item per thread, it also requires a commutative operator.
+     * Primitive-specific args are:
+     * - wgTempIsArgument: if true, pass in a temp array for temporary use
+     * - useLongFunctionName: use config-specific name, otherwise wgReduce
      */
-  fn workgroupReduce(
-    input: ptr<storage, array<${this.env.datatype}>, read>,
-    wgTemp: ptr<workgroup, array<${this.env.datatype}, 32> >,
-    builtins: Builtins
-  ) -> ${this.env.datatype} {
-    ${this.env.fnDeclarations.computeLinearizedGridParameters}
-    /* TODO: what if there are more threads than subgroup_size * subgroup_size? */
-    var acc: ${this.env.datatype} = ${this.env.binop.identity};
-    var numSubgroups = roundUpDivU32(${this.env.workgroupSize}, builtins.sgsz);
-    /* note: this access pattern is not particularly TLB-friendly */
-    for (var i = gid;
-      i < arrayLength(input);
-      i += totalThreadCount) {
-        /* on every iteration, grab wkgpsz items */
-        acc = binop(acc, input[i]);
+    const shortFnName = "wgReduce";
+    /* every entry in params below needs to be a member of args */
+    const params = ["binop", "datatype", "workgroupSize", "SUBGROUP_MIN_SIZE"];
+    for (const necessary of params) {
+      if (!(necessary in args)) {
+        console.warn(`wgReduce: field '${necessary}' must be set in args`);
+      }
     }
-    /* acc contains a partial sum for every thread */
-    workgroupBarrier();
-    /* now we need to reduce acc within our workgroup */
-    /* switch to local IDs only. write into wg memory */
-    acc = ${this.env.binop.subgroupReduceOp}(acc);
-    var mySubgroupID = builtins.lidx / builtins.sgsz;
-    if (subgroupElect()) {
-      /* I'm the first element in my subgroup */
-      wgTemp[mySubgroupID] = acc;
+    const config = params.map((param) => args[param]).join("_");
+    const wgTemp = args.wgTempIsArgument ? "wgTemp" : `wg_temp_${config}`;
+    const declareAndUseLocalWgTemp = !args.wgTempIsArgument;
+    const longFnName = `${shortFnName}_${config}`;
+    const fnName = args?.useLongFunctionName ? longFnName : shortFnName;
+    const fn = /* wgsl */ `
+${
+  declareAndUseLocalWgTemp
+    ? `const TEMP_${longFnName}_MEM_SIZE = 2 * ${args.workgroupSize} / ${args.SUBGROUP_MIN_SIZE};
+var<workgroup> ${wgTemp}: array<${args.datatype}, TEMP_${longFnName}_MEM_SIZE>;`
+    : ""
+}
+
+fn ${fnName}(// in: ptr<storage, array<${args.datatype}>, read>,
+             in: ${args.datatype},
+             ${
+               declareAndUseLocalWgTemp
+                 ? ""
+                 : `wgTemp: ptr<workgroup, array<${args.datatype}, MAX_PARTIALS_SIZE>>,`
+             }
+             builtinsUniform: BuiltinsUniform,
+             builtinsNonuniform: BuiltinsNonuniform) -> ${args.datatype} {
+  let lidx = builtinsNonuniform.lidx;
+  let sgsz = builtinsUniform.sgsz;
+  let sgid = builtinsNonuniform.sgid;
+  let BLOCK_DIM: u32 = ${args.workgroupSize};
+  let sid = lidx / sgsz;
+  let lane_log = u32(countTrailingZeros(sgsz)); /* log_2(sgsz) */
+  /* workgroup size / subgroup size; how many partial reductions in this tile? */
+  let local_spine: u32 = BLOCK_DIM >> lane_log;
+  let aligned_size_base = 1u << ((u32(countTrailingZeros(local_spine)) + lane_log - 1u) / lane_log * lane_log);
+  /* fix for aligned_size_base == 1 (needed when subgroup_size == BLOCK_DIM) */
+  let aligned_size = select(aligned_size_base, BLOCK_DIM, aligned_size_base == 1);
+
+  let t_red = in;
+  let s_red = ${args.binop.subgroupReduceOp}(t_red);
+  if (sgid == 0u) {
+    ${wgTemp}[sid] = s_red;
+  }
+  workgroupBarrier();
+  var f_red: ${args.datatype} = ${args.binop.identity};
+
+  var offset = 0u;
+  var top_offset = 0u;
+  let lane_pred = sgid == sgsz - 1u;
+  if (sgsz > aligned_size) {
+    /* don't enter the loop */
+    f_red = ${wgTemp}[lidx + top_offset];
+  } else {
+    for (var j = sgsz; j <= aligned_size; j <<= lane_log) {
+      let step = local_spine >> offset;
+      let pred = lidx < step;
+      f_red = ${args.binop.subgroupReduceOp}(
+        select(${args.binop.identity},
+        ${wgTemp}[lidx + top_offset],
+        pred));
+      if (pred && lane_pred) {
+        ${wgTemp}[sid + step + top_offset] = f_red;
+      }
+      workgroupBarrier();
+      top_offset += step;
+      offset += lane_log;
     }
-    workgroupBarrier(); /* completely populate wg memory */
-    if (builtins.lidx < builtins.sgsz) { /* only activate 0th subgroup */
-      /* read sums of all other subgroups into acc, in parallel across the subgroup */
-      /* acc is only valid for lid < numSubgroups, so ... */
-      /* select(f, t, cond) */
-      acc = select(${this.env.binop.identity}, wgTemp[builtins.lidx], builtins.lidx < numSubgroups);
-    }
-    /* acc is called here for everyone, but it only matters for thread 0 */
-    acc = ${this.env.binop.subgroupReduceOp}(acc);
-    return acc;
-        };`;
+  }
+  return f_red;
+}`;
+    return fn;
   }
   get workgroupScan() {
     /**
