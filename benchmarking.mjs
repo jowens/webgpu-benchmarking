@@ -45,6 +45,7 @@ import {
   // DLDFScanTestSuite,
   // DLDFReduceTestSuite,
   DLDFScanAccuracyRegressionSuite,
+  DLDFScanMiniSuite,
 } from "./scandldf.mjs";
 import { subgroupAccuracyRegressionSuites } from "./subgroupRegression.mjs";
 import { SortOneSweepRegressionSuite } from "./onesweep.mjs";
@@ -109,6 +110,8 @@ async function main(navigator) {
   let testSuites = subgroupAccuracyRegressionSuites;
   testSuites.push(DLDFScanAccuracyRegressionSuite);
   testSuites = [SortOneSweepRegressionSuite];
+  testSuites = [DLDFScanAccuracyRegressionSuite];
+  testSuites = [DLDFScanMiniSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
   let validations = { done: 0, errors: 0 };
