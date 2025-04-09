@@ -18,6 +18,9 @@ class BinOp {
     // no defaults! if something is undefined, go with it
     Object.assign(this, args);
   }
+  toString() {
+    return this.constructor.name;
+  }
 }
 
 export class BinOpNop extends BinOp {
