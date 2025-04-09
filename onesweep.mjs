@@ -89,7 +89,6 @@ export class OneSweepSort extends BaseSort {
      *   neighboring keys next to each other in workgroup memory and significantly
      *   improves the throughput of the global scatter.
      */
-
     const kernel = /* wgsl */ `
     /* enables subgroups ONLY IF it was requested when creating device */
     /* WGSL requires this declaration is first in the shader */
@@ -206,7 +205,7 @@ export class OneSweepSort extends BaseSort {
      */
     const SORT_PASSES = ${this.SORT_PASSES}u;
     const BLOCK_DIM = ${this.BLOCK_DIM}u;
-    const MIN_SUBGROUP_SIZE = ${this.MIN_SUBGROUP_SIZE}u;
+    const SUBGROUP_MIN_SIZE = ${this.SUBGROUP_MIN_SIZE}u;
 
     const FLAG_NOT_READY = 0u << 30;
     const FLAG_REDUCTION = 1u << 30;
@@ -340,7 +339,7 @@ export class OneSweepSort extends BaseSort {
     } /* end kernel global_hist */
 
     // Assumes block dim 256
-    const SCAN_MEM_SIZE = RADIX / MIN_SUBGROUP_SIZE;
+    const SCAN_MEM_SIZE = RADIX / SUBGROUP_MIN_SIZE;
     var<workgroup> wg_scan: array<u32, SCAN_MEM_SIZE>;
 
     ${this.fnDeclarations.commonDefinitions}
@@ -898,7 +897,7 @@ export class OneSweepSort extends BaseSort {
     this.SORT_PASSES = divRoundUp(this.KEY_BITS, this.RADIX_LOG);
 
     /* the following better match what's in the shader! */
-    this.MIN_SUBGROUP_SIZE =
+    this.SUBGROUP_MIN_SIZE =
       this.device.adapterInfo.subgroupMinSize ?? this.RADIX; // this is fragile, if RADIX changes, check it
     this.BLOCK_DIM = this.BLOCK_DIM ?? 256;
     this.workgroupSize = this.BLOCK_DIM; // this is only for subgroup emulation
@@ -1286,6 +1285,15 @@ const SortOneSweepRegressionParams = {
   disableSubgroups: [false],
 };
 
+const SortOneSweepSingletonParams = {
+  inputLength: [2 ** 25],
+  // inputLength: [2048, 4096],
+  // inputLength: range(10, 27).map((i) => 2 ** i),
+  datatype: ["u32"],
+  type: ["keysonly" /* "keyvalue", */],
+  disableSubgroups: [false],
+};
+
 const SortOneSweepKPTSensitivityParams = {
   inputLength: [2 ** 12],
   datatype: ["u32"],
@@ -1319,8 +1327,7 @@ export const SortOneSweepRegressionSuite = new BaseTestSuite({
   initializeCPUBuffer: "fisher-yates",
   // initializeCPUBuffer: "randomizeAbsUnder1024",
   trials: 5,
-  params: SortOneSweepSizeParams,
-  // params: SortOneSweepKPTSensitivityParams,
+  params: SortOneSweepSingletonParams,
   primitive: OneSweepSort,
   // primitiveArgs: { validate: false },
   // plots: [OneSweepKeysPerThreadPlot],
