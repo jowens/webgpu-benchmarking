@@ -93,6 +93,9 @@ export class BasePrimitive {
    *   compute kernel parameters (e.g., number of workgroups)
    *   based the number of inputs in that buffer, so we need
    *   to know its datatype
+   *
+   * It may be useful at some point to have this function
+   * return the buffer it just registered.
    */
   registerBuffer(bufferObj) {
     switch (typeof bufferObj) {
