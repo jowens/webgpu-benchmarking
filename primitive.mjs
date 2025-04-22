@@ -430,7 +430,8 @@ export class BasePrimitive {
                 !(binding in this.__buffers || binding.buffer in this.__buffers)
               ) {
                 console.error(
-                  `Primitive ${this.label} has no registered buffer ${binding}.`
+                  `Primitive ${this.label} has no registered buffer ${binding}.`,
+                  this
                 );
               }
             }
