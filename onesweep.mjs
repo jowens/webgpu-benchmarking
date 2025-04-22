@@ -193,7 +193,7 @@ export class OneSweepSort extends BaseSort {
 
     if (this.type === "keyvalue") {
       /* much easier to put the payload buffers at the end since they're
-       * the only ones that differ between keyonly and keyvalue */
+       * the only ones that differ between keysonly and keyvalue */
       kernel += /* WGSL */ `
     /** payload{In,Out}: we do no computation with these, we simply
      * copy them around, so use u32 no matter what the underlying
@@ -1099,6 +1099,8 @@ export class OneSweepSort extends BaseSort {
         memdest
       );
     }
+    let inputForPrinting = memsrc;
+    let outputForPrinting = memdest;
     let memsrcpayload, memdestpayload;
     if (this.type === "keyvalue") {
       memsrcpayload =
@@ -1118,6 +1120,35 @@ export class OneSweepSort extends BaseSort {
           memdestpayload
         );
       }
+      inputForPrinting = [memsrc, memsrcpayload];
+      outputForPrinting = [memdest, memdestpayload];
+    }
+    function sortKeysAndValues(keys, values) {
+      if (keys.length !== values.length) {
+        console.warn(
+          "OneSweepSort::validate: keys/values must have same length",
+          keys,
+          values
+        );
+      }
+
+      /* Array.from converts from typed array, because map on
+       * typed array ONLY returns the same typed array */
+      const combined = Array.from(keys).map((key, index) => ({
+        key,
+        value: values[index],
+      }));
+
+      combined.sort((a, b) => {
+        if (a.key < b.key) return -1;
+        if (a.key > b.key) return 1;
+        return 0;
+      });
+
+      const sortedKeys = combined.map((item) => item.key);
+      const sortedValues = combined.map((item) => item.value);
+
+      return { keys: sortedKeys, values: sortedValues };
     }
     let referenceOutput;
     switch (args?.outputKeys?.label) {
@@ -1160,7 +1191,15 @@ export class OneSweepSort extends BaseSort {
       }
       case undefined:
       default:
-        referenceOutput = memsrc.slice().sort();
+        switch (this.type) {
+          case "keyvalue":
+            referenceOutput = sortKeysAndValues(memsrc, memsrcpayload);
+            break;
+          case "keysonly":
+          default:
+            referenceOutput = memsrc.slice().sort();
+            break;
+        }
         break;
     }
     const isValidComparison = (args = {}) => {
@@ -1186,26 +1225,49 @@ export class OneSweepSort extends BaseSort {
           return true; /* valid throughout entire buffer */
       }
     };
-    function validates(args) {
-      return args.cpu == args.gpu;
-    }
+    /* arrow function to allow use of this.args within it */
+    const validates = (args) => {
+      switch (this.type) {
+        case "keyvalue":
+          return args.cpu[0] === args.gpu[0] && args.cpu[1] === args.gpu[1];
+        case "keysonly":
+        default:
+          return args.cpu === args.gpu;
+      }
+    };
     let returnString = "";
     let allowedErrors = 5;
     for (let i = 0; i < memdest.length; i++) {
       if (allowedErrors == 0) {
         break;
       }
-      const compare = {
-        cpu: referenceOutput[i],
-        gpu: memdest[i],
-        datatype: this.datatype,
-        i,
-        label: args?.outputKeys?.label,
-      };
+      let compare;
+      switch (this.type) {
+        case "keyvalue":
+          compare = {
+            // set properly for keyvalue, it's now just a copy of keysonly
+            cpu: [referenceOutput.keys[i], referenceOutput.values[i]],
+            gpu: [memdest[i], memdestpayload[i]],
+            datatype: this.datatype,
+            i,
+            label: args?.outputKeys?.label,
+          };
+          break;
+        case "keysonly":
+        default:
+          compare = {
+            cpu: referenceOutput[i],
+            gpu: memdest[i],
+            datatype: this.datatype,
+            i,
+            label: args?.outputKeys?.label,
+          };
+          break;
+      }
       if (isValidComparison(compare) && !validates(compare)) {
-        returnString += `\nElement ${i}: expected ${
-          referenceOutput[i]
-        }, instead saw ${memdest[i]} (diff: ${Math.abs(
+        returnString += `\nElement ${i}: expected ${compare.cpu}, instead saw ${
+          compare.gpu
+        } (diff: ${Math.abs(
           (referenceOutput[i] - memdest[i]) / referenceOutput[i]
         )}).`;
         if (this.getBuffer("debugBuffer")) {
@@ -1227,12 +1289,12 @@ export class OneSweepSort extends BaseSort {
         this.type,
         this,
         "with input",
-        memsrc,
+        inputForPrinting,
         "should validate to (reference)",
         args?.outputKeys?.label ?? "",
         referenceOutput,
         "and actually validates to (GPU output)",
-        memdest,
+        outputForPrinting,
         this.getBuffer("debugBuffer") ? "\ndebugBuffer" : "",
         this.getBuffer("debugBuffer")
           ? this.getBuffer("debugBuffer").cpuBuffer
