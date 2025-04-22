@@ -23,14 +23,15 @@ export class OneSweepSort extends BaseSort {
     this.knownBuffers = [
       "keysInOut",
       "keysTemp",
-      "payloadInOut",
-      "payloadTemp",
       "sortParameters",
       "sortBump",
       "hist",
       "passHist",
       "err",
     ];
+    if (args.type === "keyvalue") {
+      this.knownBuffers.push("payloadInOut", "payloadTemp");
+    }
 
     /* we need a binary operator to do subgroup operations when they
      * are being emulated. Fortunately throughout these kernels, the only
@@ -89,7 +90,7 @@ export class OneSweepSort extends BaseSort {
      *   neighboring keys next to each other in workgroup memory and significantly
      *   improves the throughput of the global scatter.
      */
-    const kernel = /* wgsl */ `
+    let kernel = /* wgsl */ `
     /* enables subgroups ONLY IF it was requested when creating device */
     /* WGSL requires this declaration is first in the shader */
     ${this.fnDeclarations.enableSubgroupsIfAppropriate}
@@ -107,15 +108,9 @@ export class OneSweepSort extends BaseSort {
     var<storage, read_write> keysOut: array<${this.datatype}>;
 
     @group(0) @binding(2)
-    var<storage, read> payloadIn: array<u32>;
-
-    @group(0) @binding(3)
-    var<storage, read_write> payloadOut: array<u32>;
-
-    @group(0) @binding(4)
     var<storage, read_write> sortBump: array<atomic<u32>>;
 
-    @group(0) @binding(5)
+    @group(0) @binding(3)
     var<storage, read_write> hist: array<atomic<u32>>;
     /**
      * hist keeps NUM_PASSES histograms, one per digit, each having RADIX entries
@@ -126,7 +121,7 @@ export class OneSweepSort extends BaseSort {
      *   hist[768, 1024) has 256 buckets that count keysIn[31:24]
      */
 
-    @group(0) @binding(6)
+    @group(0) @binding(4)
     var<storage, read_write> passHist: array<atomic<u32>>;
     /**
      * Structure of passHist:
@@ -194,8 +189,23 @@ export class OneSweepSort extends BaseSort {
      * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
      * |   ?    |   ?    |   ?    | ... |   ?     |
      * +------------------------------------------+
-     */
+     */`;
 
+    if (this.type === "keyvalue") {
+      /* much easier to put the payload buffers at the end since they're
+       * the only ones that differ between keyonly and keyvalue */
+      kernel += /* WGSL */ `
+    /** payload{In,Out}: we do no computation with these, we simply
+     * copy them around, so use u32 no matter what the underlying
+     * datatype is */
+    @group(0) @binding(5)
+    var<storage, read> payloadIn: array<u32>;
+
+    @group(0) @binding(6)
+    var<storage, read_write> payloadOut: array<u32>;`;
+    }
+
+    kernel += /* WGSL */ `
     @group(1) @binding(0)
     var<uniform> sortParameters : SortParameters;
 
@@ -459,7 +469,6 @@ export class OneSweepSort extends BaseSort {
     var<workgroup> wg_broadcast_tile_id: u32;
     /* the next two could be folded into wg_warpHist but are separate for now */
     var<workgroup> wg_sgCompletionCount: atomic<u32>; /* have all our subgroups succeeded? */
-    var<workgroup> wg_sgCompletionCount_nonatomic: u32; /* shadows wg_sgCompletionCount, necessary b/c no workgroupUniformAtomicLoad */
     var<workgroup> wg_incomplete: u32; /* did anyone see a thread that didn't complete? */
     var<workgroup> wg_fallback: array<atomic<u32>, RADIX>; /* we can probably find another place to put this that doesn't require a separate allocation */
 
@@ -556,7 +565,6 @@ export class OneSweepSort extends BaseSort {
       if (builtinsNonuniform.lidx == 0u) {
         wg_broadcast_tile_id = atomicAdd(&sortBump[sortParameters.shift >> 3u], 1u);
         atomicStore(&wg_sgCompletionCount, 0);
-        wg_sgCompletionCount_nonatomic = 0;
         wg_incomplete = 0;
       }
       let partid = workgroupUniformLoad(&wg_broadcast_tile_id);
@@ -733,7 +741,6 @@ export class OneSweepSort extends BaseSort {
        *
        * In workgroup memory, we use
        * - wg_sgCompletionCount: counts number of successful subgroups
-       *   - wg_sgCompletionCount_nonatomic: shadows wg_sgCompletionCount
        * - wg_incomplete: did anyone see a thread that didn't complete?
        * both initialized to zero at the top of the kernel
        */
@@ -746,7 +753,7 @@ export class OneSweepSort extends BaseSort {
         let part_offset = builtinsUniform.nwg.x * (sortParameters.shift >> 3u) * RADIX;
         var lookbackIndex = (builtinsNonuniform.lidx & RADIX_MASK) + part_offset + lookbackid * RADIX; /* ptr into passHist */
 
-        while (workgroupUniformLoad(&wg_sgCompletionCount_nonatomic) < num_subgroups) { /* loop until every subgroup is done */
+        while (workgroupUniformLoad(&wg_sgCompletionCount) < num_subgroups) { /* loop until every subgroup is done */
           var spinCount = 0u;
           // Read the preceding histogram from the spine (stored in passHist)
           var flagPayload = 0u;
@@ -848,11 +855,6 @@ export class OneSweepSort extends BaseSort {
               atomicAdd(&wg_sgCompletionCount, 1);
             }
           }
-          workgroupBarrier();
-          if (builtinsNonuniform.lidx == 0) {
-            wg_sgCompletionCount_nonatomic = atomicLoad(&wg_sgCompletionCount);
-          }
-          workgroupBarrier();
         } /* end while (wg_sgCompletionCount < subgroup_size) */
 
         // Post results into shared memory
@@ -869,8 +871,9 @@ export class OneSweepSort extends BaseSort {
       if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
         var i = builtinsNonuniform.lidx;
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
-          var whi = atomicLoad(&wg_warpHist[i]);
-          keysOut[wg_localHist[(whi >> sortParameters.shift) & RADIX_MASK] + i] = keyFromU32(whi);
+          var keyU32 = atomicLoad(&wg_warpHist[i]);
+          var dest = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;
+          keysOut[dest] = keyFromU32(keyU32);
           i += BLOCK_DIM;
         }
       }
@@ -878,8 +881,9 @@ export class OneSweepSort extends BaseSort {
       if (partid == builtinsUniform.nwg.x - 1u) { /* last workgroup */
         let final_size = arrayLength(&keysIn) - partid * PART_SIZE;
         for (var i = builtinsNonuniform.lidx; i < final_size; i += BLOCK_DIM) {
-          var whi = atomicLoad(&wg_warpHist[i]);
-          keysOut[wg_localHist[(whi >> sortParameters.shift) & RADIX_MASK] + i] = keyFromU32(whi);
+          var keyU32 = atomicLoad(&wg_warpHist[i]);
+          var dest = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;
+          keysOut[dest] = keyFromU32(keyU32);
         }
       }
     } /* end kernel onesweep_pass */`;
@@ -949,22 +953,12 @@ export class OneSweepSort extends BaseSort {
   compute() {
     this.finalizeRuntimeParameters();
     const bufferTypes = [
-      [
-        "read-only-storage",
-        "storage",
-        "read-only-storage",
-        "storage",
-        "storage",
-        "storage",
-        "storage",
-      ],
+      ["read-only-storage", "storage", "storage", "storage", "storage"],
       ["uniform"],
     ];
     const bindings0Even = [
       "keysInOut",
       "keysTemp",
-      "payloadInOut",
-      "payloadTemp",
       "sortBump",
       "hist",
       "passHist",
@@ -972,12 +966,15 @@ export class OneSweepSort extends BaseSort {
     const bindings0Odd = [
       "keysTemp",
       "keysInOut",
-      "payloadTemp",
-      "payloadInOut",
       "sortBump",
       "hist",
       "passHist",
     ];
+    if (this.type === "keyvalue") {
+      bufferTypes[0].push("read-only-storage", "storage");
+      bindings0Even.push("payloadInOut", "payloadTemp");
+      bindings0Odd.push("payloadInOut", "payloadTemp");
+    }
     const sortParameterBinding = new Array(this.SORT_PASSES + 2);
     for (var i = 0; i < sortParameterBinding.length; i++) {
       sortParameterBinding[i] = {
@@ -1084,6 +1081,7 @@ export class OneSweepSort extends BaseSort {
     /** if we pass in buffers, use them, otherwise use the named buffers
      * that are stored in the primitive */
     /* assumes that cpuBuffers are populated with useful data */
+    /* TODO: if type === keyvalue, does not compare payloads at all */
     const memsrc =
       args.inputKeys?.cpuBuffer ??
       args.inputKeys ??
@@ -1100,6 +1098,26 @@ export class OneSweepSort extends BaseSort {
         "dest",
         memdest
       );
+    }
+    let memsrcpayload, memdestpayload;
+    if (this.type === "keyvalue") {
+      memsrcpayload =
+        args.inputPayload?.cpuBuffer ??
+        args.inputPayload ??
+        this.getBuffer("payloadInOut").cpuBuffer;
+      memdestpayload =
+        args.outputPayload?.cpuBuffer ??
+        args.outputPayload ??
+        this.getBuffer("payloadInOut").cpuBuffer;
+      if (memsrcpayload === memdestpayload) {
+        console.warn(
+          "Warning: source and destination payload for OneSweep::validate are the same buffer",
+          "src:",
+          memsrcpayload,
+          "dest",
+          memdestpayload
+        );
+      }
     }
     let referenceOutput;
     switch (args?.outputKeys?.label) {
@@ -1282,6 +1300,7 @@ const SortOneSweepRegressionParams = {
   // inputLength: range(10, 27).map((i) => 2 ** i),
   datatype: ["u32", "i32", "f32"],
   type: ["keysonly" /* "keyvalue", */],
+  direction: ["ascending"],
   disableSubgroups: [false],
 };
 
@@ -1290,7 +1309,7 @@ const SortOneSweepSingletonParams = {
   // inputLength: [2048, 4096],
   // inputLength: range(10, 27).map((i) => 2 ** i),
   datatype: ["u32"],
-  type: ["keysonly" /* "keyvalue", */],
+  type: ["keysonly", "keyvalue"],
   disableSubgroups: [false],
 };
 

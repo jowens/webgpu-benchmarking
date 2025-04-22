@@ -109,9 +109,9 @@ async function main(navigator) {
 
   let testSuites = subgroupAccuracyRegressionSuites;
   testSuites.push(DLDFScanAccuracyRegressionSuite);
-  testSuites = [SortOneSweepRegressionSuite];
   testSuites = [DLDFScanAccuracyRegressionSuite];
   testSuites = [DLDFScanMiniSuite];
+  testSuites = [SortOneSweepRegressionSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
   let validations = { done: 0, errors: 0 };
@@ -207,16 +207,17 @@ async function main(navigator) {
           primitive.registerBuffer(testOutputBuffer);
         }
 
-        if (testSuite.category == "sort" && testSuite.testSuite == "onesweep") {
+        if (
+          testSuite.category === "sort" &&
+          testSuite.testSuite === "onesweep" &&
+          primitive.type === "keyvalue"
+        ) {
           /* these will eventually need to be named variables */
-          /* if a key-only sort, initialize with epsilon length */
-          const length =
-            primitive.type == "keyvalue" ? testInputBuffer.length : 1;
           primitive.registerBuffer(
             new Buffer({
               device,
               datatype: primitive.datatype,
-              length,
+              length: testInputBuffer.length,
               label: "payloadInOut",
               createCPUBuffer: true,
               initializeCPUBuffer: true /* fill with default data */,
@@ -228,7 +229,7 @@ async function main(navigator) {
             new Buffer({
               device,
               datatype: primitive.datatype,
-              length,
+              length: testInputBuffer.length,
               label: "payloadTemp",
               createCPUBuffer: true,
               createGPUBuffer: true,
