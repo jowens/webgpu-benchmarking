@@ -124,7 +124,10 @@ async function main(navigator) {
     /* do we perform a computation? */
     if (testSuite?.primitive?.prototype.compute) {
       const uniqueRuns = new Set(); // if uniqueRuns is defined, don't run dups
-      let testInputBuffer, testOriginalInputBuffer, testOutputBuffer;
+      let testInputBuffer,
+        testOriginalInputBuffer,
+        testOriginalValuesBuffer,
+        testOutputBuffer;
       const inputBufferIsOutputBuffer =
         testSuite.category == "sort" && testSuite.testSuite == "onesweep";
       for (const params of combinations(testSuite.params)) {
@@ -169,7 +172,8 @@ async function main(navigator) {
         }
         if (testSuite.category == "sort" && testSuite.testSuite == "onesweep") {
           testInputBuffer.label = "keysInOut"; /* sort wants a different name */
-          testOriginalInputBuffer = testInputBuffer.cpuBuffer.slice(); // copy
+          /* copy the input to a safe place, because we're going to overwrite it */
+          testOriginalInputBuffer = testInputBuffer.cpuBuffer.slice();
         }
         primitive.registerBuffer(testInputBuffer);
 
@@ -213,18 +217,18 @@ async function main(navigator) {
           primitive.type === "keyvalue"
         ) {
           /* these will eventually need to be named variables */
-          primitive.registerBuffer(
-            new Buffer({
-              device,
-              datatype: primitive.datatype,
-              length: testInputBuffer.length,
-              label: "payloadInOut",
-              createCPUBuffer: true,
-              initializeCPUBuffer: true /* fill with default data */,
-              createGPUBuffer: true,
-              initializeGPUBuffer: true /* with CPU data */,
-            })
-          );
+          const testValuesBuffer = new Buffer({
+            device,
+            datatype: primitive.datatype,
+            length: testInputBuffer.length,
+            label: "payloadInOut",
+            createCPUBuffer: true,
+            initializeCPUBuffer: true /* fill with default data */,
+            createGPUBuffer: true,
+            initializeGPUBuffer: true /* with CPU data */,
+          });
+          primitive.registerBuffer(testValuesBuffer);
+          testOriginalValuesBuffer = testValuesBuffer.cpuBuffer.slice();
           primitive.registerBuffer(
             new Buffer({
               device,
@@ -270,6 +274,10 @@ async function main(navigator) {
               inputKeys: testOriginalInputBuffer,
               outputKeys: primitive.getBuffer("keysInOut"),
             };
+            if (primitive.type == "keyvalue") {
+              validateArgs.inputPayload = testOriginalValuesBuffer;
+              validateArgs.outputPayload = primitive.getBuffer("payloadInOut");
+            }
           }
           const errorstr = primitive.validate(validateArgs);
           if (errorstr == "") {
