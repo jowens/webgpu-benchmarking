@@ -236,18 +236,19 @@ export class wgslFunctions {
     `;
   }
   wgReduce(args = {}) {
-    args = { ...args, ...this.env };
+    args = { ...this.env, ...args }; // properties in args overwrite this.env
 
     /** The normal case would be that we only need one function of each type
      * thus we can use the shortFnName for declaration and call, and can do
-     * everything within a template string
-     * But if we need more flexibility (here, more than one reduce call),
-     * we should do it outside the template string. Until that is necessary,
-     * this capability has not been used and is untested
+     * everything within a template string.
+     * But if we need more flexibility (here, more than one reduce call in
+     * a module), we should do it outside the template string. Until that is
+     * necessary, this capability has not been used and is untested.
      *
      * Primitive-specific args are:
      * - wgTempIsArgument: if true, pass in a temp array for temporary use
      * - useLongFunctionName: use config-specific name, otherwise wgReduce
+     * Default for all of these is "false".
      */
     const shortFnName = "wgReduce";
     /* every entry in params below needs to be a member of args */
