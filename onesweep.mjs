@@ -873,16 +873,24 @@ export class OneSweepSort extends BaseSort {
        * This is the only difference between keysonly and key-value sort
        */
 
+      /* key-value sort needs additional allocated registers */
+      ${
+        this.type === "keyvalue"
+          ? /* WGSL */ `
+      var digits = array<u32, KEYS_PER_THREAD>(); // this could be u8 if supported
+      var values = array<u32, KEYS_PER_THREAD>();`
+          : ""
+      }
+
       if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
         var i = builtinsNonuniform.lidx;
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
+          var keyU32 = atomicLoad(&wg_warpHist[i]);
+          /* difference between keysonly & keyvalue: keyvalue needs to save/reuse digit */
           ${
             this.type === "keysonly"
               ? /* WGSL */ `
-            var keyU32 = atomicLoad(&wg_warpHist[i]);
-            var destaddr = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;
-            keysOut[destaddr] = keyFromU32(keyU32);
-            i += BLOCK_DIM;`
+            var destaddr = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;`
               : ""
             // alt[s_localHistogram[s_warpHistograms[i] >> radixShift & RADIX_MASK] + i] =
             // s_warpHistograms[i];
@@ -890,10 +898,8 @@ export class OneSweepSort extends BaseSort {
           ${
             this.type === "keyvalue"
               ? /* WGSL */ `
-            var keyU32 = atomicLoad(&wg_warpHist[i]);
-            var destaddr = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;
-            keysOut[destaddr] = keyFromU32(keyU32);
-            i += BLOCK_DIM;`
+            digits[k] = (keyU32 >> sortParameters.shift) & RADIX_MASK;
+            var destaddr = wg_localHist[digits[k]] + i;`
               : ""
             // for (uint32_t i = threadIdx.x, k = 0; k < KEYS_PER_THREAD; i += blockDim.x, ++k) {
             //   digits[k] = s_warpHistograms[i] >> radixShift & RADIX_MASK;
@@ -916,6 +922,8 @@ export class OneSweepSort extends BaseSort {
             //   altPayload[s_localHistogram[digits[k]] + i] = s_warpHistograms[i];
             // }
           }
+          keysOut[destaddr] = keyFromU32(keyU32);
+          i += BLOCK_DIM;
         }
       }
 
