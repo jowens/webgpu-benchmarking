@@ -859,22 +859,63 @@ export class OneSweepSort extends BaseSort {
 
         // Post results into shared memory
         if (builtinsNonuniform.lidx < RADIX) {
-          /** This curious-looking line is necessary to get the right scattering location in the next
-            * code block. */
-          wg_localHist[builtinsNonuniform.lidx] = lookbackAccumulate - wg_localHist[builtinsNonuniform.lidx];
+          /** This curious-looking line is necessary to get the right
+           * scattering location in the next code block. */
+          wg_localHist[builtinsNonuniform.lidx] =
+            lookbackAccumulate - wg_localHist[builtinsNonuniform.lidx];
         }
         workgroupBarrier();
       } /* end code block */
 
       /** Scatter keys from shared memory to global memory. Getting the correct scattering location
-       * is dependent on the curious-looking line above. */
+       * is dependent on the curious-looking line above.
+       *
+       * This is the only difference between keysonly and key-value sort
+       */
+
       if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
         var i = builtinsNonuniform.lidx;
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
-          var keyU32 = atomicLoad(&wg_warpHist[i]);
-          var dest = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;
-          keysOut[dest] = keyFromU32(keyU32);
-          i += BLOCK_DIM;
+          ${
+            this.type === "keysonly"
+              ? /* WGSL */ `
+            var keyU32 = atomicLoad(&wg_warpHist[i]);
+            var destaddr = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;
+            keysOut[destaddr] = keyFromU32(keyU32);
+            i += BLOCK_DIM;`
+              : ""
+            // alt[s_localHistogram[s_warpHistograms[i] >> radixShift & RADIX_MASK] + i] =
+            // s_warpHistograms[i];
+          }
+          ${
+            this.type === "keyvalue"
+              ? /* WGSL */ `
+            var keyU32 = atomicLoad(&wg_warpHist[i]);
+            var destaddr = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;
+            keysOut[destaddr] = keyFromU32(keyU32);
+            i += BLOCK_DIM;`
+              : ""
+            // for (uint32_t i = threadIdx.x, k = 0; k < KEYS_PER_THREAD; i += blockDim.x, ++k) {
+            //   digits[k] = s_warpHistograms[i] >> radixShift & RADIX_MASK;
+            //   alt[s_localHistogram[digits[k]] + i] = s_warpHistograms[i];
+            // }
+            // __syncthreads();
+            // {
+            //   const uint32_t warpOffset = WARP_INDEX * LANE_COUNT * KEYS_PER_THREAD;
+            //   const uint32_t devOffset = partitionIndex * WARPS * LANE_COUNT * KEYS_PER_THREAD;
+            //   for (uint32_t i = getLaneId() + warpOffset + devOffset, k = 0; k < KEYS_PER_THREAD;
+            //        i += LANE_COUNT, ++k) {
+            //     values[k] = payload[i];
+            //   }
+            //   for (uint32_t k = 0; k < KEYS_PER_THREAD; ++k) {
+            //     s_warpHistograms[offsets[k]] = values[k];
+            //   }
+            // }
+            // __syncthreads();
+            // for (uint32_t i = threadIdx.x, k = 0; k < KEYS_PER_THREAD; i += blockDim.x, ++k) {
+            //   altPayload[s_localHistogram[digits[k]] + i] = s_warpHistograms[i];
+            // }
+          }
         }
       }
 
@@ -882,8 +923,8 @@ export class OneSweepSort extends BaseSort {
         let final_size = arrayLength(&keysIn) - partid * PART_SIZE;
         for (var i = builtinsNonuniform.lidx; i < final_size; i += BLOCK_DIM) {
           var keyU32 = atomicLoad(&wg_warpHist[i]);
-          var dest = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;
-          keysOut[dest] = keyFromU32(keyU32);
+          var destaddr = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;
+          keysOut[destaddr] = keyFromU32(keyU32);
         }
       }
     } /* end kernel onesweep_pass */`;
@@ -1081,7 +1122,13 @@ export class OneSweepSort extends BaseSort {
     /** if we pass in buffers, use them, otherwise use the named buffers
      * that are stored in the primitive */
     /* assumes that cpuBuffers are populated with useful data */
-    /* TODO: if type === keyvalue, does not compare payloads at all */
+    /** this is a reasonably complex validation routine. it handles:
+     * - keysonly and keyvalue
+     * - validating against the output but also two intermediate sort
+     *   stages (hist and passHist)
+     * - validating against just a subset of the output (necessary for
+     *   passHist)
+     */
     const memsrc =
       args.inputKeys?.cpuBuffer ??
       args.inputKeys ??
@@ -1245,7 +1292,6 @@ export class OneSweepSort extends BaseSort {
       switch (this.type) {
         case "keyvalue":
           compare = {
-            // set properly for keyvalue, it's now just a copy of keysonly
             cpu: [referenceOutput.keys[i], referenceOutput.values[i]],
             gpu: [memdest[i], memdestpayload[i]],
             datatype: this.datatype,
