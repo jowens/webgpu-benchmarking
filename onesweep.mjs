@@ -1481,9 +1481,9 @@ export class OneSweepSort extends BaseSort {
         }*/
 
 const SortOneSweepSizeParams = {
-  inputLength: range(10, 27).map((i) => 2 ** i),
+  inputLength: range(10, 25).map((i) => 2 ** i),
   datatype: ["u32"],
-  type: ["keysonly" /* "keyvalue", */],
+  type: ["keysonly", "keyvalue"],
   disableSubgroups: [false],
 };
 
@@ -1533,14 +1533,22 @@ const OneSweepKeysPerThreadPlot = {
     "CPU timing (performance.now). Colored lines are REDUCE_KEYS_PER_THREAD.",
 };
 
+const OneSweepKeyvKeyValuePlot = {
+  x: { field: "inputLength", label: "Input length (# of 4B u32s)" },
+  y: { field: "cputime", label: "CPU time (ns)" },
+  stroke: { field: "type" },
+  caption:
+    "CPU timing (performance.now). Stroke distinguishes key-only vs. key-value.",
+};
+
 export const SortOneSweepRegressionSuite = new BaseTestSuite({
   category: "sort",
   testSuite: "onesweep",
   initializeCPUBuffer: "fisher-yates",
   // initializeCPUBuffer: "randomizeAbsUnder1024",
   trials: 5,
-  params: SortOneSweepSingletonParams,
+  params: SortOneSweepSizeParams,
   primitive: OneSweepSort,
   // primitiveArgs: { validate: false },
-  // plots: [OneSweepKeysPerThreadPlot],
+  plots: [OneSweepKeyvKeyValuePlot],
 });
