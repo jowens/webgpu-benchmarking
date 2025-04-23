@@ -367,7 +367,7 @@ async function main(navigator) {
         console.info(
           `${validations.done} validations complete${
             validations?.tested ? ` (${validations.tested})` : ""
-          }, ${validations.errors} errors.`
+          }, ${validations.errors} error${validations.errors != 1 ? "s" : ""}.`
         );
       }
 
