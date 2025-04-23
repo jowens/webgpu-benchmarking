@@ -126,7 +126,8 @@ async function main(navigator) {
       const uniqueRuns = new Set(); // if uniqueRuns is defined, don't run dups
       let testInputBuffer,
         testOriginalInputBuffer,
-        testOriginalValuesBuffer,
+        testValuesBuffer, // key-value sort
+        testOriginalValuesBuffer, // key-value sort
         testOutputBuffer;
       const inputBufferIsOutputBuffer =
         testSuite.category == "sort" && testSuite.testSuite == "onesweep";
@@ -218,7 +219,7 @@ async function main(navigator) {
           primitive.type === "keyvalue"
         ) {
           /* these will eventually need to be named variables */
-          const testValuesBuffer = new Buffer({
+          testValuesBuffer = new Buffer({
             device,
             datatype: primitive.datatype,
             length: testInputBuffer.length,
@@ -227,6 +228,7 @@ async function main(navigator) {
             initializeCPUBuffer: testSuite.initializeCPUBuffer,
             createGPUBuffer: true,
             initializeGPUBuffer: true /* with CPU data */,
+            createMappableGPUBuffer: true,
           });
           primitive.registerBuffer(testValuesBuffer);
           testOriginalValuesBuffer = testValuesBuffer.cpuBuffer.slice();
@@ -238,6 +240,7 @@ async function main(navigator) {
               label: "payloadTemp",
               createCPUBuffer: true,
               createGPUBuffer: true,
+              createMappableGPUBuffer: true /* debugging */,
             })
           );
           /** if we wanted "hist" and "passHist" visible to the CPU,
@@ -263,6 +266,13 @@ async function main(navigator) {
           // submit ONE run just for correctness
           await primitive.execute();
           await testOutputBuffer.copyGPUToCPU();
+          if (
+            testSuite.category === "sort" &&
+            testSuite.testSuite === "onesweep" &&
+            primitive.type === "keyvalue"
+          ) {
+            await testValuesBuffer.copyGPUToCPU();
+          }
           if (testDebugBuffer) {
             await testDebugBuffer.copyGPUToCPU();
           }
