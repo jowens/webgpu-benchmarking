@@ -189,12 +189,12 @@ export class OneSweepSort extends BaseSort {
      * | Bin  0 | Bin  1 | Bin  2 | ... | Bin 255 |
      * |   ?    |   ?    |   ?    | ... |   ?     |
      * +------------------------------------------+
-     */`;
-
-    if (this.type === "keyvalue") {
+     */
+    ${
       /* much easier to put the payload buffers at the end since they're
        * the only ones that differ between keysonly and keyvalue */
-      kernel += /* WGSL */ `
+      this.type === "keyvalue"
+        ? /* WGSL */ `
     /** payload{In,Out}: we do no computation with these, we simply
      * copy them around, so use u32 no matter what the underlying
      * datatype is */
@@ -202,10 +202,10 @@ export class OneSweepSort extends BaseSort {
     var<storage, read> payloadIn: array<u32>;
 
     @group(0) @binding(6)
-    var<storage, read_write> payloadOut: array<u32>;`;
+    var<storage, read_write> payloadOut: array<u32>;`
+        : ""
     }
 
-    kernel += /* WGSL */ `
     @group(1) @binding(0)
     var<uniform> sortParameters : SortParameters;
 
@@ -575,6 +575,8 @@ export class OneSweepSort extends BaseSort {
        */
       var keys = array<u32, KEYS_PER_THREAD>();
       {
+        /* blocking the load like this---subgroup-blocked?---enables us
+         * to minimize the size of scan up the warp histograms. */
         let dev_offset = partid * PART_SIZE;
         let s_offset = sid * sgsz * KEYS_PER_THREAD;
         var i = builtinsNonuniform.sgid + s_offset + dev_offset;
@@ -878,13 +880,17 @@ export class OneSweepSort extends BaseSort {
         this.type === "keyvalue"
           ? /* WGSL */ `
       var digits = array<u32, KEYS_PER_THREAD>(); // this could be u8 if supported
+      /* TODO: "I save the key's digit, not the global offset. I was trying to save on
+       * registers---u8 vs u32---but given that the minimal addressable memory size for
+       * registers is u32, it probably doesn't save anything over simply saving the
+       * global scatter location." */
       var values = array<u32, KEYS_PER_THREAD>();`
           : ""
       }
 
       if (partid < builtinsUniform.nwg.x - 1u) { /* not the last workgroup */
-        var i = builtinsNonuniform.lidx;
-        for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
+        var i = builtinsNonuniform.lidx; /* WGSL doesn't let me put this in for initializer */
+        for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* scatter keys */
           var keyU32 = atomicLoad(&wg_warpHist[i]);
           /* difference between keysonly & keyvalue: keyvalue needs to save/reuse digit */
           ${
@@ -892,8 +898,6 @@ export class OneSweepSort extends BaseSort {
               ? /* WGSL */ `
             var destaddr = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;`
               : ""
-            // alt[s_localHistogram[s_warpHistograms[i] >> radixShift & RADIX_MASK] + i] =
-            // s_warpHistograms[i];
           }
           ${
             this.type === "keyvalue"
@@ -901,29 +905,40 @@ export class OneSweepSort extends BaseSort {
             digits[k] = (keyU32 >> sortParameters.shift) & RADIX_MASK;
             var destaddr = wg_localHist[digits[k]] + i;`
               : ""
-            // for (uint32_t i = threadIdx.x, k = 0; k < KEYS_PER_THREAD; i += blockDim.x, ++k) {
-            //   digits[k] = s_warpHistograms[i] >> radixShift & RADIX_MASK;
-            //   alt[s_localHistogram[digits[k]] + i] = s_warpHistograms[i];
-            // }
-            // __syncthreads();
-            // {
-            //   const uint32_t warpOffset = WARP_INDEX * LANE_COUNT * KEYS_PER_THREAD;
-            //   const uint32_t devOffset = partitionIndex * WARPS * LANE_COUNT * KEYS_PER_THREAD;
-            //   for (uint32_t i = getLaneId() + warpOffset + devOffset, k = 0; k < KEYS_PER_THREAD;
-            //        i += LANE_COUNT, ++k) {
-            //     values[k] = payload[i];
-            //   }
-            //   for (uint32_t k = 0; k < KEYS_PER_THREAD; ++k) {
-            //     s_warpHistograms[offsets[k]] = values[k];
-            //   }
-            // }
-            // __syncthreads();
-            // for (uint32_t i = threadIdx.x, k = 0; k < KEYS_PER_THREAD; i += blockDim.x, ++k) {
-            //   altPayload[s_localHistogram[digits[k]] + i] = s_warpHistograms[i];
-            // }
           }
           keysOut[destaddr] = keyFromU32(keyU32);
           i += BLOCK_DIM;
+        }
+        ${
+          /* now do the rest of the work for keyvalue */
+          this.type === "keyvalue"
+            ? /* WGSL */ `
+        workgroupBarrier();
+        {
+          /* this code exactly tracks how we loaded from keysIn[] */
+          /* this is necessary to make sure the offsets are consistent */
+          let dev_offset = partid * PART_SIZE;
+          let s_offset = sid * sgsz * KEYS_PER_THREAD;
+          var i = builtinsNonuniform.sgid + s_offset + dev_offset;
+          for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* load payloads */
+            values[k] = payloadIn[i];
+            i += sgsz;
+          }
+
+          for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* scatter payloads */
+            atomicStore(&wg_warpHist[offsets[k]], values[k]);
+          }
+        }
+        workgroupBarrier();
+
+        i = builtinsNonuniform.lidx;
+        for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
+          var value = atomicLoad(&wg_warpHist[i]);
+          var destaddr = wg_localHist[digits[k]] + i;
+          payloadOut[destaddr] = value;
+          i += BLOCK_DIM;
+        }`
+            : ""
         }
       }
 
@@ -1022,7 +1037,7 @@ export class OneSweepSort extends BaseSort {
     if (this.type === "keyvalue") {
       bufferTypes[0].push("read-only-storage", "storage");
       bindings0Even.push("payloadInOut", "payloadTemp");
-      bindings0Odd.push("payloadInOut", "payloadTemp");
+      bindings0Odd.push("payloadTemp", "payloadInOut");
     }
     const sortParameterBinding = new Array(this.SORT_PASSES + 2);
     for (var i = 0; i < sortParameterBinding.length; i++) {
