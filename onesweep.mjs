@@ -944,10 +944,62 @@ export class OneSweepSort extends BaseSort {
 
       if (partid == builtinsUniform.nwg.x - 1u) { /* last workgroup */
         let final_size = arrayLength(&keysIn) - partid * PART_SIZE;
-        for (var i = builtinsNonuniform.lidx; i < final_size; i += BLOCK_DIM) {
-          var keyU32 = atomicLoad(&wg_warpHist[i]);
-          var destaddr = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;
-          keysOut[destaddr] = keyFromU32(keyU32);
+        var i = builtinsNonuniform.lidx; /* WGSL doesn't let me put this in for initializer */
+        for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* scatter keys */
+          if (i < final_size) {
+            var keyU32 = atomicLoad(&wg_warpHist[i]);
+            /* difference between keysonly & keyvalue: keyvalue needs to save/reuse digit */
+            ${
+              this.type === "keysonly"
+                ? /* WGSL */ `
+              var destaddr = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;`
+                : ""
+            }
+            ${
+              this.type === "keyvalue"
+                ? /* WGSL */ `
+              digits[k] = (keyU32 >> sortParameters.shift) & RADIX_MASK;
+              var destaddr = wg_localHist[digits[k]] + i;`
+                : ""
+            }
+            keysOut[destaddr] = keyFromU32(keyU32);
+          }
+          i += BLOCK_DIM;
+        }
+        ${
+          /* now do the rest of the work for keyvalue */
+          this.type === "keyvalue"
+            ? /* WGSL */ `
+        workgroupBarrier();
+        {
+          /* this code exactly tracks how we loaded from keysIn[] */
+          /* this is necessary to make sure the offsets are consistent */
+          let dev_offset = partid * PART_SIZE;
+          let s_offset = sid * sgsz * KEYS_PER_THREAD;
+          var i = builtinsNonuniform.sgid + s_offset + dev_offset;
+          for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* load payloads */
+            if (i < final_size) {
+              values[k] = payloadIn[i];
+            }
+            i += sgsz;
+          }
+
+          for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* scatter payloads */
+            atomicStore(&wg_warpHist[offsets[k]], values[k]);
+          }
+        }
+        workgroupBarrier();
+
+        i = builtinsNonuniform.lidx;
+        for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
+          if (i < final_size) {
+            var value = atomicLoad(&wg_warpHist[i]);
+            var destaddr = wg_localHist[digits[k]] + i;
+            payloadOut[destaddr] = value;
+          }
+          i += BLOCK_DIM;
+        }`
+            : ""
         }
       }
     } /* end kernel onesweep_pass */`;
