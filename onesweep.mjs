@@ -48,8 +48,17 @@ export class OneSweepSort extends BaseSort {
   }
 
   get bytesTransferred() {
-    /* TODO: make this work for key-payload also */
-    return this.getBuffer("keysInOut").size * 2;
+    switch (this.type) {
+      case "keyvalue":
+        return (
+          (this.getBuffer("keysInOut").size +
+            this.getBuffer("payloadInOut").size) *
+          2
+        );
+      case "keysonly":
+      default:
+        return this.getBuffer("keysInOut").size * 2;
+    }
   }
 
   sortOneSweepWGSL = () => {
@@ -596,6 +605,7 @@ export class OneSweepSort extends BaseSort {
              * value of the datatype. But remember that in the core
              * of the sort, we are sorting only u32s, so we should
              * pick the largest u32 (0xffffffff).
+             * TODO: If we do descending sort, use 0 instead
              */
             keys[k] = select(0xffffffff,
                              keyToU32(keysIn[i]),
@@ -978,7 +988,7 @@ export class OneSweepSort extends BaseSort {
           let s_offset = sid * sgsz * KEYS_PER_THREAD;
           var i = builtinsNonuniform.sgid + s_offset + dev_offset;
           for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* load payloads */
-            if (i < final_size) {
+            if (i < arrayLength(&keysIn)) {
               values[k] = payloadIn[i];
             }
             i += sgsz;
