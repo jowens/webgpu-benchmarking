@@ -15,6 +15,9 @@ import { Datatype } from "./datatype.mjs";
 export class OneSweepSort extends BaseSort {
   constructor(args) {
     super(args);
+    if (this.direction === undefined) {
+      this.direction = "ascending";
+    }
 
     /** functions for converting between u32 and other key datatypes,
      * and also defining MAX (largest possible key value) */
@@ -1255,7 +1258,7 @@ export class OneSweepSort extends BaseSort {
       inputForPrinting = [memsrc, memsrcpayload];
       outputForPrinting = [memdest, memdestpayload];
     }
-    function sortKeysAndValues(keys, values) {
+    function sortKeysAndValues(keys, values, direction) {
       if (keys.length !== values.length) {
         console.warn(
           "OneSweepSort::validate: keys/values must have same length",
@@ -1271,11 +1274,23 @@ export class OneSweepSort extends BaseSort {
         value: values[index],
       }));
 
-      combined.sort((a, b) => {
-        if (a.key < b.key) return -1;
-        if (a.key > b.key) return 1;
-        return 0;
-      });
+      switch (direction) {
+        case "descending":
+          combined.sort((a, b) => {
+            if (a.key < b.key) return 1;
+            if (a.key > b.key) return -1;
+            return 0;
+          });
+          break;
+        default:
+        case "ascending":
+          combined.sort((a, b) => {
+            if (a.key < b.key) return -1;
+            if (a.key > b.key) return 1;
+            return 0;
+          });
+          break;
+      }
 
       const sortedKeys = combined.map((item) => item.key);
       const sortedValues = combined.map((item) => item.value);
@@ -1325,7 +1340,12 @@ export class OneSweepSort extends BaseSort {
       default:
         switch (this.type) {
           case "keyvalue":
-            referenceOutput = sortKeysAndValues(memsrc, memsrcpayload);
+            console.log(this);
+            referenceOutput = sortKeysAndValues(
+              memsrc,
+              memsrcpayload,
+              this.direction
+            );
             break;
           case "keysonly":
           default:
@@ -1503,6 +1523,7 @@ const SortOneSweepSingletonParams = {
   // inputLength: range(10, 27).map((i) => 2 ** i),
   datatype: ["u32"],
   type: ["keysonly", "keyvalue"],
+  direction: ["ascending", "descending"],
   disableSubgroups: [false],
 };
 
@@ -1547,8 +1568,8 @@ export const SortOneSweepRegressionSuite = new BaseTestSuite({
   initializeCPUBuffer: "fisher-yates",
   // initializeCPUBuffer: "randomizeAbsUnder1024",
   trials: 5,
-  params: SortOneSweepSizeParams,
+  params: SortOneSweepSingletonParams,
   primitive: OneSweepSort,
   // primitiveArgs: { validate: false },
-  plots: [OneSweepKeyvKeyValuePlot],
+  // plots: [OneSweepKeyvKeyValuePlot],
 });
