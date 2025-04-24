@@ -111,6 +111,8 @@ export class OneSweepSort extends BaseSort {
         shift: u32,
         thread_blocks: u32, // number of tiles in the onesweep_pass kernel
         seed: u32,
+        last_pass: u32, /* 1 if this is the last call of onesweep_pass
+                         * used for descending sort to flip direction */
     };
 
     @group(0) @binding(0)
@@ -283,6 +285,18 @@ export class OneSweepSort extends BaseSort {
      * If we are sorting u32 keys, this function does nothing */
     ${this.datatypeObject.keyToU32}
     ${this.datatypeObject.keyFromU32}
+
+    /** Support descending sort, accomplished by reversing the write index on the last
+     * pass of onesweep_pass on writeback of keys and values */
+    fn directionizeIndex(deviceIndex: u32, numElements: u32) -> u32 {
+      /** for a descending sort, ONLY on last sort pass, flip index calculation 0-n => n-0.
+       * Otherwise, just return the index. */
+      ${
+        this.direction === "descending"
+          ? /* WGSL */ "return select(deviceIndex, numElements - deviceIndex - 1, sortParameters.last_pass == 1);"
+          : /* WGSL */ "return deviceIndex;"
+      }
+    }
 
     /**
      * Input: global keysIn[]
@@ -909,14 +923,17 @@ export class OneSweepSort extends BaseSort {
           ${
             this.type === "keysonly"
               ? /* WGSL */ `
-            var destaddr = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;`
+          var digit = (keyU32 >> sortParameters.shift) & RADIX_MASK;
+          var destaddr = directionizeIndex(wg_localHist[digit] + i,
+                                             arrayLength(&keysIn));`
               : ""
           }
           ${
             this.type === "keyvalue"
               ? /* WGSL */ `
-            digits[k] = (keyU32 >> sortParameters.shift) & RADIX_MASK;
-            var destaddr = wg_localHist[digits[k]] + i;`
+          digits[k] = (keyU32 >> sortParameters.shift) & RADIX_MASK;
+          var destaddr = directionizeIndex(wg_localHist[digits[k]] + i,
+                                             arrayLength(&keysIn));`
               : ""
           }
           keysOut[destaddr] = keyFromU32(keyU32);
@@ -947,7 +964,8 @@ export class OneSweepSort extends BaseSort {
         i = builtinsNonuniform.lidx;
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
           var value = atomicLoad(&wg_warpHist[i]);
-          var destaddr = wg_localHist[digits[k]] + i;
+          var destaddr = directionizeIndex(wg_localHist[digits[k]] + i,
+                                             arrayLength(&keysIn));
           payloadOut[destaddr] = value;
           i += BLOCK_DIM;
         }`
@@ -965,14 +983,17 @@ export class OneSweepSort extends BaseSort {
             ${
               this.type === "keysonly"
                 ? /* WGSL */ `
-              var destaddr = wg_localHist[(keyU32 >> sortParameters.shift) & RADIX_MASK] + i;`
+            var digit = (keyU32 >> sortParameters.shift) & RADIX_MASK;
+            var destaddr = directionizeIndex(wg_localHist[digit] + i,
+                                               arrayLength(&keysIn));`
                 : ""
             }
             ${
               this.type === "keyvalue"
                 ? /* WGSL */ `
-              digits[k] = (keyU32 >> sortParameters.shift) & RADIX_MASK;
-              var destaddr = wg_localHist[digits[k]] + i;`
+            digits[k] = (keyU32 >> sortParameters.shift) & RADIX_MASK;
+            var destaddr = directionizeIndex(wg_localHist[digits[k]] + i,
+                                               arrayLength(&keysIn));`
                 : ""
             }
             keysOut[destaddr] = keyFromU32(keyU32);
@@ -1007,7 +1028,8 @@ export class OneSweepSort extends BaseSort {
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
           if (i < final_size) {
             var value = atomicLoad(&wg_warpHist[i]);
-            var destaddr = wg_localHist[digits[k]] + i;
+            var destaddr = directionizeIndex(wg_localHist[digits[k]] + i,
+                                               arrayLength(&keysIn));
             payloadOut[destaddr] = value;
           }
           i += BLOCK_DIM;
@@ -1049,12 +1071,12 @@ export class OneSweepSort extends BaseSort {
      * sortParameters[0]: for global_hist
      * sortParameters[1]: for onesweep_scan
      * sortParameters[2,3,4,5]: for onesweep_pass[0,1,2,3]
-     * sortParameters is size, shift, thread_blocks, seed [all u32]
+     * sortParameters is size, shift, thread_blocks, seed, last_pass [all u32]
      *
      * In the below calculations, we are using _length_ (in elements)
      *   not _size_ (in bytes)
      */
-    this.uniformBufferLength = 4; // 4 elements in uniformBuffer
+    this.uniformBufferLength = 5; // 5 elements in uniformBuffer
     this.uniformBufferOffsetLength = Math.max(
       /* how much space per entry? BUT it better be at least minUniform... */
       this.uniformBufferLength,
@@ -1074,7 +1096,10 @@ export class OneSweepSort extends BaseSort {
       this.sortParameters[offset + 2] =
         i == 0 ? this.reduceWorkgroupCount : this.passWorkgroupCount;
       this.sortParameters[offset + 3] = 0;
+      // set to 1 ONLY on last sort pass
+      this.sortParameters[offset + 4] = i == this.SORT_PASSES + 1 ? 1 : 0;
     }
+
     this.sortBumpSize = 4 * 4; // size: (4usize * std::mem::size_of::<u32>())
     this.histSize = this.SORT_PASSES * this.RADIX * 4; // (((SORT_PASSES * RADIX) as usize) * std::mem::size_of::<u32>())
     this.passHistSize = this.passWorkgroupCount * this.histSize; // ((pass_thread_blocks * (RADIX * SORT_PASSES) as usize) * std::mem::size_of::<u32>())
@@ -1139,7 +1164,7 @@ export class OneSweepSort extends BaseSort {
         entryPoint: "global_hist",
         bufferTypes,
         bindings: [bindings0Even, [sortParameterBinding[0]]],
-        label: `OneSweep sort (${this.type}) global_hist [subgroups: ${this.useSubgroups}]`,
+        label: `OneSweep sort (${this.type}, ${this.direction}) global_hist [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
           return [this.reduceWorkgroupCount];
@@ -1150,7 +1175,7 @@ export class OneSweepSort extends BaseSort {
         entryPoint: "onesweep_scan",
         bufferTypes,
         bindings: [bindings0Even, [sortParameterBinding[1]]],
-        label: `OneSweep sort (${this.type}) onesweep_scan [subgroups: ${this.useSubgroups}]`,
+        label: `OneSweep sort (${this.type}, ${this.direction}) onesweep_scan [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
           return [this.SORT_PASSES];
@@ -1161,7 +1186,7 @@ export class OneSweepSort extends BaseSort {
         entryPoint: "onesweep_pass",
         bufferTypes,
         bindings: [bindings0Even, [sortParameterBinding[2]]],
-        label: `OneSweep sort (${this.type}) onesweep_pass shift 0 [subgroups: ${this.useSubgroups}]`,
+        label: `OneSweep sort (${this.type}, ${this.direction}) onesweep_pass shift 0 [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         logLaunchParameters: false,
         getDispatchGeometry: () => {
@@ -1173,7 +1198,7 @@ export class OneSweepSort extends BaseSort {
         entryPoint: "onesweep_pass",
         bufferTypes,
         bindings: [bindings0Odd, [sortParameterBinding[3]]],
-        label: `OneSweep sort (${this.type}) onesweep_pass digit 1 [subgroups: ${this.useSubgroups}]`,
+        label: `OneSweep sort (${this.type}, ${this.direction}) onesweep_pass digit 1 [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         logLaunchParameters: false,
         getDispatchGeometry: () => {
@@ -1185,7 +1210,7 @@ export class OneSweepSort extends BaseSort {
         entryPoint: "onesweep_pass",
         bufferTypes,
         bindings: [bindings0Even, [sortParameterBinding[4]]],
-        label: `OneSweep sort (${this.type}) onesweep_pass digit 2 [subgroups: ${this.useSubgroups}]`,
+        label: `OneSweep sort (${this.type}, ${this.direction}) onesweep_pass digit 2 [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         logLaunchParameters: false,
         getDispatchGeometry: () => {
@@ -1197,7 +1222,7 @@ export class OneSweepSort extends BaseSort {
         entryPoint: "onesweep_pass",
         bufferTypes,
         bindings: [bindings0Odd, [sortParameterBinding[5]]],
-        label: `OneSweep sort (${this.type}) onesweep_pass digit 3 [subgroups: ${this.useSubgroups}]`,
+        label: `OneSweep sort (${this.type}, ${this.direction}) onesweep_pass digit 3 [subgroups: ${this.useSubgroups}]`,
         logKernelCodeToConsole: false,
         logLaunchParameters: false,
         getDispatchGeometry: () => {
@@ -1340,7 +1365,6 @@ export class OneSweepSort extends BaseSort {
       default:
         switch (this.type) {
           case "keyvalue":
-            console.log(this);
             referenceOutput = sortKeysAndValues(
               memsrc,
               memsrcpayload,
@@ -1348,9 +1372,20 @@ export class OneSweepSort extends BaseSort {
             );
             break;
           case "keysonly":
-          default:
-            referenceOutput = memsrc.slice().sort();
+          default: {
+            let sortfn;
+            switch (this.direction) {
+              case "descending":
+                sortfn = (a, b) => b - a;
+                break;
+              default:
+              case "ascending":
+                sortfn = (a, b) => a - b;
+                break;
+            }
+            referenceOutput = memsrc.slice().sort(sortfn);
             break;
+          }
         }
         break;
     }
@@ -1438,6 +1473,7 @@ export class OneSweepSort extends BaseSort {
       console.log(
         this.label,
         this.type,
+        this.direction,
         this,
         "with input",
         inputForPrinting,
