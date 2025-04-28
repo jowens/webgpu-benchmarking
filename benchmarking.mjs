@@ -109,9 +109,9 @@ async function main(navigator) {
 
   let testSuites = subgroupAccuracyRegressionSuites;
   testSuites.push(DLDFScanAccuracyRegressionSuite);
+  testSuites = [SortOneSweepRegressionSuite];
   testSuites = [DLDFScanAccuracyRegressionSuite];
   testSuites = [DLDFScanMiniSuite];
-  testSuites = [SortOneSweepRegressionSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
   let validations = { done: 0, errors: 0 };
@@ -317,6 +317,11 @@ async function main(navigator) {
 
         // TEST FOR PERFORMANCE
         if (testSuite?.trials > 0) {
+          if (inputBufferIsOutputBuffer) {
+            if (testOriginalInputBuffer) {
+              /* copy contents back into input buffer */
+            }
+          }
           await primitive.execute({
             trials: testSuite.trials,
             enableGPUTiming: hasTimestampQuery,
@@ -357,6 +362,10 @@ async function main(navigator) {
                 primitive.inputLength * datatypeToBytes(primitive.datatype);
               result.bandwidthGPU = primitive.bytesTransferred / result.gputime;
               result.bandwidthCPU = primitive.bytesTransferred / result.cputime;
+              result.inputItemsPerSecondE9GPU =
+                primitive.inputLength / result.gputime;
+              result.inputItemsPerSecondE9CPU =
+                primitive.inputLength / result.cputime;
               if (primitive.gflops) {
                 result.gflops = primitive.gflops(result.gputime);
               }
@@ -364,11 +373,13 @@ async function main(navigator) {
                 ...result,
                 timing: "GPU",
                 bandwidth: result.bandwidthGPU,
+                inputItemsPerSecondE9: result.inputItemsPerSecondE9GPU,
               });
               expts.push({
                 ...result,
                 timing: "CPU",
                 bandwidth: result.bandwidthCPU,
+                inputItemsPerSecondE9: result.inputItemsPerSecondE9CPU,
               });
             });
         } // end of TEST FOR PERFORMANCE
