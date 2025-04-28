@@ -577,7 +577,7 @@ fn main(builtinsUniform: BuiltinsUniform,
           ],
         ],
         label: `Thomas Smith's scan (${this.type}) with decoupled lookback/decoupled fallback [subgroups: ${this.useSubgroups}]`,
-        logKernelCodeToConsole: true,
+        logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
           return this.getSimpleDispatchGeometry();
         },
