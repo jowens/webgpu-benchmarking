@@ -31,12 +31,12 @@ export class SubgroupRegression extends BasePrimitive {
     this.args.computeReference({ referenceOutput, memsrc, sgsz });
 
     function validates(args) {
-      return args.cpu == args.gpu;
+      return args.cpu === args.gpu;
     }
     let returnString = "";
     let allowedErrors = 5;
     for (let i = 0; i < memdest.length; i++) {
-      if (allowedErrors == 0) {
+      if (allowedErrors === 0) {
         break;
       }
       if (

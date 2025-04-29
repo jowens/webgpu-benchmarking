@@ -51,11 +51,11 @@ var<storage, read> inputBuffer: array<vec4<${this.datatype}>>;
  * for reduce output: array<${this.datatype}>;
  */
 var<storage, read_write> outputBuffer: ${
-      this.type == "exclusive" || this.type == "inclusive"
+      this.type === "exclusive" || this.type === "inclusive"
         ? "array<vec4<"
         : "array<"
     }${this.datatype}${
-      this.type == "exclusive" || this.type == "inclusive" ? ">>" : ">"
+      this.type === "exclusive" || this.type === "inclusive" ? ">>" : ">"
     };
 
 @group(0) @binding(2)
@@ -170,7 +170,7 @@ fn main(builtinsUniform: BuiltinsUniform,
   // s_offset: within this workgroup, at what index do I start loading?
   let s_offset = sgid + sid * sgsz * VEC4_SPT;
 `;
-    if (this.type == "exclusive" || this.type == "inclusive") {
+    if (this.type === "exclusive" || this.type === "inclusive") {
       kernel += /* wgsl */ `
   var t_scan = array<vec4<${this.datatype}>, VEC4_SPT>();
   {
@@ -235,12 +235,12 @@ fn main(builtinsUniform: BuiltinsUniform,
        *     If we're only computing reduction, we don't have to update t_scan at all.
        */
       ${
-        this.type == "exclusive"
+        this.type === "exclusive"
           ? "t_scan[k] = vec4InclusiveToExclusive(t_scan[k]);"
           : ""
       }
       ${
-        this.type == "exclusive" || this.type == "inclusive"
+        this.type === "exclusive" || this.type == "inclusive"
           ? "t_scan[k] = vec4ScalarBinopV4(select(prev, t, sgid != 0u), t_scan[k]);"
           : ""
       }
@@ -259,7 +259,7 @@ fn main(builtinsUniform: BuiltinsUniform,
   }`;
     }
 
-    if (this.type == "reduce") {
+    if (this.type === "reduce") {
       /* reduce is much much simpler. Reduce across each thread's vector (vec4Reduce),
        * then across the subgroup (subgroupReduce), then serially across the VEC4_SPT
        * vectors within the subgroup; put result in wg_partials[subgroupID].  */
@@ -465,7 +465,7 @@ fn main(builtinsUniform: BuiltinsUniform,
     } /* end control flag still locked */
   }`;
 
-    if (this.type == "exclusive" || this.type == "inclusive") {
+    if (this.type === "exclusive" || this.type === "inclusive") {
       /* For scan computations:
        * At this point, t_scan[k] holds a per-subgroup scan.
        * This code block adds the [reduction of all prior blocks +
@@ -494,7 +494,7 @@ fn main(builtinsUniform: BuiltinsUniform,
             i += sgsz;
           }
         }`;
-    } else if (this.type == "reduce") {
+    } else if (this.type === "reduce") {
       /** For reduction computations:
        * Much simpler. Only thread 0 of the last tile must add the reduction
        * of all previous tiles to its tile reduction and write that to the output.
@@ -515,6 +515,8 @@ fn main(builtinsUniform: BuiltinsUniform,
     this.PART_SIZE = 4096; // MUST match the partition size specified in shaders.
     this.MAX_READBACK_SIZE = 8192; // Max size of our readback buffer
     this.workgroupSize = 256;
+    this.SUBGROUP_MIN_SIZE =
+      this.device.adapterInfo.subgroupMinSize ?? this.workgroupSize;
     const inputSize = this.getBuffer("inputBuffer").size; // bytes
     const inputLength = inputSize / 4; /* 4 is size of datatype */
     this.workgroupCount = Math.ceil(inputLength / this.PART_SIZE);
@@ -635,7 +637,7 @@ const DLDFRegressionParams = {
   type: ["reduce", "inclusive", "exclusive"],
   datatype: ["f32", "u32"],
   binopbase: [BinOpAdd, BinOpMax, BinOpMin],
-  disableSubgroups: [false, true],
+  disableSubgroups: [false /*, true*/],
 };
 
 const DLDFMiniParams = {

@@ -51,7 +51,7 @@ export async function main(navigator) {
   for (let i = 0; i < inputLength; i++) {
     switch (datatype) {
       case "u32":
-        memsrcX32[i] = i == 0 ? 11 : memsrcX32[i - 1] + 1; // trying to get u32s
+        memsrcX32[i] = i === 0 ? 11 : memsrcX32[i - 1] + 1; // trying to get u32s
         break;
       case "f32":
         memsrcX32[i] = i & 0x10 ? i - 42 : i + 42;
@@ -110,8 +110,8 @@ export async function main(navigator) {
       break;
     default:
       if (
-        primitive.constructor.name == "DLDFScan" &&
-        primitive.type == "reduce"
+        primitive.constructor.name === "DLDFScan" &&
+        primitive.type === "reduce"
       ) {
         memdestBytes = 4;
       } else {
@@ -207,7 +207,7 @@ export async function main(navigator) {
       outputBuffer: memdest,
       debugBuffer: memdebug,
     });
-    if (errorstr == "") {
+    if (errorstr === "") {
       console.info("Validation passed");
     } else {
       console.error(`Validation failed:\n${errorstr}`);

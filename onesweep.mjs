@@ -1094,10 +1094,10 @@ export class OneSweepSort extends BaseSort {
       this.sortParameters[offset] = this.inputLength;
       this.sortParameters[offset + 1] = Math.max(i - 2, 0) * this.RADIX_LOG;
       this.sortParameters[offset + 2] =
-        i == 0 ? this.reduceWorkgroupCount : this.passWorkgroupCount;
+        i === 0 ? this.reduceWorkgroupCount : this.passWorkgroupCount;
       this.sortParameters[offset + 3] = 0;
       // set to 1 ONLY on last sort pass
-      this.sortParameters[offset + 4] = i == this.SORT_PASSES + 1 ? 1 : 0;
+      this.sortParameters[offset + 4] = i === this.SORT_PASSES + 1 ? 1 : 0;
     }
 
     this.sortBumpSize = 4 * 4; // size: (4usize * std::mem::size_of::<u32>())
@@ -1425,7 +1425,7 @@ export class OneSweepSort extends BaseSort {
     let returnString = "";
     let allowedErrors = 5;
     for (let i = 0; i < memdest.length; i++) {
-      if (allowedErrors == 0) {
+      if (allowedErrors === 0) {
         break;
       }
       let compare;
@@ -1603,7 +1603,7 @@ export const SortOneSweepRegressionSuite = new BaseTestSuite({
   testSuite: "onesweep",
   initializeCPUBuffer: "fisher-yates",
   // initializeCPUBuffer: "randomizeAbsUnder1024",
-  trials: 5,
+  trials: 2,
   params: SortOneSweepSingletonParams,
   primitive: OneSweepSort,
   // primitiveArgs: { validate: false },

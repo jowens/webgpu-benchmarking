@@ -292,7 +292,7 @@ export class BasePrimitive {
     let kernelCount = 0; // how many kernels are there total?
     if (args.enableGPUTiming) {
       for (const action of this.compute()) {
-        if (action.constructor == Kernel && action.enabled()) {
+        if (action.constructor === Kernel && action.enabled()) {
           kernelCount++;
         }
       }
@@ -524,7 +524,7 @@ dispatchGeometry: ${dispatchGeometry}`);
              * go find the actual buffer associated with that string.
              * pick first one we find, in bindings order */
             for (const buffer of this.buffers) {
-              if (buffer.label == action.buffer) {
+              if (buffer.label === action.buffer) {
                 action.buffer = buffer;
                 break;
               }
@@ -574,7 +574,7 @@ dispatchGeometry: ${dispatchGeometry}`);
            *   same size, then skip the new allocation.
            */
           const existingBuffer = this.getBuffer(action.label);
-          if (existingBuffer && existingBuffer.size == action.size) {
+          if (existingBuffer && existingBuffer.size === action.size) {
             /* just use the existing buffer */
           } else {
             const allocatedBuffer = this.device.createBuffer({
@@ -641,7 +641,7 @@ dispatchGeometry: ${dispatchGeometry}`);
 export class Kernel {
   constructor(args) {
     this.label = "kernel"; // default
-    if (typeof args == "function") {
+    if (typeof args === "function") {
       /* the function takes an optional arg object and returns the kernel string */
       this.kernel = args;
     } else {
