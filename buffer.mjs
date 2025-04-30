@@ -25,6 +25,8 @@ export class Buffer {
   #gpuBuffer; /* this ALWAYS stores a GPUBufferBinding */
   #mappableGPUBuffer;
   #cpuBuffer;
+  #cpuBufferBackup; /* if we overwrite #cpuBuffer */
+  #cpuBufferIsDirty; /* compared to cpuBufferBackup */
   constructor(args) {
     this.args = { ...args };
     /* generally expect args to contain datatype and size or length */
@@ -55,6 +57,7 @@ export class Buffer {
         );
       }
       this.#cpuBuffer = new (datatypeToTypedArray(this.datatype))(this.length);
+      this.#cpuBufferIsDirty = true;
       if (this.args.initializeCPUBuffer) {
         for (let i = 0; i < this.length; i++) {
           let val;
@@ -122,6 +125,11 @@ export class Buffer {
           default:
             break;
         }
+        /* we have now populated #cpuBuffer */
+        if (args.storeCPUBackup) {
+          this.#cpuBufferBackup = this.#cpuBuffer.slice();
+        }
+        this.#cpuBufferIsDirty = false;
       }
     }
 
@@ -164,14 +172,7 @@ export class Buffer {
             GPUBufferUsage.COPY_DST,
       });
       if (this.args.initializeGPUBuffer) {
-        if (this.#cpuBuffer == undefined) {
-          console.error("Buffer: initializeGPUBuffer requires a CPUBuffer");
-        }
-        this.device.queue.writeBuffer(
-          this.buffer.buffer,
-          this.buffer.offset ?? 0,
-          this.#cpuBuffer
-        );
+        this.copyCPUToGPU();
       }
       if (this.args.createMappableGPUBuffer) {
         this.#mappableGPUBuffer = this.device.createBuffer({
@@ -192,6 +193,17 @@ export class Buffer {
         "GPU buffer is undefined"
       );
     }
+  }
+
+  copyCPUToGPU() {
+    if (this.#cpuBuffer == undefined) {
+      console.error("Buffer::copyCPUToGPU requires a CPUBuffer");
+    }
+    this.device.queue.writeBuffer(
+      this.buffer.buffer,
+      this.buffer.offset ?? 0,
+      this.#cpuBuffer
+    );
   }
 
   async copyGPUToCPU() {
@@ -226,6 +238,13 @@ export class Buffer {
     this.#mappableGPUBuffer.unmap();
   }
 
+  copyCPUBackupToCPU() {
+    if (this.args.storeCPUBackup && this.#cpuBufferIsDirty) {
+      this.#cpuBuffer = this.#cpuBufferBackup.slice();
+      this.#cpuBufferIsDirty = false;
+    }
+  }
+
   set buffer(b) {
     if (b?.buffer) {
       /* this is already a GPUBufferBinding */
@@ -240,6 +259,9 @@ export class Buffer {
   }
   get cpuBuffer() {
     return this.#cpuBuffer;
+  }
+  get cpuBufferBackup() {
+    return this.#cpuBufferBackup;
   }
   /* worried about an infinite loop in the below */
   get size() {
