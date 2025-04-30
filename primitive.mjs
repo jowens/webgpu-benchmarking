@@ -61,6 +61,7 @@ export class BasePrimitive {
       }
     }
 
+    // not sure a Map gives me anything I don't get from {}
     this.__buffers = {}; // this is essentially private
     this.useSubgroups = this.device.features.has("subgroups");
     if (args.disableSubgroups) {
