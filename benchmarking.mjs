@@ -4,7 +4,6 @@ import {
   delay,
   download,
   datatypeToBytes,
-  divRoundUp,
 } from "./util.mjs";
 import { Buffer } from "./buffer.mjs";
 
@@ -29,11 +28,11 @@ if (typeof process !== "undefined" && process.release.name === "node") {
   /* end https://github.com/sharonchoong/svg-exportJS */
   const urlParams = new URL(window.location.href).searchParams;
   saveJSON = urlParams.get("saveJSON"); // string or undefined
-  if (saveJSON == "false") {
+  if (saveJSON === "false") {
     saveJSON = false;
   }
   saveSVG = urlParams.get("saveSVG"); // string or undefined
-  if (saveSVG == "false") {
+  if (saveSVG === "false") {
     saveSVG = false;
   }
 }
@@ -107,11 +106,13 @@ async function main(navigator) {
   // ];
   //const testSuites = [AtomicGlobalU32ReduceTestSuite];
 
-  let testSuites = subgroupAccuracyRegressionSuites;
-  testSuites.push(DLDFScanAccuracyRegressionSuite);
-  testSuites = [SortOneSweepRegressionSuite];
-  testSuites = [DLDFScanAccuracyRegressionSuite];
-  testSuites = [DLDFScanMiniSuite];
+  let testSuites = []; // subgroupAccuracyRegressionSuites;
+  testSuites.push(
+    // DLDFScanAccuracyRegressionSuite,
+    SortOneSweepRegressionSuite
+    // DLDFScanAccuracyRegressionSuite,
+    // DLDFScanMiniSuite
+  );
 
   const expts = new Array(); // push new rows (experiments) onto this
   let validations = { done: 0, errors: 0 };
@@ -125,12 +126,10 @@ async function main(navigator) {
     if (testSuite?.primitive?.prototype.compute) {
       const uniqueRuns = new Set(); // if uniqueRuns is defined, don't run dups
       let testInputBuffer,
-        testOriginalInputBuffer,
         testValuesBuffer, // key-value sort
-        testOriginalValuesBuffer, // key-value sort
         testOutputBuffer;
       const inputBufferIsOutputBuffer =
-        testSuite.category == "sort" && testSuite.testSuite == "onesweep";
+        testSuite.category === "sort" && testSuite.testSuite === "onesweep";
       for (const params of combinations(testSuite.params)) {
         if (params.binopbase && params.datatype && !params.binop) {
           /** we're iterating over both binopbase and datatype, which we can use
@@ -167,19 +166,24 @@ async function main(navigator) {
             initializeCPUBuffer:
               testSuite.initializeCPUBuffer ??
               "randomizeAbsUnder1024" /* fill with default data */,
+            storeCPUBackup: inputBufferIsOutputBuffer,
             createGPUBuffer: true,
             initializeGPUBuffer: true /* with CPU data */,
             createMappableGPUBuffer: inputBufferIsOutputBuffer,
           });
         }
-        if (testSuite.category == "sort" && testSuite.testSuite == "onesweep") {
+        if (
+          testSuite.category === "sort" &&
+          testSuite.testSuite === "onesweep"
+        ) {
           testInputBuffer.label = "keysInOut"; /* sort wants a different name */
-          /* copy the input to a safe place, because we're going to overwrite it */
-          testOriginalInputBuffer = testInputBuffer.cpuBuffer.slice();
         }
         primitive.registerBuffer(testInputBuffer);
 
-        if (testSuite.category == "sort" && testSuite.testSuite == "onesweep") {
+        if (
+          testSuite.category === "sort" &&
+          testSuite.testSuite === "onesweep"
+        ) {
           /* register the temp buffer */
           primitive.registerBuffer(
             new Buffer({
@@ -202,7 +206,7 @@ async function main(navigator) {
                 ? "vec4u"
                 : primitive.datatype,
             length:
-              "type" in primitive && primitive.type == "reduce"
+              "type" in primitive && primitive.type === "reduce"
                 ? 1
                 : primitive.inputLength,
             label: "outputBuffer",
@@ -212,12 +216,12 @@ async function main(navigator) {
 
           primitive.registerBuffer(testOutputBuffer);
         }
-
-        if (
+        const usesPayloadBuffers =
           testSuite.category === "sort" &&
           testSuite.testSuite === "onesweep" &&
-          primitive.type === "keyvalue"
-        ) {
+          primitive.type === "keyvalue";
+
+        if (usesPayloadBuffers) {
           /* these will eventually need to be named variables */
           testValuesBuffer = new Buffer({
             device,
@@ -226,12 +230,12 @@ async function main(navigator) {
             label: "payloadInOut",
             createCPUBuffer: true,
             initializeCPUBuffer: testSuite.initializeCPUBuffer,
+            storeCPUBackup: inputBufferIsOutputBuffer,
             createGPUBuffer: true,
             initializeGPUBuffer: true /* with CPU data */,
             createMappableGPUBuffer: true,
           });
           primitive.registerBuffer(testValuesBuffer);
-          testOriginalValuesBuffer = testValuesBuffer.cpuBuffer.slice();
           primitive.registerBuffer(
             new Buffer({
               device,
@@ -278,20 +282,20 @@ async function main(navigator) {
           }
           let validateArgs = {};
           if (
-            testSuite.category == "sort" &&
-            testSuite.testSuite == "onesweep"
+            testSuite.category === "sort" &&
+            testSuite.testSuite === "onesweep"
           ) {
             validateArgs = {
-              inputKeys: testOriginalInputBuffer,
+              inputKeys: testInputBuffer.cpuBufferBackup,
               outputKeys: primitive.getBuffer("keysInOut"),
             };
-            if (primitive.type == "keyvalue") {
-              validateArgs.inputPayload = testOriginalValuesBuffer;
+            if (usesPayloadBuffers) {
+              validateArgs.inputPayload = testValuesBuffer.cpuBufferBackup;
               validateArgs.outputPayload = primitive.getBuffer("payloadInOut");
             }
           }
           const errorstr = primitive.validate(validateArgs);
-          if (errorstr == "") {
+          if (errorstr === "") {
             // console.info("Validation passed", params);
           } else {
             validations.errors++;
@@ -318,8 +322,12 @@ async function main(navigator) {
         // TEST FOR PERFORMANCE
         if (testSuite?.trials > 0) {
           if (inputBufferIsOutputBuffer) {
-            if (testOriginalInputBuffer) {
-              /* copy contents back into input buffer */
+            /* Previous run's output erased current input */
+            testInputBuffer.copyCPUBackupToCPU();
+            testInputBuffer.copyCPUToGPU();
+            if (usesPayloadBuffers) {
+              testValuesBuffer.copyCPUBackupToCPU();
+              testValuesBuffer.copyCPUToGPU();
             }
           }
           await primitive.execute({
@@ -327,61 +335,59 @@ async function main(navigator) {
             enableGPUTiming: hasTimestampQuery,
             enableCPUTiming: true,
           });
-          primitive
-            .getTimingResult()
-            .then(({ gpuTotalTimeNS, cpuTotalTimeNS }) => {
-              const result = {
-                testSuite: testSuite.testSuite,
-                category: testSuite.category,
-              };
-              if (gpuTotalTimeNS instanceof Array) {
-                // gpuTotalTimeNS might be a list, in which case just add together for now
-                result.gpuTotalTimeNSArray = gpuTotalTimeNS;
-                gpuTotalTimeNS = gpuTotalTimeNS.reduce((x, a) => x + a, 0);
-              }
-              /* copy primitive's fields into result */
-              for (const [field, value] of Object.entries(primitive)) {
-                if (typeof value !== "function" && !Array.isArray(value)) {
-                  if (typeof value !== "object") {
-                    result[field] = value;
-                  } else {
-                    /* object - if it's got a constructor, use a (useful) name */
-                    /* useful for "binop" or other parameters */
-                    if (value?.constructor?.name !== "Object") {
-                      result[field] = value.constructor.name;
-                    }
-                  }
+          let { gpuTotalTimeNS, cpuTotalTimeNS } =
+            await primitive.getTimingResult();
+          const result = {
+            testSuite: testSuite.testSuite,
+            category: testSuite.category,
+          };
+          if (gpuTotalTimeNS instanceof Array) {
+            // gpuTotalTimeNS might be a list, in which case just add together for now
+            result.gpuTotalTimeNSArray = gpuTotalTimeNS;
+            gpuTotalTimeNS = gpuTotalTimeNS.reduce((x, a) => x + a, 0);
+          }
+          /* copy primitive's fields into result */
+          for (const [field, value] of Object.entries(primitive)) {
+            if (typeof value !== "function" && !Array.isArray(value)) {
+              if (typeof value !== "object") {
+                result[field] = value;
+              } else {
+                /* object - if it's got a constructor, use a (useful) name */
+                /* useful for "binop" or other parameters */
+                if (value?.constructor?.name !== "Object") {
+                  result[field] = value.constructor.name;
                 }
               }
-              result.date = new Date();
-              result.gpuinfo = adapter.info;
-              result.gputime = gpuTotalTimeNS / testSuite.trials;
-              result.cputime = cpuTotalTimeNS / testSuite.trials;
-              result.cpugpuDelta = result.cputime - result.gputime;
-              result.inputBytes =
-                primitive.inputLength * datatypeToBytes(primitive.datatype);
-              result.bandwidthGPU = primitive.bytesTransferred / result.gputime;
-              result.bandwidthCPU = primitive.bytesTransferred / result.cputime;
-              result.inputItemsPerSecondE9GPU =
-                primitive.inputLength / result.gputime;
-              result.inputItemsPerSecondE9CPU =
-                primitive.inputLength / result.cputime;
-              if (primitive.gflops) {
-                result.gflops = primitive.gflops(result.gputime);
-              }
-              expts.push({
-                ...result,
-                timing: "GPU",
-                bandwidth: result.bandwidthGPU,
-                inputItemsPerSecondE9: result.inputItemsPerSecondE9GPU,
-              });
-              expts.push({
-                ...result,
-                timing: "CPU",
-                bandwidth: result.bandwidthCPU,
-                inputItemsPerSecondE9: result.inputItemsPerSecondE9CPU,
-              });
-            });
+            }
+          }
+          result.date = new Date();
+          result.gpuinfo = adapter.info;
+          result.gputime = gpuTotalTimeNS / testSuite.trials;
+          result.cputime = cpuTotalTimeNS / testSuite.trials;
+          result.cpugpuDelta = result.cputime - result.gputime;
+          result.inputBytes =
+            primitive.inputLength * datatypeToBytes(primitive.datatype);
+          result.bandwidthGPU = primitive.bytesTransferred / result.gputime;
+          result.bandwidthCPU = primitive.bytesTransferred / result.cputime;
+          result.inputItemsPerSecondE9GPU =
+            primitive.inputLength / result.gputime;
+          result.inputItemsPerSecondE9CPU =
+            primitive.inputLength / result.cputime;
+          if (primitive.gflops) {
+            result.gflops = primitive.gflops(result.gputime);
+          }
+          expts.push({
+            ...result,
+            timing: "GPU",
+            bandwidth: result.bandwidthGPU,
+            inputItemsPerSecondE9: result.inputItemsPerSecondE9GPU,
+          });
+          expts.push({
+            ...result,
+            timing: "CPU",
+            bandwidth: result.bandwidthCPU,
+            inputItemsPerSecondE9: result.inputItemsPerSecondE9CPU,
+          });
         } // end of TEST FOR PERFORMANCE
       } // end of running all combinations for this testSuite
       if (validations.done > 0) {
@@ -411,8 +417,8 @@ async function main(navigator) {
       let filteredExpts = expts.filter(
         plot.filter ??
           ((row) =>
-            row.testSuite == lastTestSeen.testSuite &&
-            row.category == lastTestSeen.category)
+            row.testSuite === lastTestSeen.testSuite &&
+            row.category === lastTestSeen.category)
       );
       console.info(
         "Filtered experiments for",
