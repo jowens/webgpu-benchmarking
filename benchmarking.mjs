@@ -106,12 +106,11 @@ async function main(navigator) {
   // ];
   //const testSuites = [AtomicGlobalU32ReduceTestSuite];
 
-  let testSuites = []; // subgroupAccuracyRegressionSuites;
+  let testSuites = subgroupAccuracyRegressionSuites;
   testSuites.push(
-    // DLDFScanAccuracyRegressionSuite,
-    SortOneSweepRegressionSuite
-    // DLDFScanAccuracyRegressionSuite,
-    // DLDFScanMiniSuite
+    SortOneSweepRegressionSuite,
+    DLDFScanAccuracyRegressionSuite,
+    DLDFScanMiniSuite
   );
 
   const expts = new Array(); // push new rows (experiments) onto this
@@ -504,5 +503,6 @@ async function main(navigator) {
   if (saveJSON) {
     download(expts, "application/json", "foo.json");
   }
+  console.log("Finished.");
 }
 export { main };
