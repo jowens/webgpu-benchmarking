@@ -41,6 +41,7 @@ export class TimingHelper {
 
   reset(numKernels) {
     this.#passNumber = 0;
+    this.#numKernels = numKernels;
     if (this.#canTimestamp) {
       this.#querySet = this.#device.createQuerySet({
         type: "timestamp",
