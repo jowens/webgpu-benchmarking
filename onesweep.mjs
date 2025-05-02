@@ -274,7 +274,7 @@ export class OneSweepSort extends BaseSort {
      *    it's instead that the subgroup calls in each kernel assume a hardwired
      *    name of wg_sw_subgroups, and that's hard to fix.
      */
-    ${this.fnDeclarations.subgroupEmulationWith({
+    ${this.fnDeclarations.subgroupEmulation({
       datatype: "u32",
       workgroupSize: `${this.BLOCK_DIM}`,
     })}

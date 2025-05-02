@@ -98,6 +98,7 @@ export class wgslFunctions {
     this.env = args;
   }
   commonDefinitions(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     return /* wgsl */ `
   struct Builtins {
@@ -122,23 +123,22 @@ export class wgslFunctions {
   }`;
   }
   initializeSubgroupVars(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     return "let sgsz: u32 = builtinsUniform.sgsz;\nlet sgid: u32 = builtinsNonuniform.sgid;\n";
   }
   enableSubgroupsIfAppropriate(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     return "enable subgroups;\n";
   }
   subgroupEmulation(args = {}) {
-    const env = { ...this.env, ...args }; // properties in args overwrite this.env
-    return "";
-  }
-  // eslint-disable-next-line no-unused-vars
-  subgroupEmulationWith(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     return "";
   }
   roundUpDivU32(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     return /* wgsl */ `fn roundUpDivU32(a : u32, b : u32) -> u32 {
     return (a + b - 1) / b;
@@ -249,6 +249,7 @@ export class wgslFunctions {
     `;
   }
   subgroupZero(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     return /* wgsl */ `
     fn isSubgroupZero(lidx: u32, sgsz: u32) -> bool {
@@ -256,16 +257,19 @@ export class wgslFunctions {
     }`;
   }
   subgroupShuffle(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     /* keep builtin */
     return "";
   }
   subgroupBallot(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     /* keep builtin */
     return "";
   }
   subgroupMax(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     /* keep builtin */
     return "";
@@ -532,6 +536,7 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
     super(env);
   }
   commonDefinitions(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     return /* wgsl */ `
     struct Builtins {
@@ -550,11 +555,13 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
     }`;
   }
   initializeSubgroupVars(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     return /* wgsl */ `
     sgid = builtinsNonuniform.lidx;`;
   }
   enableSubgroupsIfAppropriate(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     return "/* don't enable subgroups */\n";
   }
@@ -565,18 +572,8 @@ export class wgslFunctionsWithoutSubgroupSupport extends wgslFunctions {
     const sgsz: u32 = ${env.workgroupSize};
     var<private> sgid: u32;`;
   }
-  /* if instead you need more specificity, use this one instead */
-  subgroupEmulationWith(
-    args = {
-      datatype: env.datatype,
-      workgroupSize: env.workgroupSize,
-    }
-  ) {
-    return /* wgsl */ `var<workgroup> wg_sw_subgroups: array<${args.datatype}, ${args.workgroupSize}>;
-    const sgsz: u32 = ${args.workgroupSize};
-    var<private> sgid: u32;`;
-  }
   subgroupZero(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     return /* wgsl */ `
     fn isSubgroupZero(lidx: u32, sgsz: u32) -> bool {
@@ -662,6 +659,7 @@ fn subgroupReduce(in: ${env.datatype}) -> ${env.datatype} {
 }`;
   }
   subgroupBinopIsU32Add(args = {}) {
+    // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
     return /* wgsl */ `fn binop(a : u32, b : u32) -> u32 {return a+b;}`;
   }
