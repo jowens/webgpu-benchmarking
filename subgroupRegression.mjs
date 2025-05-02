@@ -71,7 +71,7 @@ export class SubgroupRegression extends BasePrimitive {
   };
   kernel = () => {
     return /* wgsl */ `
-${this.fnDeclarations.enableSubgroupsIfAppropriate}
+${this.fnDeclarations.enableSubgroupsIfAppropriate()}
 
 @group(0) @binding(0)
 var<storage, read_write> outputBuffer: array<${
@@ -86,20 +86,20 @@ var<storage, read> inputBuffer: array<${
 @group(0) @binding(2)
 var<storage, read_write> debugBuffer: array<u32>;
 
-${this.fnDeclarations.subgroupEmulation}
-${this.fnDeclarations.commonDefinitions}
-${this.fnDeclarations.subgroupShuffle}
-${this.fnDeclarations.subgroupBallot}
+${this.fnDeclarations.subgroupEmulation()}
+${this.fnDeclarations.commonDefinitions()}
+${this.fnDeclarations.subgroupShuffle()}
+${this.fnDeclarations.subgroupBallot()}
 /* some functions only work if binop is defined in the primitive */
 ${this.binop ? this.binop.wgslfn : ""}
-${this.binop ? this.fnDeclarations.subgroupReduce : ""}
-${this.binop ? this.fnDeclarations.subgroupInclusiveOpScan : ""}
+${this.binop ? this.fnDeclarations.subgroupReduce() : ""}
+${this.binop ? this.fnDeclarations.subgroupInclusiveOpScan() : ""}
 
 @compute @workgroup_size(${this.workgroupSize}, 1, 1)
 fn main(builtinsUniform: BuiltinsUniform,
         builtinsNonuniform: BuiltinsNonuniform) {
-  ${this.fnDeclarations.initializeSubgroupVars}
-  ${this.fnDeclarations.computeLinearizedGridParametersSplit}
+  ${this.fnDeclarations.initializeSubgroupVars()}
+  ${this.fnDeclarations.computeLinearizedGridParametersSplit()}
   ${
     typeof this.args.wgslOp === "function"
       ? this.args.wgslOp(this)

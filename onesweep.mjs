@@ -105,7 +105,7 @@ export class OneSweepSort extends BaseSort {
     let kernel = /* wgsl */ `
     /* enables subgroups ONLY IF it was requested when creating device */
     /* WGSL requires this declaration is first in the shader */
-    ${this.fnDeclarations.enableSubgroupsIfAppropriate}
+    ${this.fnDeclarations.enableSubgroupsIfAppropriate()}
     struct SortParameters {
         length: u32,
         shift: u32,
@@ -278,7 +278,7 @@ export class OneSweepSort extends BaseSort {
       datatype: "u32",
       workgroupSize: `${this.BLOCK_DIM}`,
     })}
-    ${this.fnDeclarations.subgroupZero}
+    ${this.fnDeclarations.subgroupZero()}
 
     /** OneSweepSort internally sorts u32 keys
      * The following functions convert ${this.datatype} keys <-> u32 keys
@@ -378,7 +378,7 @@ export class OneSweepSort extends BaseSort {
     const SCAN_MEM_SIZE = RADIX / SUBGROUP_MIN_SIZE;
     var<workgroup> wg_scan: array<u32, SCAN_MEM_SIZE>;
 
-    ${this.fnDeclarations.commonDefinitions}
+    ${this.fnDeclarations.commonDefinitions()}
     ${this.binop.wgslfn}
 
     /**
@@ -410,7 +410,7 @@ export class OneSweepSort extends BaseSort {
     @compute @workgroup_size(BLOCK_DIM, 1, 1)
     fn onesweep_scan(builtinsUniform: BuiltinsUniform,
         builtinsNonuniform: BuiltinsNonuniform) {
-      ${this.fnDeclarations.initializeSubgroupVars}
+      ${this.fnDeclarations.initializeSubgroupVars()}
 
       let sid = builtinsNonuniform.lidx / sgsz;  // Caution 1D workgroup ONLY! Ok, but technically not in HLSL spec
       /* seems like RADIX must equal BLOCK_DIM here */
@@ -570,7 +570,7 @@ export class OneSweepSort extends BaseSort {
     @compute @workgroup_size(BLOCK_DIM, 1, 1)
     fn onesweep_pass(builtinsUniform: BuiltinsUniform,
         builtinsNonuniform: BuiltinsNonuniform) {
-      ${this.fnDeclarations.initializeSubgroupVars}
+      ${this.fnDeclarations.initializeSubgroupVars()}
 
       let sid = builtinsNonuniform.lidx / sgsz;  // Caution 1D workgroup ONLY! Ok, but technically not in HLSL spec
 
