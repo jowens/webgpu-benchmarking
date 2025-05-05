@@ -1412,7 +1412,7 @@ export class OneSweepSort extends BaseSort {
           return true; /* valid throughout entire buffer */
       }
     };
-    /* arrow function to allow use of this.args within it */
+    /* arrow function to allow use of this.type within it */
     const validates = (args) => {
       switch (this.type) {
         case "keyvalue":
