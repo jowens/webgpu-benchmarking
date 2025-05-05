@@ -55,8 +55,8 @@ async function main(navigator) {
   const hasTimestampQuery = adapter.features.has("timestamp-query");
   const device = await adapter?.requestDevice({
     requiredLimits: {
-      maxBufferSize: 4294967296,
-      maxStorageBufferBindingSize: 4294967292,
+      maxBufferSize: 2147483648,
+      maxStorageBufferBindingSize: 2147483644,
       maxComputeWorkgroupStorageSize: 32768,
     },
     requiredFeatures: [
