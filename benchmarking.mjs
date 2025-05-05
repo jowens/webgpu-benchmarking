@@ -107,12 +107,13 @@ async function main(navigator) {
   // ];
   //const testSuites = [AtomicGlobalU32ReduceTestSuite];
 
-  let testSuites = subgroupAccuracyRegressionSuites;
+  //   let testSuites = subgroupAccuracyRegressionSuites;
   //testSuites.push(
   //  SortOneSweepRegressionSuite,
   //  DLDFScanAccuracyRegressionSuite,
   //  DLDFScanMiniSuite
   //);
+  let testSuites = [DLDFScanMiniSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
   let validations = { done: 0, errors: 0 };
