@@ -74,6 +74,7 @@ async function main(navigator) {
       isFallbackAdapter: this.isFallbackAdapter,
     };
   };
+  console.info(JSON.stringify(adapter.info));
 
   if (!device) {
     fail("Fatal error: Device does not support WebGPU.");
@@ -107,11 +108,11 @@ async function main(navigator) {
   //const testSuites = [AtomicGlobalU32ReduceTestSuite];
 
   let testSuites = subgroupAccuracyRegressionSuites;
-  testSuites.push(
-    SortOneSweepRegressionSuite,
-    DLDFScanAccuracyRegressionSuite,
-    DLDFScanMiniSuite
-  );
+  //testSuites.push(
+  //  SortOneSweepRegressionSuite,
+  //  DLDFScanAccuracyRegressionSuite,
+  //  DLDFScanMiniSuite
+  //);
 
   const expts = new Array(); // push new rows (experiments) onto this
   let validations = { done: 0, errors: 0 };
