@@ -19,8 +19,14 @@ class NonCachingMap {
 }
 
 class WebGPUObjectCache {
-  constructor({ enabled = ["pipelineLayouts"] /* default */, ...args } = {}) {
+  constructor({
+    enabled = ["pipelineLayouts", "bindGroupLayouts"] /* default */,
+    ...args
+  } = {}) {
     this.pipelineLayouts = enabled.includes("pipelineLayouts")
+      ? new Map()
+      : new NonCachingMap();
+    this.bindGroupLayouts = enabled.includes("bindGroupLayouts")
       ? new Map()
       : new NonCachingMap();
   }
@@ -424,7 +430,12 @@ export class BasePrimitive {
           let pipelineLayout = webGPUObjectCache.pipelineLayouts.get(
             generateCacheKey(action.bufferTypes)
           );
-          console.info("pipelineLayout is ", pipelineLayout);
+          console.info(
+            "pipelineLayout is ",
+            action.bufferTypes,
+            generateCacheKey(action.bufferTypes),
+            pipelineLayout
+          );
           if (!pipelineLayout) {
             /* first build up bindGroupLayouts, then create a pipeline layout */
             const bindGroupLayouts = [];
@@ -444,10 +455,29 @@ export class BasePrimitive {
                   });
                 }
               });
-              const bindGroupLayout = this.device.createBindGroupLayout({
-                label: `${this.label} bindGroupLayout[${bufferTypesGroupIndex}]`,
-                entries,
-              });
+              let bindGroupLayout = webGPUObjectCache.bindGroupLayouts.get(
+                generateCacheKey(entries)
+              );
+              if (!bindGroupLayout) {
+                /* did not find it in cache, construct it */
+                console.info(
+                  "Did not find bindGroupLayout in cache, constructing from",
+                  entries,
+                  generateCacheKey(entries)
+                );
+                bindGroupLayout = this.device.createBindGroupLayout({
+                  entries,
+                });
+              } else {
+                /* bindGroupLayout was cached, use it */
+                console.info(
+                  "Find bindGroupLayout in cache, cache key is",
+                  entries,
+                  generateCacheKey(entries),
+                  bindGroupLayout
+                );
+              }
+              bindGroupLayout.label = `${this.label} bindGroupLayout[${bufferTypesGroupIndex}]`;
               bindGroupLayouts.push(bindGroupLayout);
             }
             pipelineLayout = this.device.createPipelineLayout({
