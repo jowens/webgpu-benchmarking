@@ -46,11 +46,13 @@ import {
   DLDFScanAccuracyRegressionSuite,
   DLDFScanMiniSuite,
 } from "./scandldf.mjs";
+import { StoneberryScanMiniSuite } from "./stoneberry-scan.mjs";
 import { subgroupAccuracyRegressionSuites } from "./subgroupRegression.mjs";
 import { SortOneSweepRegressionSuite } from "./onesweep.mjs";
 
 async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
+  console.info(adapter, adapter.features);
   const hasSubgroups = adapter.features.has("subgroups");
   const hasTimestampQuery = adapter.features.has("timestamp-query");
   const device = await adapter?.requestDevice({
@@ -64,6 +66,7 @@ async function main(navigator) {
       ...(hasSubgroups ? ["subgroups"] : []),
     ],
   });
+  console.info(device, JSON.stringify(device));
   adapter.info.toJSON = function () {
     return {
       architecture: this.architecture,
@@ -114,6 +117,7 @@ async function main(navigator) {
   //  DLDFScanMiniSuite
   //);
   let testSuites = [DLDFScanMiniSuite];
+  // let testSuites = [StoneberryScanMiniSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
   let validations = { done: 0, errors: 0 };
@@ -179,6 +183,12 @@ async function main(navigator) {
         ) {
           testInputBuffer.label = "keysInOut"; /* sort wants a different name */
         }
+        if (
+          testSuite.category === "scan" &&
+          testSuite.testSuite === "stoneberry-scan"
+        ) {
+          testInputBuffer.label = "src";
+        }
         primitive.registerBuffer(testInputBuffer);
 
         if (
@@ -214,7 +224,13 @@ async function main(navigator) {
             createGPUBuffer: true,
             createMappableGPUBuffer: true,
           });
-
+          if (
+            testSuite.category === "scan" &&
+            testSuite.testSuite === "stoneberry-scan"
+          ) {
+            /* stoneberry scan expects a different label */
+            testOutputBuffer.label = "prefixScan";
+          }
           primitive.registerBuffer(testOutputBuffer);
         }
         const usesPayloadBuffers =
