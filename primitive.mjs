@@ -8,7 +8,9 @@ import {
 import { formatWGSL } from "./util.mjs";
 
 export class BasePrimitive {
-  static pipelineLayoutsCache = new Map();
+  // these static objects are shared by all Primitives
+  static __deviceToWebGPUObjectCache = new WeakMap();
+  // this is a WeakMap<device, CacheableWebGPUObjects>
   static __timingHelper; // initialized to undefined
 
   constructor(args) {
@@ -40,6 +42,18 @@ export class BasePrimitive {
         );
       }
       this[requiredField] = args[requiredField];
+    }
+
+    if (!BasePrimitive.__deviceToWebGPUObjectCache.has(this.device)) {
+      console.info(
+        "Never seen this device before. Let's initialize a new set of caches for it."
+      );
+      /* never seen this device before */
+      BasePrimitive.__deviceToWebGPUObjectCache.set(this.device, {
+        pipelineLayouts: new Map(),
+      });
+    } else {
+      console.info("We already have a cache for this device.");
     }
 
     /** possible that we've specified binop but not datatype, in
@@ -320,6 +334,13 @@ export class BasePrimitive {
       this.device.createCommandEncoder({
         label: `${this.label} primitive encoder`,
       });
+    if (!BasePrimitive.__deviceToWebGPUObjectCache.has(this.device)) {
+      /* should never see this */
+      console.error("Device not found in WebGPU object cache", this.device);
+    }
+    const webGPUObjectCache =
+      /* this was created in constructor */
+      BasePrimitive.__deviceToWebGPUObjectCache.get(this.device);
     for (const action of this.compute()) {
       switch (action.constructor) {
         case Kernel: {
@@ -371,12 +392,18 @@ export class BasePrimitive {
           }
 
           // build up bindGroupLayouts and pipelineLayout
-          let pipelineLayout;
-          if (action.bufferTypes in BasePrimitive.pipelineLayoutsCache) {
-            /* cached, use it */
-            pipelineLayout =
-              BasePrimitive.pipelineLayoutsCache[action.bufferTypes];
-          } else {
+          let pipelineLayout = webGPUObjectCache.pipelineLayouts.get(
+            JSON.stringify(action.bufferTypes)
+          );
+          console.info(
+            "In cache? Cached pipelineLayouts has ",
+            webGPUObjectCache.pipelineLayouts.size,
+            "items",
+            action.bufferTypes,
+            webGPUObjectCache.pipelineLayouts.has(action.bufferTypes)
+          );
+          if (!pipelineLayout) {
+            console.info("Key not found", action.bufferTypes);
             /* first build up bindGroupLayouts, then create a pipeline layout */
             const bindGroupLayouts = [];
             for (const [
@@ -405,8 +432,13 @@ export class BasePrimitive {
               bindGroupLayouts,
             });
             /* and cache it */
-            BasePrimitive.pipelineLayoutsCache[action.bufferTypes] =
-              pipelineLayout;
+            webGPUObjectCache.pipelineLayouts.set(
+              JSON.stringify(action.bufferTypes),
+              pipelineLayout
+            );
+          } else {
+            console.info("Using cached pipelineLayout.");
+            /* pipelineLayout was cached */
           }
           pipelineLayout.label = `${this.label} compute pipeline`;
 
