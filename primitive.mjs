@@ -20,26 +20,63 @@ class NonCachingMap {
 
 class WebGPUObjectCache {
   constructor({
-    enabled = ["pipelineLayouts", "bindGroupLayouts"] /* default */,
+    enabled = [
+      "pipelineLayouts",
+      "bindGroupLayouts",
+      "computeModules",
+      "computePipelines",
+    ] /* this list is the default */,
     ...args
   } = {}) {
+    /** each object type has its own cache for efficiency, and for the ability
+     * to selectively enable/disable that cache */
     this.pipelineLayouts = enabled.includes("pipelineLayouts")
       ? new Map()
       : new NonCachingMap();
     this.bindGroupLayouts = enabled.includes("bindGroupLayouts")
       ? new Map()
       : new NonCachingMap();
+    this.computeModules = enabled.includes("computeModules")
+      ? new Map()
+      : new NonCachingMap();
+    this.computePipelines = enabled.includes("computePipelines")
+      ? new Map()
+      : new NonCachingMap();
   }
 }
 
-function generateCacheKey(key) {
-  function replacer(key, value) {
-    if (key === "label") {
-      return undefined; // don't serialize
-    }
-    return value; // do the default
+function generateCacheKey(obj) {
+  // Handle non-object types (primitives, null, undefined) directly.
+  if (typeof obj !== "object" || obj === null) {
+    return String(obj);
   }
-  return JSON.stringify(key, replacer);
+
+  return JSON.stringify(obj, (key, value) => {
+    // 1. Always completely ignore labels for caching purposes
+    if (key === "label") {
+      return undefined;
+    }
+
+    // 2. Check for pre-computed '__cacheKey' on nested objects
+    // This check applies to the 'value' being processed,
+    // which would be a nested object.
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      Object.hasOwn(value, "__cacheKey") && // ESLint-friendly check
+      typeof value.__cacheKey === "string" // Ensure it's a string, as expected for a key
+    ) {
+      // If a valid cacheKey is found on a nested object,
+      // use that string as its representation in the parent's key.
+      // We prepend a unique identifier (e.g., "__ref_") to avoid collisions
+      // with actual string values that might coincidentally look like a cache key.
+      return `__cached_ref_:${value.__cacheKey}`;
+    }
+
+    // For all other keys/values, return the original value.
+    // JSON.stringify will then process this value as usual (e.g., ignoring functions/symbols).
+    return value;
+  });
 }
 
 export class BasePrimitive {
@@ -123,6 +160,15 @@ export class BasePrimitive {
     } else {
       this.fnDeclarations = new wgslFunctionsWithoutSubgroupSupport(this);
     }
+  }
+
+  makeParamString(params) {
+    let str = " [";
+    for (const param of params) {
+      str += ` ${param}: ${this[param]}`;
+    }
+    str += " ]";
+    return str;
   }
 
   /** registerBuffer associates a name with a buffer and
@@ -405,10 +451,24 @@ export class BasePrimitive {
             );
           }
 
-          const computeModule = this.device.createShaderModule({
-            label: `module: ${this.label}`,
-            code: kernelString,
-          });
+          const computeModuleCacheKey = generateCacheKey(kernelString);
+          let computeModule = webGPUObjectCache.computeModules.get(
+            computeModuleCacheKey
+          );
+          if (!computeModule) {
+            computeModule = this.device.createShaderModule({
+              code: kernelString,
+            });
+            computeModule.__cacheKey = computeModuleCacheKey;
+            console.info("Caching new compute module, label is", this.label);
+            webGPUObjectCache.computeModules.set(
+              computeModuleCacheKey,
+              computeModule
+            );
+          } else {
+            console.info("Found compute module in cache");
+          }
+          computeModule.label = `module: ${this.label}`;
 
           if (action?.logCompilationInfo) {
             /* careful: probably has performance implications b/c await */
@@ -427,13 +487,14 @@ export class BasePrimitive {
           }
 
           // build up bindGroupLayouts and pipelineLayout
+          const pipelineLayoutCacheKey = generateCacheKey(action.bufferTypes);
           let pipelineLayout = webGPUObjectCache.pipelineLayouts.get(
-            generateCacheKey(action.bufferTypes)
+            pipelineLayoutCacheKey
           );
           console.info(
             "pipelineLayout is ",
             action.bufferTypes,
-            generateCacheKey(action.bufferTypes),
+            pipelineLayoutCacheKey,
             pipelineLayout
           );
           if (!pipelineLayout) {
@@ -455,25 +516,31 @@ export class BasePrimitive {
                   });
                 }
               });
+              const bindGroupLayoutCacheKey = generateCacheKey(entries);
               let bindGroupLayout = webGPUObjectCache.bindGroupLayouts.get(
-                generateCacheKey(entries)
+                bindGroupLayoutCacheKey
               );
               if (!bindGroupLayout) {
                 /* did not find it in cache, construct it */
                 console.info(
                   "Did not find bindGroupLayout in cache, constructing from",
                   entries,
-                  generateCacheKey(entries)
+                  bindGroupLayoutCacheKey
                 );
                 bindGroupLayout = this.device.createBindGroupLayout({
                   entries,
                 });
+                bindGroupLayout.__cacheKey = bindGroupLayoutCacheKey;
+                webGPUObjectCache.bindGroupLayouts.set(
+                  bindGroupLayoutCacheKey,
+                  bindGroupLayout
+                );
               } else {
                 /* bindGroupLayout was cached, use it */
                 console.info(
                   "Find bindGroupLayout in cache, cache key is",
                   entries,
-                  generateCacheKey(entries),
+                  bindGroupLayoutCacheKey,
                   bindGroupLayout
                 );
               }
@@ -483,20 +550,24 @@ export class BasePrimitive {
             pipelineLayout = this.device.createPipelineLayout({
               bindGroupLayouts,
             });
+            pipelineLayout.__cacheKey = pipelineLayoutCacheKey;
             /* and cache it */
-            console.info("Caching new pipelineLayout", pipelineLayout);
+            console.info(
+              "Caching new pipelineLayout",
+              pipelineLayout,
+              pipelineLayoutCacheKey
+            );
             webGPUObjectCache.pipelineLayouts.set(
-              generateCacheKey(action.bufferTypes),
+              pipelineLayoutCacheKey,
               pipelineLayout
             );
           } else {
             /* pipelineLayout was cached, use it */
-            console.info("Found pipelineLayout", pipelineLayout);
+            console.info("Found pipelineLayout in cache", pipelineLayout);
           }
           pipelineLayout.label = `${this.label} compute pipeline`;
 
-          const kernelPipeline = this.device.createComputePipeline({
-            label: `${this.label} compute pipeline`,
+          const computePipelineDesc = {
             layout: pipelineLayout,
             compute: {
               module: computeModule,
@@ -504,7 +575,36 @@ export class BasePrimitive {
               // warning: next line has never been used/tested
               ...(action.constants && { constants: action.constants }),
             },
-          });
+          };
+          const computePipelineCacheKey = generateCacheKey(computePipelineDesc);
+          let computePipeline = webGPUObjectCache.computePipelines.get(
+            computePipelineCacheKey
+          );
+          console.info(
+            "computePipeline is ",
+            computePipelineDesc,
+            computePipelineCacheKey,
+            computePipeline
+          );
+          if (!computePipeline) {
+            computePipeline =
+              this.device.createComputePipeline(computePipelineDesc);
+            computePipeline.__cacheKey = computePipelineCacheKey;
+            /* and cache it */
+            console.info(
+              "Caching new computePipeline",
+              computePipeline,
+              computePipelineCacheKey
+            );
+            webGPUObjectCache.computePipelines.set(
+              computePipelineCacheKey,
+              computePipeline
+            );
+          } else {
+            /* computePipeline was cached, use it */
+            console.info("Found computePipeline in cache", computePipeline);
+          }
+          computePipeline.label = `${this.label} compute pipeline`;
 
           if (action?.bindings?.length === undefined) {
             console.error(
@@ -537,18 +637,21 @@ export class BasePrimitive {
               )
             : encoder.beginComputePass(kernelDescriptor);
 
-          kernelPass.setPipeline(kernelPipeline);
+          kernelPass.setPipeline(computePipeline);
 
           for (const [bindGroupIndex, bindGroup] of action.bindings.entries()) {
+            const entries = bindGroup.map((binding, bindingIndex) => ({
+              binding: bindingIndex,
+              resource: this.getBufferResource(binding),
+            }));
+            /** Don't think it's feasible to cache bind groups because we don't have a
+             * canonical way to name a buffer */
             const kernelBindGroup = this.device.createBindGroup({
               label: `bindGroup ${bindGroupIndex} for ${this.label} ${
                 action.entryPoint && action.entryPoint
               } kernel`,
-              layout: kernelPipeline.getBindGroupLayout(bindGroupIndex),
-              entries: bindGroup.map((binding, bindingIndex) => ({
-                binding: bindingIndex,
-                resource: this.getBufferResource(binding),
-              })),
+              layout: computePipeline.getBindGroupLayout(bindGroupIndex),
+              entries,
             });
             kernelPass.setBindGroup(bindGroupIndex, kernelBindGroup);
           }
