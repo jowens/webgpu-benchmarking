@@ -49,6 +49,7 @@ import {
 import { StoneberryScanMiniSuite } from "./stoneberry-scan.mjs";
 import { subgroupAccuracyRegressionSuites } from "./subgroupRegression.mjs";
 import { SortOneSweepRegressionSuite } from "./onesweep.mjs";
+import { BasePrimitive } from "./primitive.mjs";
 
 async function main(navigator) {
   const adapter = await navigator.gpu?.requestAdapter();
@@ -120,6 +121,7 @@ async function main(navigator) {
   // let testSuites = [StoneberryScanMiniSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
+  let primitiveCacheStats;
   let validations = { done: 0, errors: 0 };
   for (const testSuite of testSuites) {
     console.log(testSuite);
@@ -405,8 +407,13 @@ async function main(navigator) {
             bandwidth: result.bandwidthCPU,
             inputItemsPerSecondE9: result.inputItemsPerSecondE9CPU,
           });
+          /* record statistics every time through, overwriting any previous statistics */
+          primitiveCacheStats = BasePrimitive.cacheStats(device);
         } // end of TEST FOR PERFORMANCE
       } // end of running all combinations for this testSuite
+      if (primitiveCacheStats) {
+        console.info("Primitive cache stats", primitiveCacheStats);
+      }
       if (validations.done > 0) {
         console.info(
           `${validations.done} validations complete${

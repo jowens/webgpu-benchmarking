@@ -5,18 +5,8 @@ import {
   wgslFunctions,
   wgslFunctionsWithoutSubgroupSupport,
 } from "./wgslFunctions.mjs";
+import { CountingMap, NonCachingMap } from "./mapvariants.mjs";
 import { formatWGSL } from "./util.mjs";
-
-class NonCachingMap {
-  constructor() {}
-  has() {
-    return false;
-  }
-  get() {
-    return false;
-  }
-  set() {}
-}
 
 class WebGPUObjectCache {
   constructor({
@@ -31,17 +21,24 @@ class WebGPUObjectCache {
     /** each object type has its own cache for efficiency, and for the ability
      * to selectively enable/disable that cache */
     this.pipelineLayouts = enabled.includes("pipelineLayouts")
-      ? new Map()
+      ? new CountingMap()
       : new NonCachingMap();
     this.bindGroupLayouts = enabled.includes("bindGroupLayouts")
-      ? new Map()
+      ? new CountingMap()
       : new NonCachingMap();
     this.computeModules = enabled.includes("computeModules")
-      ? new Map()
+      ? new CountingMap()
       : new NonCachingMap();
     this.computePipelines = enabled.includes("computePipelines")
-      ? new Map()
+      ? new CountingMap()
       : new NonCachingMap();
+  }
+  get stats() {
+    return `Cache hits/misses:
+Pipeline layouts: ${this.pipelineLayouts.hits}/${this.pipelineLayouts.misses}
+Bind group layouts: ${this.bindGroupLayouts.hits}/${this.bindGroupLayouts.misses}
+Compute modules: ${this.computeModules.hits}/${this.computeModules.misses}
+Compute pipelines: ${this.computePipelines.hits}/${this.computePipelines.misses}`;
   }
 }
 
@@ -169,6 +166,10 @@ export class BasePrimitive {
     }
     str += " ]";
     return str;
+  }
+
+  static cacheStats(device) {
+    return BasePrimitive.__deviceToWebGPUObjectCache.get(device).stats;
   }
 
   /** registerBuffer associates a name with a buffer and

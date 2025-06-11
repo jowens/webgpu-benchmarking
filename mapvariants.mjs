@@ -1,0 +1,145 @@
+export class CountingMap {
+  #hits = 0; // Private class field for hits
+  #misses = 0; // Private class field for misses
+  #map; // Private class field for the internal Map
+
+  constructor(iterable) {
+    this.#map = new Map(iterable);
+  }
+
+  // Override the get() method to count hits and misses
+  get(key) {
+    if (this.#map.has(key)) {
+      this.#hits++; // Accessing private field
+      return this.#map.get(key);
+    } else {
+      this.#misses++; // Accessing private field
+      return undefined;
+    }
+  }
+
+  // Delegate other Map methods to the internal #map
+  set(key, value) {
+    return this.#map.set(key, value);
+  }
+
+  has(key) {
+    return this.#map.has(key);
+  }
+
+  delete(key) {
+    return this.#map.delete(key);
+  }
+
+  clear() {
+    this.#map.clear();
+    this.#hits = 0; // Reset private counts on clear
+    this.#misses = 0; // Reset private counts on clear
+  }
+
+  get size() {
+    return this.#map.size;
+  }
+
+  // Public getters to expose the private counts
+  get hits() {
+    return this.#hits;
+  }
+
+  get misses() {
+    return this.#misses;
+  }
+
+  // Iteration methods (delegate to the internal #map's iterators)
+  forEach(callbackFn, thisArg) {
+    this.#map.forEach(callbackFn, thisArg);
+  }
+
+  keys() {
+    return this.#map.keys();
+  }
+
+  values() {
+    return this.#map.values();
+  }
+
+  entries() {
+    return this.#map.entries();
+  }
+
+  // Make it iterable
+  [Symbol.iterator]() {
+    return this.#map[Symbol.iterator]();
+  }
+}
+
+export class NonCachingMap {
+  constructor(iterable) {
+    // The constructor intentionally does nothing with the iterable
+    // as no data is ever stored.
+  }
+
+  // has() always returns false as nothing is ever in the map.
+  has(key) {
+    return false;
+  }
+
+  // get() always returns undefined as nothing is ever retrieved.
+  get(key) {
+    return undefined;
+  }
+
+  // set() does nothing as no data is ever stored.
+  set(key, value) {
+    // Return 'this' for chainability, consistent with Map's set() behavior.
+    return this;
+  }
+
+  // delete() always returns false as nothing can be deleted.
+  delete(key) {
+    return false;
+  }
+
+  // clear() does nothing as there's nothing to clear.
+  clear() {
+    // No operation
+  }
+
+  // size always returns 0 as there are no entries.
+  get size() {
+    return 0;
+  }
+
+  get hits() {
+    return 0;
+  }
+
+  get misses() {
+    return 0;
+  }
+
+  // forEach() does nothing as there are no entries to iterate.
+  forEach(callbackFn, thisArg) {
+    // No operation
+  }
+
+  // keys() returns an empty iterator.
+  keys() {
+    return [].values(); // An iterator for an empty array
+  }
+
+  // values() returns an empty iterator.
+  values() {
+    return [].values(); // An iterator for an empty array
+  }
+
+  // entries() returns an empty iterator.
+  entries() {
+    return [].values(); // An iterator for an empty array
+  }
+
+  // Make it iterable, returning an empty iterator.
+  [Symbol.iterator]() {
+    return [].values(); // An iterator for an empty array
+  }
+}
