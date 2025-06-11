@@ -74,29 +74,34 @@ export class CountingMap {
 }
 
 export class NonCachingMap {
-  constructor(iterable) {
+  // eslint-disable-next-line no-unused-vars
+  constructor(_iterable) {
     // The constructor intentionally does nothing with the iterable
     // as no data is ever stored.
   }
 
   // has() always returns false as nothing is ever in the map.
-  has(key) {
+  // eslint-disable-next-line no-unused-vars
+  has(_key) {
     return false;
   }
 
   // get() always returns undefined as nothing is ever retrieved.
-  get(key) {
+  // eslint-disable-next-line no-unused-vars
+  get(_key) {
     return undefined;
   }
 
   // set() does nothing as no data is ever stored.
-  set(key, value) {
+  // eslint-disable-next-line no-unused-vars
+  set(_key, _value) {
     // Return 'this' for chainability, consistent with Map's set() behavior.
     return this;
   }
 
   // delete() always returns false as nothing can be deleted.
-  delete(key) {
+  // eslint-disable-next-line no-unused-vars
+  delete(_key) {
     return false;
   }
 
@@ -119,7 +124,8 @@ export class NonCachingMap {
   }
 
   // forEach() does nothing as there are no entries to iterate.
-  forEach(callbackFn, thisArg) {
+  // eslint-disable-next-line no-unused-vars
+  forEach(_callbackFn, _thisArg) {
     // No operation
   }
 

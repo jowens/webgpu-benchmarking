@@ -16,6 +16,7 @@ class WebGPUObjectCache {
       "computeModules",
       "computePipelines",
     ] /* this list is the default */,
+    // eslint-disable-next-line no-unused-vars
     ...args
   } = {}) {
     /** each object type has its own cache for efficiency, and for the ability
@@ -461,13 +462,10 @@ export class BasePrimitive {
               code: kernelString,
             });
             computeModule.__cacheKey = computeModuleCacheKey;
-            console.info("Caching new compute module, label is", this.label);
             webGPUObjectCache.computeModules.set(
               computeModuleCacheKey,
               computeModule
             );
-          } else {
-            console.info("Found compute module in cache");
           }
           computeModule.label = `module: ${this.label}`;
 
@@ -491,12 +489,6 @@ export class BasePrimitive {
           const pipelineLayoutCacheKey = generateCacheKey(action.bufferTypes);
           let pipelineLayout = webGPUObjectCache.pipelineLayouts.get(
             pipelineLayoutCacheKey
-          );
-          console.info(
-            "pipelineLayout is ",
-            action.bufferTypes,
-            pipelineLayoutCacheKey,
-            pipelineLayout
           );
           if (!pipelineLayout) {
             /* first build up bindGroupLayouts, then create a pipeline layout */
@@ -523,24 +515,11 @@ export class BasePrimitive {
               );
               if (!bindGroupLayout) {
                 /* did not find it in cache, construct it */
-                console.info(
-                  "Did not find bindGroupLayout in cache, constructing from",
-                  entries,
-                  bindGroupLayoutCacheKey
-                );
                 bindGroupLayout = this.device.createBindGroupLayout({
                   entries,
                 });
                 bindGroupLayout.__cacheKey = bindGroupLayoutCacheKey;
                 webGPUObjectCache.bindGroupLayouts.set(
-                  bindGroupLayoutCacheKey,
-                  bindGroupLayout
-                );
-              } else {
-                /* bindGroupLayout was cached, use it */
-                console.info(
-                  "Find bindGroupLayout in cache, cache key is",
-                  entries,
                   bindGroupLayoutCacheKey,
                   bindGroupLayout
                 );
@@ -553,18 +532,10 @@ export class BasePrimitive {
             });
             pipelineLayout.__cacheKey = pipelineLayoutCacheKey;
             /* and cache it */
-            console.info(
-              "Caching new pipelineLayout",
-              pipelineLayout,
-              pipelineLayoutCacheKey
-            );
             webGPUObjectCache.pipelineLayouts.set(
               pipelineLayoutCacheKey,
               pipelineLayout
             );
-          } else {
-            /* pipelineLayout was cached, use it */
-            console.info("Found pipelineLayout in cache", pipelineLayout);
           }
           pipelineLayout.label = `${this.label} compute pipeline`;
 
@@ -581,29 +552,15 @@ export class BasePrimitive {
           let computePipeline = webGPUObjectCache.computePipelines.get(
             computePipelineCacheKey
           );
-          console.info(
-            "computePipeline is ",
-            computePipelineDesc,
-            computePipelineCacheKey,
-            computePipeline
-          );
           if (!computePipeline) {
             computePipeline =
               this.device.createComputePipeline(computePipelineDesc);
             computePipeline.__cacheKey = computePipelineCacheKey;
             /* and cache it */
-            console.info(
-              "Caching new computePipeline",
-              computePipeline,
-              computePipelineCacheKey
-            );
             webGPUObjectCache.computePipelines.set(
               computePipelineCacheKey,
               computePipeline
             );
-          } else {
-            /* computePipeline was cached, use it */
-            console.info("Found computePipeline in cache", computePipeline);
           }
           computePipeline.label = `${this.label} compute pipeline`;
 
