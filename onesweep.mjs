@@ -48,6 +48,19 @@ export class OneSweepSort extends BaseSort {
         delete this[knownBuffer]; // let's make sure it's in one place only
       }
     }
+
+    /** set a label that properly enumerates the kernel parameterization
+     * this is not perfect though; it's also parameterized by values set
+     * in finalizeRuntimeParameters (and those aren't available at this time)
+     */
+    if (!("label" in args)) {
+      this.label += this.makeParamString([
+        "direction",
+        "type",
+        "datatype",
+        "useSubgroups",
+      ]);
+    }
   }
 
   get bytesTransferred() {

@@ -28,6 +28,19 @@ export class DLDFScan extends BaseScan {
     for (const knownBuffer of this.additionalKnownBuffers) {
       this.knownBuffers.push(knownBuffer);
     }
+
+    /** set a label that properly enumerates the kernel parameterization
+     * this is not perfect though; it's also parameterized by values set
+     * in finalizeRuntimeParameters (and those aren't available at this time)
+     */
+    if (!("label" in args)) {
+      this.label += this.makeParamString([
+        "type",
+        "datatype",
+        "binop",
+        "useSubgroups",
+      ]);
+    }
   }
 
   scandldfWGSL = () => {
