@@ -44,7 +44,9 @@ import {
   // DLDFScanTestSuite,
   // DLDFReduceTestSuite,
   DLDFScanAccuracyRegressionSuite,
+  DLDFCachePerfTestSuite,
   DLDFScanMiniSuite,
+  DLDFFailureSuite,
 } from "./scandldf.mjs";
 import { StoneberryScanMiniSuite } from "./stoneberry-scan.mjs";
 import { subgroupAccuracyRegressionSuites } from "./subgroupRegression.mjs";
@@ -117,7 +119,10 @@ async function main(navigator) {
   //  DLDFScanAccuracyRegressionSuite,
   //  DLDFScanMiniSuite
   //);
-  let testSuites = [DLDFScanMiniSuite];
+  // let testSuites = [DLDFScanMiniSuite];
+  // let testSuites = [DLDFScanAccuracyRegressionSuite];
+  let testSuites = [DLDFCachePerfTestSuite];
+  // let testSuites = [DLDFFailureSuite];
   // let testSuites = [StoneberryScanMiniSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
@@ -354,63 +359,23 @@ async function main(navigator) {
             enableGPUTiming: hasTimestampQuery,
             enableCPUTiming: true,
           });
-          let { gpuTotalTimeNS, cpuTotalTimeNS } =
+
+          const { gpuTotalTimeNS, cpuTotalTimeNS } =
             await primitive.getTimingResult();
-          const result = {
-            testSuite: testSuite.testSuite,
-            category: testSuite.category,
-          };
-          if (gpuTotalTimeNS instanceof Array) {
-            // gpuTotalTimeNS might be a list, in which case just add together for now
-            result.gpuTotalTimeNSArray = gpuTotalTimeNS;
-            gpuTotalTimeNS = gpuTotalTimeNS.reduce((x, a) => x + a, 0);
-          }
-          /* copy primitive's fields into result */
-          for (const [field, value] of Object.entries(primitive)) {
-            if (typeof value !== "function" && !Array.isArray(value)) {
-              if (typeof value !== "object") {
-                result[field] = value;
-              } else {
-                /* object - if it's got a constructor, use a (useful) name */
-                /* useful for "binop" or other parameters */
-                if (value?.constructor?.name !== "Object") {
-                  result[field] = value.constructor.name;
-                }
-              }
-            }
-          }
-          result.date = new Date();
-          result.gpuinfo = adapter.info;
-          result.gputime = gpuTotalTimeNS / testSuite.trials;
-          result.cputime = cpuTotalTimeNS / testSuite.trials;
-          result.cpugpuDelta = result.cputime - result.gputime;
-          result.inputBytes =
-            primitive.inputLength * datatypeToBytes(primitive.datatype);
-          result.bandwidthGPU = primitive.bytesTransferred / result.gputime;
-          result.bandwidthCPU = primitive.bytesTransferred / result.cputime;
-          result.inputItemsPerSecondE9GPU =
-            primitive.inputLength / result.gputime;
-          result.inputItemsPerSecondE9CPU =
-            primitive.inputLength / result.cputime;
-          if (primitive.gflops) {
-            result.gflops = primitive.gflops(result.gputime);
-          }
-          expts.push({
-            ...result,
-            timing: "GPU",
-            bandwidth: result.bandwidthGPU,
-            inputItemsPerSecondE9: result.inputItemsPerSecondE9GPU,
-          });
-          expts.push({
-            ...result,
-            timing: "CPU",
-            bandwidth: result.bandwidthCPU,
-            inputItemsPerSecondE9: result.inputItemsPerSecondE9CPU,
-          });
-          /* record statistics every time through, overwriting any previous statistics */
-          primitiveCacheStats = BasePrimitive.cacheStats(device);
+          processAndRecordResults(
+            expts,
+            gpuTotalTimeNS,
+            cpuTotalTimeNS,
+            primitive,
+            testSuite,
+            adapter.info
+          );
         } // end of TEST FOR PERFORMANCE
       } // end of running all combinations for this testSuite
+
+      /* record statistics every time through, overwriting any previous statistics */
+      primitiveCacheStats = BasePrimitive.cacheStats(device);
+
       if (primitiveCacheStats) {
         console.info("Primitive cache stats", primitiveCacheStats);
       }
@@ -421,21 +386,10 @@ async function main(navigator) {
           }, ${validations.errors} error${validations.errors != 1 ? "s" : ""}.`
         );
       }
-
-      // delay is just to make sure previous jobs finish before plotting
-      // almost certainly the timer->then clause above should be written in a way
-      //   that lets me wait on it instead
     }
 
-    if (expts.length > 0) {
-      await delay(5000);
-      console.info(expts);
-    }
-
+    console.info(expts);
     const plots = testSuite.getPlots();
-    if (plots.length > 0) {
-      await delay(2000);
-    }
     for (let plot of plots) {
       /* default: if filter not specified, only take expts from the last test we ran */
       let filteredExpts = expts.filter(
@@ -530,4 +484,65 @@ async function main(navigator) {
   }
   console.log("Finished.");
 }
+
+function processAndRecordResults(
+  expts,
+  gpuTotalTimeNS,
+  cpuTotalTimeNS,
+  primitive,
+  testSuite,
+  adapter
+) {
+  // ... (Calculates bandwidth, gflops, etc., and pushes to `expts`) ...
+  const result = {
+    testSuite: testSuite.testSuite,
+    category: testSuite.category,
+  };
+  if (gpuTotalTimeNS instanceof Array) {
+    // gpuTotalTimeNS might be a list, in which case just add together for now
+    result.gpuTotalTimeNSArray = gpuTotalTimeNS;
+    gpuTotalTimeNS = gpuTotalTimeNS.reduce((x, a) => x + a, 0);
+  }
+  /* copy primitive's fields into result */
+  for (const [field, value] of Object.entries(primitive)) {
+    if (typeof value !== "function" && !Array.isArray(value)) {
+      if (typeof value !== "object") {
+        result[field] = value;
+      } else {
+        /* object - if it's got a constructor, use a (useful) name */
+        /* useful for "binop" or other parameters */
+        if (value?.constructor?.name !== "Object") {
+          result[field] = value.constructor.name;
+        }
+      }
+    }
+  }
+  result.date = new Date();
+  result.gpuinfo = adapter.info;
+  result.gputime = gpuTotalTimeNS / testSuite.trials;
+  result.cputime = cpuTotalTimeNS / testSuite.trials;
+  result.cpugpuDelta = result.cputime - result.gputime;
+  result.inputBytes =
+    primitive.inputLength * datatypeToBytes(primitive.datatype);
+  result.bandwidthGPU = primitive.bytesTransferred / result.gputime;
+  result.bandwidthCPU = primitive.bytesTransferred / result.cputime;
+  result.inputItemsPerSecondE9GPU = primitive.inputLength / result.gputime;
+  result.inputItemsPerSecondE9CPU = primitive.inputLength / result.cputime;
+  if (primitive.gflops) {
+    result.gflops = primitive.gflops(result.gputime);
+  }
+  expts.push({
+    ...result,
+    timing: "GPU",
+    bandwidth: result.bandwidthGPU,
+    inputItemsPerSecondE9: result.inputItemsPerSecondE9GPU,
+  });
+  expts.push({
+    ...result,
+    timing: "CPU",
+    bandwidth: result.bandwidthCPU,
+    inputItemsPerSecondE9: result.inputItemsPerSecondE9CPU,
+  });
+}
+
 export { main };
