@@ -5,7 +5,7 @@ import {
   wgslFunctions,
   wgslFunctionsWithoutSubgroupSupport,
 } from "./wgslFunctions.mjs";
-import { CountingMap, NonCachingMap } from "./mapvariants.mjs";
+import { CountingMap } from "./mapvariants.mjs";
 import { formatWGSL } from "./util.mjs";
 
 class WebGPUObjectCache {
