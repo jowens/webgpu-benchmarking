@@ -21,18 +21,19 @@ class WebGPUObjectCache {
   } = {}) {
     /** each object type has its own cache for efficiency, and for the ability
      * to selectively enable/disable that cache */
-    this.pipelineLayouts = enabled.includes("pipelineLayouts")
-      ? new CountingMap()
-      : new NonCachingMap();
-    this.bindGroupLayouts = enabled.includes("bindGroupLayouts")
-      ? new CountingMap()
-      : new NonCachingMap();
-    this.computeModules = enabled.includes("computeModules")
-      ? new CountingMap()
-      : new NonCachingMap();
-    this.computePipelines = enabled.includes("computePipelines")
-      ? new CountingMap()
-      : new NonCachingMap();
+    this.initiallyEnabled = enabled;
+    this.caches = [
+      "pipelineLayouts",
+      "bindGroupLayouts",
+      "computeModules",
+      "computePipelines",
+    ];
+    for (const cache of this.caches) {
+      this[cache] = new CountingMap({
+        enabled: this.initiallyEnabled.includes(cache),
+      });
+    }
+    console.log(this);
   }
   get stats() {
     return `Cache hits/misses:
@@ -40,6 +41,16 @@ Pipeline layouts: ${this.pipelineLayouts.hits}/${this.pipelineLayouts.misses}
 Bind group layouts: ${this.bindGroupLayouts.hits}/${this.bindGroupLayouts.misses}
 Compute modules: ${this.computeModules.hits}/${this.computeModules.misses}
 Compute pipelines: ${this.computePipelines.hits}/${this.computePipelines.misses}`;
+  }
+  enable() {
+    for (const enabled of this.initiallyEnabled) {
+      this[enabled].enable();
+    }
+  }
+  disable() {
+    for (const enabled of this.initiallyEnabled) {
+      this[enabled].disable();
+    }
   }
 }
 
@@ -124,6 +135,23 @@ export class BasePrimitive {
          */
         new WebGPUObjectCache()
       );
+    }
+
+    if ("webgpucache" in args) {
+      console.info("Saw webgpucache argument", args.webgpucache);
+      switch (args.webgpucache) {
+        case "enable":
+          BasePrimitive.__deviceToWebGPUObjectCache.get(this.device).enable();
+          break;
+        case "disable":
+          BasePrimitive.__deviceToWebGPUObjectCache.get(this.device).disable();
+          break;
+        default:
+          console.error(
+            'Primitive constructor: webgpucache must be either "enable" or "disable"'
+          );
+          break;
+      }
     }
 
     /** possible that we've specified binop but not datatype, in
