@@ -613,6 +613,24 @@ export const DLDFScanPlot = {
   caption: "CPU timing (performance.now), GPU timing (timestamps)",
 };
 
+export const DLDFCPUTimePlot = {
+  x: { field: "inputBytes", label: "Input array size (B)" },
+  y: { field: "cputime", label: "CPU runtime (ns)" },
+  stroke: { field: "webgpucache" },
+  test_br: "gpuinfo.description",
+  caption: "CPU timing (performance.now)",
+  filter: (row) => row.timing === "CPU",
+};
+
+export const DLDFCPUBWPlot = {
+  x: { field: "inputBytes", label: "Input array size (B)" },
+  y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+  stroke: { field: "webgpucache" },
+  test_br: "gpuinfo.description",
+  caption: "CPU timing (performance.now)",
+  filter: (row) => row.timing === "CPU",
+};
+
 export const DLDFScanTestSuite = new BaseTestSuite({
   category: "scan",
   testSuite: "DLDF scan",
@@ -646,10 +664,19 @@ export const DLDFReduceTestSuite = new BaseTestSuite({
 });
 
 const DLDFRegressionParams = {
-  inputLength: range(12, 25).map((i) => 2 ** i),
+  inputLength: range(10, 23).map((i) => 2 ** i),
   type: ["reduce", "inclusive", "exclusive"],
   datatype: ["f32", "u32"],
   binopbase: [BinOpAdd, BinOpMax, BinOpMin],
+  disableSubgroups: [false /*, true*/],
+};
+
+const DLDFLengthOnlyRegressionParams = {
+  webgpucache: ["enable", "disable"] /* put this first so it varies slowest */,
+  inputLength: range(10, 21 /*25*/).map((i) => 2 ** i),
+  type: ["exclusive"],
+  datatype: ["u32"],
+  binopbase: [BinOpAdd],
   disableSubgroups: [false /*, true*/],
 };
 
@@ -664,9 +691,18 @@ const DLDFMiniParams = {
 export const DLDFScanAccuracyRegressionSuite = new BaseTestSuite({
   category: "scan",
   testSuite: "DLDF",
-  trials: 2,
+  trials: 20,
   params: DLDFRegressionParams,
   primitive: DLDFScan,
+});
+
+export const DLDFCachePerfTestSuite = new BaseTestSuite({
+  category: "scan",
+  testSuite: "DLDF",
+  trials: 20,
+  params: DLDFLengthOnlyRegressionParams,
+  primitive: DLDFScan,
+  plots: [DLDFCPUTimePlot, DLDFCPUBWPlot, DLDFScanPlot],
 });
 
 export const DLDFScanMiniSuite = new BaseTestSuite({
@@ -674,5 +710,21 @@ export const DLDFScanMiniSuite = new BaseTestSuite({
   testSuite: "DLDF",
   trials: 2,
   params: DLDFMiniParams,
+  primitive: DLDFScan,
+});
+
+const DLDFailureParams = {
+  inputLength: [2 ** 23],
+  type: ["exclusive"],
+  datatype: ["u32"],
+  binopbase: [BinOpAdd],
+  disableSubgroups: [false /*, true*/],
+};
+
+export const DLDFFailureSuite = new BaseTestSuite({
+  category: "scan",
+  testSuite: "DLDF",
+  trials: 25,
+  params: DLDFailureParams,
   primitive: DLDFScan,
 });
