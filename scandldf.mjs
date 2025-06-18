@@ -613,6 +613,24 @@ export const DLDFScanPlot = {
   caption: "CPU timing (performance.now), GPU timing (timestamps)",
 };
 
+export const DLDFGPUTimePlot = {
+  x: { field: "inputBytes", label: "Input array size (B)" },
+  y: { field: "gputime", label: "GPU runtime (ns)" },
+  stroke: { field: "webgpucache" },
+  test_br: "gpuinfo.description",
+  caption: "GPU timing (timestamps)",
+  filter: (row) => row.timing === "GPU",
+};
+
+export const DLDFGPUBWPlot = {
+  x: { field: "inputBytes", label: "Input array size (B)" },
+  y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+  stroke: { field: "webgpucache" },
+  test_br: "gpuinfo.description",
+  caption: "GPU timing (timestamps)",
+  filter: (row) => row.timing === "GPU",
+};
+
 export const DLDFCPUTimePlot = {
   x: { field: "inputBytes", label: "Input array size (B)" },
   y: { field: "cputime", label: "CPU runtime (ns)" },
@@ -620,6 +638,26 @@ export const DLDFCPUTimePlot = {
   test_br: "gpuinfo.description",
   caption: "CPU timing (performance.now)",
   filter: (row) => row.timing === "CPU",
+};
+
+export const DLDFDottedCPUTimePlot = {
+  x: { field: "inputBytes", label: "Input array size (B)" },
+  y: { field: "cputime", label: "CPU runtime (ns)" },
+  stroke: { field: "webgpucache" },
+  test_br: "gpuinfo.description",
+  caption: "CPU timing (performance.now)",
+  mark: "dot",
+  filter: (row) => row.timing === "CPU",
+};
+
+export const DLDFDottedGPUTimePlot = {
+  x: { field: "inputBytes", label: "Input array size (B)" },
+  y: { field: "gputime", label: "GPU runtime (ns)" },
+  stroke: { field: "webgpucache" },
+  test_br: "gpuinfo.description",
+  caption: "GPU timing (timestamps)",
+  mark: "dot",
+  filter: (row) => row.timing === "GPU",
 };
 
 export const DLDFCPUBWPlot = {
@@ -673,7 +711,43 @@ const DLDFRegressionParams = {
 
 const DLDFLengthOnlyRegressionParams = {
   webgpucache: ["enable", "disable"] /* put this first so it varies slowest */,
-  inputLength: range(10, 21 /*25*/).map((i) => 2 ** i),
+  inputLength: range(10, 23).map((i) => 2 ** i),
+  type: ["exclusive"],
+  datatype: ["u32"],
+  binopbase: [BinOpAdd],
+  disableSubgroups: [false /*, true*/],
+};
+
+const DLDFLotsOfLengthsWithCacheRegressionParams = {
+  webgpucache: ["enable", "disable"] /* put this first so it varies slowest */,
+  inputLength: range(0, 100).map((i) => 2 ** 20 + 16384 * i),
+  type: ["exclusive"],
+  datatype: ["u32"],
+  binopbase: [BinOpAdd],
+  disableSubgroups: [false /*, true*/],
+};
+
+const DLDF2LengthsWithCacheRegressionParams = {
+  webgpucache: ["enable", "disable"] /* put this first so it varies slowest */,
+  inputLength: range(0, 2).map((i) => 2 ** 20 + 16384 * i),
+  type: ["exclusive"],
+  datatype: ["u32"],
+  binopbase: [BinOpAdd],
+  disableSubgroups: [false /*, true*/],
+};
+
+const DLDFLengthOnlyRegressionParams22 = {
+  webgpucache: ["enable", "disable"] /* put this first so it varies slowest */,
+  inputLength: [2 ** 22],
+  type: ["exclusive"],
+  datatype: ["u32"],
+  binopbase: [BinOpAdd],
+  disableSubgroups: [false /*, true*/],
+};
+
+const DLDFLengthOnlyRegressionParams25 = {
+  webgpucache: ["enable", "disable"] /* put this first so it varies slowest */,
+  inputLength: [2 ** 25],
   type: ["exclusive"],
   datatype: ["u32"],
   binopbase: [BinOpAdd],
@@ -684,6 +758,14 @@ const DLDFMiniParams = {
   inputLength: [2 ** 20],
   type: ["inclusive", "exclusive"],
   datatype: ["f32", "u32"],
+  binopbase: [BinOpAdd],
+  disableSubgroups: [false],
+};
+
+const DLDFSingletonParams = {
+  inputLength: [2 ** 20],
+  type: ["exclusive"],
+  datatype: ["u32"],
   binopbase: [BinOpAdd],
   disableSubgroups: [false],
 };
@@ -699,10 +781,34 @@ export const DLDFScanAccuracyRegressionSuite = new BaseTestSuite({
 export const DLDFCachePerfTestSuite = new BaseTestSuite({
   category: "scan",
   testSuite: "DLDF",
-  trials: 20,
+  trials: 1,
   params: DLDFLengthOnlyRegressionParams,
   primitive: DLDFScan,
-  plots: [DLDFCPUTimePlot, DLDFCPUBWPlot, DLDFScanPlot],
+  plots: [
+    DLDFCPUTimePlot,
+    DLDFCPUBWPlot,
+    DLDFGPUTimePlot,
+    DLDFGPUBWPlot,
+    DLDFScanPlot,
+  ],
+});
+
+export const DLDFDottedCachePerfTestSuite = new BaseTestSuite({
+  category: "scan",
+  testSuite: "DLDF",
+  trials: 1,
+  params: DLDFLotsOfLengthsWithCacheRegressionParams,
+  primitive: DLDFScan,
+  plots: [DLDFDottedCPUTimePlot, DLDFDottedGPUTimePlot],
+});
+
+export const DLDFDottedCachePerf2TestSuite = new BaseTestSuite({
+  category: "scan",
+  testSuite: "DLDF",
+  trials: 1,
+  params: DLDF2LengthsWithCacheRegressionParams,
+  primitive: DLDFScan,
+  plots: [DLDFDottedCPUTimePlot, DLDFDottedGPUTimePlot],
 });
 
 export const DLDFScanMiniSuite = new BaseTestSuite({
@@ -714,7 +820,7 @@ export const DLDFScanMiniSuite = new BaseTestSuite({
 });
 
 const DLDFailureParams = {
-  inputLength: [2 ** 23],
+  inputLength: [2 ** 25],
   type: ["exclusive"],
   datatype: ["u32"],
   binopbase: [BinOpAdd],
@@ -724,7 +830,16 @@ const DLDFailureParams = {
 export const DLDFFailureSuite = new BaseTestSuite({
   category: "scan",
   testSuite: "DLDF",
-  trials: 25,
+  trials: 10,
   params: DLDFailureParams,
+  primitive: DLDFScan,
+  validate: false,
+});
+
+export const DLDFSingletonWithTimingSuite = new BaseTestSuite({
+  category: "scan",
+  testSuite: "DLDF",
+  trials: 1,
+  params: DLDFSingletonParams,
   primitive: DLDFScan,
 });
