@@ -616,15 +616,8 @@ export class BasePrimitive {
             label: `${this.label} compute pass`,
           };
 
-          const kernelPass = args.enableGPUTiming
-            ? BasePrimitive.__timingHelper.beginComputePass(
-                encoder,
-                kernelDescriptor
-              )
-            : encoder.beginComputePass(kernelDescriptor);
-
-          kernelPass.setPipeline(computePipeline);
-
+          /* create kernelBindGroups here */
+          let kernelBindGroups = {};
           for (const [bindGroupIndex, bindGroup] of action.bindings.entries()) {
             const entries = bindGroup.map((binding, bindingIndex) => ({
               binding: bindingIndex,
@@ -639,7 +632,30 @@ export class BasePrimitive {
               layout: computePipeline.getBindGroupLayout(bindGroupIndex),
               entries,
             });
-            kernelPass.setBindGroup(bindGroupIndex, kernelBindGroup);
+            kernelBindGroups[bindGroupIndex] = kernelBindGroup;
+          }
+
+          /** If we have specified N trials, launch 1 pass with N dispatches.
+           * It's the programmer's responsibility to make sure that additional passes
+           * are idempotent if trials > 1. */
+          const kernelPass = args.enableGPUTiming
+            ? BasePrimitive.__timingHelper.beginComputePass(
+                encoder,
+                kernelDescriptor
+              )
+            : encoder.beginComputePass(kernelDescriptor);
+
+          kernelPass.setPipeline(computePipeline);
+
+          for (const [
+            bindGroupIndex,
+            // eslint-disable-next-line no-unused-vars
+            bindGroup,
+          ] of action.bindings.entries()) {
+            kernelPass.setBindGroup(
+              bindGroupIndex,
+              kernelBindGroups[bindGroupIndex]
+            );
           }
 
           /* For binding geometry:
@@ -656,11 +672,12 @@ export class BasePrimitive {
           } else {
             dispatchGeometry = this.getDispatchGeometry();
           }
-          /* trials might be >1 so make sure additional runs are idempotent */
+
           for (let trial = 0; trial < (args.trials ?? 1); trial++) {
             /* dispatchGeometry is a vector, so spread it to make it x,y,z */
             kernelPass.dispatchWorkgroups(...dispatchGeometry);
           }
+          kernelPass.end();
 
           if (action.logLaunchParameters) {
             /** "size of bindings" must be updated to handle
@@ -676,7 +693,7 @@ workgroupSize: ${this.workgroupSize}
 maxGSLWorkgroupCount: ${this.maxGSLWorkgroupCount}
 dispatchGeometry: ${dispatchGeometry}`);
           }
-          kernelPass.end();
+
           break;
         }
         case InitializeMemoryBlock: {
@@ -807,7 +824,9 @@ dispatchGeometry: ${dispatchGeometry}`);
     }
   }
   async getTimingResult() {
-    const gpuTotalTimeNS = await BasePrimitive.__timingHelper.getResult();
+    const gpuTotalTimeNS = BasePrimitive.__timingHelper
+      ? await BasePrimitive.__timingHelper.getResult()
+      : 0;
     const cpuTotalTimeNS = (this.cpuEndTime - this.cpuStartTime) * 1000000.0;
     return { gpuTotalTimeNS, cpuTotalTimeNS };
   }
