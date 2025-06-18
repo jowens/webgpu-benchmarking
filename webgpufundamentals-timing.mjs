@@ -20,6 +20,11 @@ export class TimingHelper {
   #state = "free";
 
   constructor(device, numKernels = 1) {
+    console.info(
+      numKernels,
+      device.features.has("timestamp-query"),
+      "constructor timing"
+    );
     this.#device = device;
     this.#canTimestamp = device.features.has("timestamp-query");
     this.#numKernels = numKernels;
@@ -31,6 +36,7 @@ export class TimingHelper {
    */
 
   destroy() {
+    console.info("Destroying timing");
     this.#querySet.destroy();
     this.#resolveBuffer.destroy();
     while (this.#resultBuffers.length > 0) {
@@ -40,11 +46,13 @@ export class TimingHelper {
   }
 
   reset(numKernels) {
+    console.info("Reset timing", numKernels);
     this.#passNumber = 0;
     this.#numKernels = numKernels;
     if (this.#canTimestamp) {
       this.#querySet = this.#device.createQuerySet({
         type: "timestamp",
+        label: `TimingHelper query set buffer of count ${numKernels * 2}`,
         count: numKernels * 2,
       });
       this.#resolveBuffer = this.#device.createBuffer({
@@ -52,6 +60,7 @@ export class TimingHelper {
         label: `TimingHelper resolve buffer of count ${this.#querySet.count}`,
         usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
       });
+      console.info("Created", this.#querySet, this.#resolveBuffer);
     }
   }
 
@@ -60,6 +69,15 @@ export class TimingHelper {
   }
 
   #beginTimestampPass(encoder, fnName, descriptor) {
+    console.info(
+      "timing begintimestamppass",
+      encoder,
+      fnName,
+      descriptor,
+      this.#canTimestamp,
+      "pass number",
+      this.#passNumber
+    );
     if (this.#canTimestamp) {
       assert(
         /* haven't started or finished all passes yet */
@@ -110,6 +128,7 @@ export class TimingHelper {
   }
 
   #resolveTiming(encoder) {
+    console.info("resolving timing", encoder);
     if (!this.#canTimestamp) {
       return;
     }
@@ -162,6 +181,7 @@ export class TimingHelper {
     const resultBuffer = this.#resultBuffer;
     await resultBuffer.mapAsync(GPUMapMode.READ);
     const times = new BigInt64Array(resultBuffer.getMappedRange());
+    console.info("getting result, size", times.length, times);
     /* I need to read about functional programming in JS to make below pretty */
     const durations = [];
     for (let idx = 0; idx < times.length; idx += 2) {
