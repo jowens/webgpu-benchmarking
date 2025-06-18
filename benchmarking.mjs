@@ -37,6 +37,12 @@ if (typeof process !== "undefined" && process.release.name === "node") {
   }
 }
 
+if (Window.crossOriginIsolated) {
+  console.info("IS cross-origin isolated");
+} else {
+  console.info("is NOT cross-origin isolated");
+}
+
 // tests
 // import { NoAtomicPKReduceTestSuite } from "./reduce.mjs";
 // import { HierarchicalScanTestSuite } from "./scan.mjs";
@@ -45,8 +51,11 @@ import {
   // DLDFReduceTestSuite,
   DLDFScanAccuracyRegressionSuite,
   DLDFCachePerfTestSuite,
+  DLDFDottedCachePerfTestSuite,
+  DLDFDottedCachePerf2TestSuite,
   DLDFScanMiniSuite,
   DLDFFailureSuite,
+  DLDFSingletonWithTimingSuite,
 } from "./scandldf.mjs";
 import { StoneberryScanMiniSuite } from "./stoneberry-scan.mjs";
 import { subgroupAccuracyRegressionSuites } from "./subgroupRegression.mjs";
@@ -121,7 +130,9 @@ async function main(navigator) {
   //);
   // let testSuites = [DLDFScanMiniSuite];
   // let testSuites = [DLDFScanAccuracyRegressionSuite];
-  let testSuites = [DLDFCachePerfTestSuite];
+  // let testSuites = [DLDFDottedCachePerfTestSuite];
+  let testSuites = [DLDFDottedCachePerf2TestSuite];
+  // let testSuites = [DLDFSingletonWithTimingSuite];
   // let testSuites = [DLDFFailureSuite];
   // let testSuites = [StoneberryScanMiniSuite];
 
@@ -398,6 +409,7 @@ async function main(navigator) {
             row.testSuite === lastTestSeen.testSuite &&
             row.category === lastTestSeen.category)
       );
+      const mark = plot.mark ?? "lineY";
       console.info(
         "Filtered experiments for",
         plot.caption,
@@ -412,7 +424,7 @@ async function main(navigator) {
       );
       const schema = {
         marks: [
-          Plot.lineY(filteredExpts, {
+          Plot[mark](filteredExpts, {
             x: plot.x.field,
             y: plot.y.field,
             ...("fx" in plot && { fx: plot.fx.field }),
