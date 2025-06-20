@@ -57,6 +57,7 @@ export class Buffer {
         );
       }
       this.#cpuBuffer = new (datatypeToTypedArray(this.datatype))(this.length);
+      const is64Bit = this.datatype === "u64";
       this.#cpuBufferIsDirty = true;
       if (this.args.initializeCPUBuffer) {
         for (let i = 0; i < this.length; i++) {
@@ -83,6 +84,7 @@ export class Buffer {
               break;
             case "u32":
             case "i32":
+            case "u64":
               switch (this.args.initializeCPUBuffer) {
                 case "xor-beef":
                   val = i ^ 0xbeef;
@@ -100,12 +102,16 @@ export class Buffer {
                   break;
                 case "fisheryates":
                 default:
-                  val = i == 0 ? 0 : this.#cpuBuffer[i - 1] + 1; // trying to get u32s
+                  if (is64Bit) {
+                    val = BigInt(i);
+                  } else {
+                    val = i == 0 ? 0 : this.#cpuBuffer[i - 1] + 1; // trying to get u32s
+                  }
                   break;
               }
               break;
           }
-          this.#cpuBuffer[i] = val;
+          this.#cpuBuffer[i] = is64Bit ? BigInt(val) : val;
         }
         /* now post-process the array */
         switch (this.args.initializeCPUBuffer) {
