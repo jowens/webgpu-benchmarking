@@ -710,8 +710,8 @@ const DLDFRegressionParams = {
 };
 
 const DLDFLengthOnlyRegressionParams = {
-  webgpucache: ["enable", "disable"] /* put this first so it varies slowest */,
-  inputLength: range(10, 23).map((i) => 2 ** i),
+  // webgpucache: ["enable", "disable"] /* put this first so it varies slowest */,
+  inputLength: range(10, 25).map((i) => 2 ** i),
   type: ["exclusive"],
   datatype: ["u32"],
   binopbase: [BinOpAdd],
@@ -776,6 +776,7 @@ export const DLDFScanAccuracyRegressionSuite = new BaseTestSuite({
   trials: 20,
   params: DLDFRegressionParams,
   primitive: DLDFScan,
+  plots: [DLDFScanPlot],
 });
 
 export const DLDFCachePerfTestSuite = new BaseTestSuite({
@@ -833,7 +834,6 @@ export const DLDFFailureSuite = new BaseTestSuite({
   trials: 10,
   params: DLDFailureParams,
   primitive: DLDFScan,
-  validate: false,
 });
 
 export const DLDFSingletonWithTimingSuite = new BaseTestSuite({
@@ -842,4 +842,13 @@ export const DLDFSingletonWithTimingSuite = new BaseTestSuite({
   trials: 1,
   params: DLDFSingletonParams,
   primitive: DLDFScan,
+});
+
+export const DLDFPerfSuite = new BaseTestSuite({
+  category: "scan",
+  testSuite: "DLDF",
+  trials: 1,
+  params: DLDFLengthOnlyRegressionParams,
+  primitive: DLDFScan,
+  plots: [DLDFScanPlot],
 });
