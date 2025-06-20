@@ -56,10 +56,14 @@ import {
   DLDFScanMiniSuite,
   DLDFFailureSuite,
   DLDFSingletonWithTimingSuite,
+  DLDFPerfSuite,
 } from "./scandldf.mjs";
 import { StoneberryScanMiniSuite } from "./stoneberry-scan.mjs";
 import { subgroupAccuracyRegressionSuites } from "./subgroupRegression.mjs";
-import { SortOneSweepRegressionSuite } from "./onesweep.mjs";
+import {
+  SortOneSweepRegressionSuite,
+  SortOneSweepFunctionalRegressionSuite,
+} from "./onesweep.mjs";
 import { BasePrimitive } from "./primitive.mjs";
 
 async function main(navigator) {
@@ -130,11 +134,13 @@ async function main(navigator) {
   //);
   // let testSuites = [DLDFScanMiniSuite];
   // let testSuites = [DLDFScanAccuracyRegressionSuite];
+  // let testSuites = [DLDFPerfSuite];
   // let testSuites = [DLDFDottedCachePerfTestSuite];
-  let testSuites = [DLDFDottedCachePerf2TestSuite];
+  // let testSuites = [DLDFDottedCachePerf2TestSuite];
   // let testSuites = [DLDFSingletonWithTimingSuite];
   // let testSuites = [DLDFFailureSuite];
   // let testSuites = [StoneberryScanMiniSuite];
+  let testSuites = [SortOneSweepFunctionalRegressionSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
   let primitiveCacheStats;
