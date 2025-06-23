@@ -722,11 +722,11 @@ export class OneSweepSort extends BaseSort {
        *   and use the variables shift and keyidx for 64b keys
        */
 
-      var shift = sortParameters.shift;
+      var shift: u32 = sortParameters.shift;
       ${
         this.keyDatatype.is64Bit
-          ? /* 64b key */ /* WGSL */ `let keyidx = select(0, 1, shift >= 32);
-      shift = select(shift, shift - 32, shift >= 32);`
+          ? /* 64b key */ /* WGSL */ `let keyidx: u32 = select(0u, 1u, shift >= 32u);
+      shift = select(shift, shift - 32u, shift >= 32u);`
           : /* 32b key */ /* WGSL */ ""
       }
 
@@ -1050,13 +1050,15 @@ export class OneSweepSort extends BaseSort {
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* scatter keys */
           ${
             this.keyDatatype.is64Bit
-              ? /* 64b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[2*i + keyIdx]);"
-              : /* 32b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[i]);"
+              ? /* 64b key */ /* WGSL */ `let key = ${this.keyDatatype.wgslU32Datatype}(atomicLoad(&wg_warpHist[2*i]),
+            atomicLoad(&wg_warpHist[2*i+1]));
+          let digit = (key[keyidx] >> shift) & RADIX_MASK;`
+              : /* 32b key */ /* WGSL */ `let key = atomicLoad(&wg_warpHist[i]);
+          let digit = (key >> shift) & RADIX_MASK;`
           }
           /* difference between keysonly & keyvalue: keyvalue needs to save/reuse digit */
-          let digit = (key >> shift) & RADIX_MASK;
           let destaddr = directionizeIndex(wg_localHist[digit] + i,
-                                             arrayLength(&keysIn));
+                                           arrayLength(&keysIn));
           ${this.type === "keyvalue" ? /* WGSL */ "digits[k] = digit;" : ""}
           keysOut[destaddr] = keyFromU32(key);
           i += BLOCK_DIM;
@@ -1102,13 +1104,15 @@ export class OneSweepSort extends BaseSort {
           if (i < final_size) {
             ${
               this.keyDatatype.is64Bit
-                ? /* 64b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[2*i + keyIdx]);"
-                : /* 32b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[i]);"
+                ? /* 64b key */ /* WGSL */ `let key = ${this.keyDatatype.wgslU32Datatype}(atomicLoad(&wg_warpHist[2*i]),
+              atomicLoad(&wg_warpHist[2*i+1]));
+            let digit = (key[keyidx] >> shift) & RADIX_MASK;`
+                : /* 32b key */ /* WGSL */ `let key = atomicLoad(&wg_warpHist[i]);
+            let digit = (key >> shift) & RADIX_MASK;`
             }
             /* difference between keysonly & keyvalue: keyvalue needs to save/reuse digit */
-            let digit = (key >> shift) & RADIX_MASK;
             let destaddr = directionizeIndex(wg_localHist[digit] + i,
-                                               arrayLength(&keysIn));
+                                             arrayLength(&keysIn));
             ${this.type === "keyvalue" ? /* WGSL */ "digits[k] = digit;" : ""}
             keysOut[destaddr] = keyFromU32(key);
           }
@@ -1170,7 +1174,8 @@ export class OneSweepSort extends BaseSort {
       this.device.adapterInfo.subgroupMinSize ?? this.RADIX; // this is fragile, if RADIX changes, check it
     this.BLOCK_DIM = this.BLOCK_DIM ?? 256;
     this.workgroupSize = this.BLOCK_DIM; // this is only for subgroup emulation
-    this.KEYS_PER_THREAD = this.KEYS_PER_THREAD ?? 15;
+    this.KEYS_PER_THREAD =
+      this.KEYS_PER_THREAD ?? (this.keyDatatype.is64Bit ? 12 : 15); // 64b: runs out of space @ 15
     this.PART_SIZE = this.KEYS_PER_THREAD * this.BLOCK_DIM;
     /* how many 32b words do we need to allocate PART_SIZE keys? */
     if (this.keyDatatype.bitsPerElement % 32 !== 0) {
@@ -1553,11 +1558,13 @@ export class OneSweepSort extends BaseSort {
           break;
       }
       if (isValidComparison(compare) && !validates(compare)) {
-        returnString += `\nElement ${i}: expected ${compare.cpu}, instead saw ${
-          compare.gpu
-        } (diff: ${Math.abs(
-          (referenceOutput[i] - memdest[i]) / referenceOutput[i]
-        )}).`;
+        returnString += `\nElement ${i}: expected ${compare.cpu}, instead saw ${compare.gpu} `;
+        if (!this.keyDatatype.is64Bit) {
+          /* can't do this math on 64b */
+          returnString += `(diff: ${Math.abs(
+            (referenceOutput[i] - memdest[i]) / referenceOutput[i]
+          )}).`;
+        }
         if (this.getBuffer("debugBuffer")) {
           returnString += ` debug[${i}] = ${
             this.getBuffer("debugBuffer").cpuBuffer[i]
