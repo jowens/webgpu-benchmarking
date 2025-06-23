@@ -826,14 +826,31 @@ export class OneSweepSort extends BaseSort {
        * The trick here is that for sgid 0, the result at my subgroup histogram
        * is the result across the workgroup.
        */
+      var shift = sortParameters.shift;
+      ${
+        this.keyDatatype.is64Bit
+          ? /* 64b key */ /* WGSL */ `let keyidx = select(0, 1, shift >= 32);
+              shift = select(shift, shift - 32, shift >= 32);`
+          : /* 32b key */ /* WGSL */ ""
+      }
       if (isSubgroupZero(builtinsNonuniform.lidx, sgsz)) {
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
-          offsets[k] += wg_localHist[(keys[k] >> sortParameters.shift) & RADIX_MASK];
+          ${
+            this.keyDatatype.is64Bit
+              ? /* 64b key */ /* WGSL */ "let key = keys[k][keyidx];"
+              : /* 32b key */ /* WGSL */ "let key = keys[k];"
+          }
+          offsets[k] += wg_localHist[(key >> shift) & RADIX_MASK];
         }
       } else { /* subgroup 1+ */
         let s_offset = sid * RADIX;
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
-          let t = (keys[k] >> sortParameters.shift) & RADIX_MASK;
+          ${
+            this.keyDatatype.is64Bit
+              ? /* 64b key */ /* WGSL */ "let key = keys[k][keyidx];"
+              : /* 32b key */ /* WGSL */ "let key = keys[k];"
+          }
+          let t = (key >> shift) & RADIX_MASK;
           offsets[k] += wg_localHist[t] + atomicLoad(&wg_warpHist[t + s_offset]);
         }
       }
@@ -922,8 +939,12 @@ export class OneSweepSort extends BaseSort {
             var fallbackStart = PART_SIZE_32B * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u) - 1);
             var fallbackEnd = PART_SIZE_32B * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u));
             for (var i = builtinsNonuniform.lidx + fallbackStart; i < fallbackEnd; i += BLOCK_DIM) {
-              var key = keyToU32(keysIn[i]);
-              var digit = (key >> sortParameters.shift) & RADIX_MASK;
+              ${
+                this.keyDatatype.is64Bit
+                  ? /* 64b key */ /* WGSL */ "let key = keyToU32(keysIn[i])[keyidx];"
+                  : /* 32b key */ /* WGSL */ "let key = keyToU32(keysIn[i]);"
+              }
+              let digit = (key >> shift) & RADIX_MASK;
               atomicAdd(&wg_fallback[digit], 1u);
               /* if we're ever doing something other than u32, here's where to change that */
               /* see FallbackHistogram in SweepCommon.hlsl */
@@ -1651,7 +1672,8 @@ const SortOneSweepFunctionalParams = {
   inputLength: [2 ** 25],
   // inputLength: [2048, 4096],
   // inputLength: range(10, 27).map((i) => 2 ** i),
-  datatype: ["u32", "i32", "f32" /*, "u64"*/],
+  //  datatype: ["u64" /*"u32", "i32", "f32" */ /*, "u64"*/],
+  datatype: ["u32", "i32", "f32"],
   type: ["keysonly" /* "keyvalue", */],
   direction: ["ascending"],
   disableSubgroups: [false],
