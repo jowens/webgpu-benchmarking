@@ -264,7 +264,7 @@ export class OneSweepSort extends BaseSort {
      * there's a diagnostic that asserts subgroup uniformity that depends on this
      *
      * Limitation: Number of items to sort must be no larger than 30 bits
-     * (10^30 items). "Doing the split here would be wicked. No idea how the
+     * (2^30 items). "Doing the split here would be wicked. No idea how the
      * performance will be affected (probably bad). For reference CUB also throws
      * in the towel and says '30 bits is fine'":
      *   "The layout of a single counter is depicted in Figure 6. We use the two
@@ -304,9 +304,8 @@ export class OneSweepSort extends BaseSort {
 
     /** OneSweepSort internally sorts u32 keys
      * The following functions convert ${this.datatype} keys <-> u32 keys
-     * If we are sorting u32 keys, this function does nothing */
-    ${this.keyDatatype.keyToU32}
-    ${this.keyDatatype.keyFromU32}
+     * If we are sorting u32 keys, these function does nothing */
+    ${this.keyDatatype.keyUintConversions}
 
     /** Support descending sort, accomplished by reversing the write index on the last
      * pass of onesweep_pass on writeback of keys and values */
@@ -358,26 +357,30 @@ export class OneSweepSort extends BaseSort {
       // segment 0 (threads [ 0, 63]) -> wg_globalHist[   0:1024), hist_offset =    0
       // segment 1 (threads [64,127]) -> wg_globalHist[1024,2048), hist_offset = 1024
       // for 64b keys: multiply all these numbers by 2 ^^^^^^^^^                 ^^^^
-      let hist_offset = builtinsNonuniform.lidx / 64u * ALL_RADIX;
+      let hist_offset0 = builtinsNonuniform.lidx / 64u * ALL_RADIX;
       {
         var i = builtinsNonuniform.lidx + builtinsUniform.wgid.x * REDUCE_PART_SIZE;
         /* not last workgroup */
         /* assumes nwg is [x, 1, 1] */
         if (builtinsUniform.wgid.x < builtinsUniform.nwg.x - 1) {
           for (var k = 0u; k < REDUCE_KEYS_PER_THREAD; k += 1u) {
-            let key = keyToU32(keysIn[i]);
-            atomicAdd(&wg_globalHist[(key & RADIX_MASK) + hist_offset], 1u);
-            atomicAdd(&wg_globalHist[((key >> 8u) & RADIX_MASK) + hist_offset + 256u], 1u);
-            atomicAdd(&wg_globalHist[((key >> 16u) & RADIX_MASK) + hist_offset + 512u], 1u);
-            atomicAdd(&wg_globalHist[((key >> 24u) & RADIX_MASK) + hist_offset + 768u], 1u);
             ${
               this.keyDatatype.is64Bit
-                ? /* 64b key */ /* WGSL */ `let keyHigh = keyHighToU32(keysIn[i]);
-            let hist_offset_high = hist_offset + 1024u;
-            atomicAdd(&wg_globalHist[(keyHigh & RADIX_MASK) + hist_offset_high], 1u);
-            atomicAdd(&wg_globalHist[((keyHigh >> 8u) & RADIX_MASK) + hist_offset_high + 256u], 1u);
-            atomicAdd(&wg_globalHist[((keyHigh >> 16u) & RADIX_MASK) + hist_offset_high + 512u], 1u);
-            atomicAdd(&wg_globalHist[((keyHigh >> 24u) & RADIX_MASK) + hist_offset_high + 768u], 1u);`
+                ? "let key01 = keyToU32(keysIn[i]); let key0 = key01[0];"
+                : "let key0 = keyToU32(keysIn[i]);"
+            }
+            atomicAdd(&wg_globalHist[(key0 & RADIX_MASK) + hist_offset0], 1u);
+            atomicAdd(&wg_globalHist[((key0 >> 8u) & RADIX_MASK) + hist_offset0 + 256u], 1u);
+            atomicAdd(&wg_globalHist[((key0 >> 16u) & RADIX_MASK) + hist_offset0 + 512u], 1u);
+            atomicAdd(&wg_globalHist[((key0 >> 24u) & RADIX_MASK) + hist_offset0 + 768u], 1u);
+            ${
+              this.keyDatatype.is64Bit
+                ? /* 64b key */ /* WGSL */ `let key1 = key01[1];
+            let hist_offset1 = hist_offset0 + 1024u;
+            atomicAdd(&wg_globalHist[(key1 & RADIX_MASK) + hist_offset1], 1u);
+            atomicAdd(&wg_globalHist[((key1 >> 8u) & RADIX_MASK) + hist_offset1 + 256u], 1u);
+            atomicAdd(&wg_globalHist[((key1 >> 16u) & RADIX_MASK) + hist_offset1 + 512u], 1u);
+            atomicAdd(&wg_globalHist[((key1 >> 24u) & RADIX_MASK) + hist_offset1 + 768u], 1u);`
                 : ""
             }
             i += REDUCE_BLOCK_DIM;
@@ -388,19 +391,23 @@ export class OneSweepSort extends BaseSort {
         if (builtinsUniform.wgid.x == builtinsUniform.nwg.x - 1) {
           for (var k = 0u; k < REDUCE_KEYS_PER_THREAD; k += 1u) {
             if (i < arrayLength(&keysIn)) {
-              let key = keyToU32(keysIn[i]);
-              atomicAdd(&wg_globalHist[(key & RADIX_MASK) + hist_offset], 1u);
-              atomicAdd(&wg_globalHist[((key >> 8u) & RADIX_MASK) + hist_offset + 256u], 1u);
-              atomicAdd(&wg_globalHist[((key >> 16u) & RADIX_MASK) + hist_offset + 512u], 1u);
-              atomicAdd(&wg_globalHist[((key >> 24u) & RADIX_MASK) + hist_offset + 768u], 1u);
               ${
                 this.keyDatatype.is64Bit
-                  ? /* 64b key */ /* WGSL */ `let keyHigh = keyHighToU32(keysIn[i]);
-              let hist_offset_high = hist_offset + 1024u;
-              atomicAdd(&wg_globalHist[(keyHigh & RADIX_MASK) + hist_offset_high], 1u);
-              atomicAdd(&wg_globalHist[((keyHigh >> 8u) & RADIX_MASK) + hist_offset_high + 256u], 1u);
-              atomicAdd(&wg_globalHist[((keyHigh >> 16u) & RADIX_MASK) + hist_offset_high + 512u], 1u);
-              atomicAdd(&wg_globalHist[((keyHigh >> 24u) & RADIX_MASK) + hist_offset_high + 768u], 1u);`
+                  ? "let key01 = keyToU32(keysIn[i]); let key0 = key01[0];"
+                  : "let key0 = keyToU32(keysIn[i]);"
+              }
+              atomicAdd(&wg_globalHist[(key0 & RADIX_MASK) + hist_offset0], 1u);
+              atomicAdd(&wg_globalHist[((key0 >> 8u) & RADIX_MASK) + hist_offset0 + 256u], 1u);
+              atomicAdd(&wg_globalHist[((key0 >> 16u) & RADIX_MASK) + hist_offset0 + 512u], 1u);
+              atomicAdd(&wg_globalHist[((key0 >> 24u) & RADIX_MASK) + hist_offset0 + 768u], 1u);
+              ${
+                this.keyDatatype.is64Bit
+                  ? /* 64b key */ /* WGSL */ `let key1 = key01[1];
+              let hist_offset1 = hist_offset0 + 1024u;
+              atomicAdd(&wg_globalHist[(key1 & RADIX_MASK) + hist_offset1], 1u);
+              atomicAdd(&wg_globalHist[((key1 >> 8u) & RADIX_MASK) + hist_offset1 + 256u], 1u);
+              atomicAdd(&wg_globalHist[((key1 >> 16u) & RADIX_MASK) + hist_offset1 + 512u], 1u);
+              atomicAdd(&wg_globalHist[((key1 >> 24u) & RADIX_MASK) + hist_offset1 + 768u], 1u);`
                   : ""
               }
             }
@@ -665,8 +672,6 @@ export class OneSweepSort extends BaseSort {
        * Subgroups fetch a contiguous block of (sgsz * KEYS_PER_THREAD) keys
        * note this copy is strided (thread i gets i, i+sgsz, i+2*sgsz, ...)
        * keys[] stores u32 representations of keys
-       * Because keys here has the native datatype (possibly a vec), we use
-       *   keyToU32Native to return that native datatype
        */
       var keys = array<${this.keyDatatype.wgslU32Datatype}, KEYS_PER_THREAD>();
       {
@@ -677,7 +682,7 @@ export class OneSweepSort extends BaseSort {
         var i = builtinsNonuniform.sgid + s_offset + dev_offset;
         if (partid < builtinsUniform.nwg.x - 1) {
           for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
-            keys[k] = keyToU32Native(keysIn[i]);
+            keys[k] = keyToU32(keysIn[i]);
             i += sgsz;
           }
         }
@@ -698,7 +703,7 @@ export class OneSweepSort extends BaseSort {
                 ? "vec2u(0xffffffff, 0xffffffff)"
                 : 0xffffffff
             },
-                             keyToU32Native(keysIn[i]),
+                             keyToU32(keysIn[i]),
                              i < arrayLength(&keysIn));
             i += sgsz;
           }
@@ -849,8 +854,6 @@ export class OneSweepSort extends BaseSort {
             : /* 32b key */ /* WGSL */ "atomicStore(&wg_warpHist[offsets[k]], keys[k]);"
         }
       }
-
-      /********* JDO stops here on Fri 20 Jun 2025 */
 
       /** Lookback/fallback strategy.
        *
@@ -1648,7 +1651,7 @@ const SortOneSweepFunctionalParams = {
   inputLength: [2 ** 25],
   // inputLength: [2048, 4096],
   // inputLength: range(10, 27).map((i) => 2 ** i),
-  datatype: ["u32", "i32", "f32" /*, "u64" */],
+  datatype: ["u32", "i32", "f32" /*, "u64"*/],
   type: ["keysonly" /* "keyvalue", */],
   direction: ["ascending"],
   disableSubgroups: [false],
