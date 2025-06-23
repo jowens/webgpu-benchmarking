@@ -103,6 +103,10 @@ fn keyFromU32(u: u32) -> ${this.datatype} {
     return this.is64Bit ? 8 : 4;
   }
 
+  get wordsPerElement() {
+    return this.is64Bit ? 2 : 1;
+  }
+
   get bitsPerElement() {
     return this.bytesPerElement * 8;
   }
