@@ -710,12 +710,31 @@ export class OneSweepSort extends BaseSort {
         }
       }
 
+      /** In many places we need a shift value from sortParameters.shift
+       * We use shift in this kernel in two ways:
+       * - Pass ID ("which pass am I on"), sortParameters.shift >> 3
+       *   - This is unchanged
+       * - Grab the correct digit from a key. If the key is a u32, this looks like
+       *     (key >> shift) & RADIX_MASK
+       *   For keys larger than 32b, we must index into a key vector, not a u32 key.
+       *   So we compute "shift" and "keyidx" and then select the digit as
+       *     (key[keyidx] >> shift) & RADIX_MASK
+       *   and use the variables shift and keyidx for 64b keys
+       */
+
+      var shift = sortParameters.shift;
+      ${
+        this.keyDatatype.is64Bit
+          ? /* 64b key */ /* WGSL */ `let keyidx = select(0, 1, shift >= 32);
+      shift = select(shift, shift - 32, shift >= 32);`
+          : /* 32b key */ /* WGSL */ ""
+      }
+
       /** We are computing a histogram per subgroup
        * Note the call to WLMS also populates wg_warpHist
        */
       var offsets = array<u32, KEYS_PER_THREAD>();
       {
-        let shift = sortParameters.shift;
         let lane_mask_lt = (1u << builtinsNonuniform.sgid) - 1u;
         let s_offset = sid * RADIX;
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
@@ -730,10 +749,9 @@ export class OneSweepSort extends BaseSort {
           offsets[k] = WLMS(
             ${
               this.keyDatatype.is64Bit
-                ? /* 64b key */ /* WGSL */ "keys[k][select(0, 1, shift >= 32)], select(shift, shift - 32, shift >= 32)"
-                : /* 32b key */ /* WGSL */ "keys[k], shift"
-            },
-            builtinsNonuniform.sgid, sgsz, lane_mask_lt, s_offset);
+                ? /* 64b key */ /* WGSL */ "keys[k][keyidx]"
+                : /* 32b key */ /* WGSL */ "keys[k]"
+            }, shift, builtinsNonuniform.sgid, sgsz, lane_mask_lt, s_offset);
         }
       }
       workgroupBarrier();
@@ -826,13 +844,6 @@ export class OneSweepSort extends BaseSort {
        * The trick here is that for sgid 0, the result at my subgroup histogram
        * is the result across the workgroup.
        */
-      var shift = sortParameters.shift;
-      ${
-        this.keyDatatype.is64Bit
-          ? /* 64b key */ /* WGSL */ `let keyidx = select(0, 1, shift >= 32);
-              shift = select(shift, shift - 32, shift >= 32);`
-          : /* 32b key */ /* WGSL */ ""
-      }
       if (isSubgroupZero(builtinsNonuniform.lidx, sgsz)) {
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
           ${
@@ -1039,7 +1050,7 @@ export class OneSweepSort extends BaseSort {
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* scatter keys */
           ${
             this.keyDatatype.is64Bit
-              ? /* 64b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[i][keyIdx]);"
+              ? /* 64b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[2*i + keyIdx]);"
               : /* 32b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[i]);"
           }
           /* difference between keysonly & keyvalue: keyvalue needs to save/reuse digit */
@@ -1091,7 +1102,7 @@ export class OneSweepSort extends BaseSort {
           if (i < final_size) {
             ${
               this.keyDatatype.is64Bit
-                ? /* 64b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[i][keyIdx]);"
+                ? /* 64b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[2*i + keyIdx]);"
                 : /* 32b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[i]);"
             }
             /* difference between keysonly & keyvalue: keyvalue needs to save/reuse digit */
