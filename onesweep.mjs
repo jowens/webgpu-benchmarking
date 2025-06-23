@@ -861,7 +861,7 @@ export class OneSweepSort extends BaseSort {
        * to store keys instead. Scatter keys into warpHist.
        *
        * 64b: Each key spans two entries in wg_warpHist, so
-       *  wg_warpHist[2k:2k+1] <= keys[k][0:1]
+       *  wg_warpHist[2k:2k+1] <- keys[k][0:1]
        **/
       for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
         ${
@@ -1025,12 +1025,12 @@ export class OneSweepSort extends BaseSort {
       ${
         this.type === "keyvalue"
           ? /* WGSL */ `
-      var digits = array<u32, KEYS_PER_THREAD>(); // this could be u8 if supported
+      let digits = array<u32, KEYS_PER_THREAD>(); // this could be u8 if supported
       /* TODO: "I save the key's digit, not the global offset. I was trying to save on
        * registers---u8 vs u32---but given that the minimal addressable memory size for
        * registers is u32, it probably doesn't save anything over simply saving the
        * global scatter location." */
-      var values = array<u32, KEYS_PER_THREAD>();`
+      let values = array<u32, KEYS_PER_THREAD>();`
           : ""
       }
 
@@ -1039,31 +1039,15 @@ export class OneSweepSort extends BaseSort {
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* scatter keys */
           ${
             this.keyDatatype.is64Bit
-              ? /* 64b key */ /* WGSL */ `
-          var keyU32 = atomicLoad(&wg_warpHist[i]);
-          var keyShift = sortParameters.shift & 0x1f; /* limit shift to [0--31] */`
-              : /* 32b key */ /* WGSL */ `
-          var keyU32 = atomicLoad(&wg_warpHist[i]);
-          var keyShift = sortParameters.shift;`
+              ? /* 64b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[i][keyIdx]);"
+              : /* 32b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[i]);"
           }
           /* difference between keysonly & keyvalue: keyvalue needs to save/reuse digit */
-          ${
-            this.type === "keysonly"
-              ? /* WGSL */ `
-          var digit = (keyU32 >> keyShift) & RADIX_MASK;
-          var destaddr = directionizeIndex(wg_localHist[digit] + i,
-                                             arrayLength(&keysIn));`
-              : ""
-          }
-          ${
-            this.type === "keyvalue"
-              ? /* WGSL */ `
-          digits[k] = (keyU32 >> keyShift) & RADIX_MASK;
-          var destaddr = directionizeIndex(wg_localHist[digits[k]] + i,
-                                             arrayLength(&keysIn));`
-              : ""
-          }
-          keysOut[destaddr] = keyFromU32(keyU32);
+          let digit = (key >> shift) & RADIX_MASK;
+          let destaddr = directionizeIndex(wg_localHist[digit] + i,
+                                             arrayLength(&keysIn));
+          ${this.type === "keyvalue" ? /* WGSL */ "digits[k] = digit;" : ""}
+          keysOut[destaddr] = keyFromU32(key);
           i += BLOCK_DIM;
         }
         ${
@@ -1105,25 +1089,17 @@ export class OneSweepSort extends BaseSort {
         var i = builtinsNonuniform.lidx; /* WGSL doesn't let me put this in for initializer */
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* scatter keys */
           if (i < final_size) {
-            var keyU32 = atomicLoad(&wg_warpHist[i]);
+            ${
+              this.keyDatatype.is64Bit
+                ? /* 64b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[i][keyIdx]);"
+                : /* 32b key */ /* WGSL */ "let key = atomicLoad(&wg_warpHist[i]);"
+            }
             /* difference between keysonly & keyvalue: keyvalue needs to save/reuse digit */
-            ${
-              this.type === "keysonly"
-                ? /* WGSL */ `
-            var digit = (keyU32 >> sortParameters.shift) & RADIX_MASK;
-            var destaddr = directionizeIndex(wg_localHist[digit] + i,
-                                               arrayLength(&keysIn));`
-                : ""
-            }
-            ${
-              this.type === "keyvalue"
-                ? /* WGSL */ `
-            digits[k] = (keyU32 >> sortParameters.shift) & RADIX_MASK;
-            var destaddr = directionizeIndex(wg_localHist[digits[k]] + i,
-                                               arrayLength(&keysIn));`
-                : ""
-            }
-            keysOut[destaddr] = keyFromU32(keyU32);
+            let digit = (key >> shift) & RADIX_MASK;
+            let destaddr = directionizeIndex(wg_localHist[digit] + i,
+                                               arrayLength(&keysIn));
+            ${this.type === "keyvalue" ? /* WGSL */ "digits[k] = digit;" : ""}
+            keysOut[destaddr] = keyFromU32(key);
           }
           i += BLOCK_DIM;
         }
@@ -1672,7 +1648,7 @@ const SortOneSweepFunctionalParams = {
   inputLength: [2 ** 25],
   // inputLength: [2048, 4096],
   // inputLength: range(10, 27).map((i) => 2 ** i),
-  //  datatype: ["u64" /*"u32", "i32", "f32" */ /*, "u64"*/],
+  // datatype: ["u64" /*"u32", "i32", "f32" */ /*, "u64"*/],
   datatype: ["u32", "i32", "f32"],
   type: ["keysonly" /* "keyvalue", */],
   direction: ["ascending"],
