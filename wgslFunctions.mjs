@@ -125,12 +125,12 @@ export class wgslFunctions {
   initializeSubgroupVars(args = {}) {
     // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
-    return "let sgsz: u32 = builtinsUniform.sgsz;\nlet sgid: u32 = builtinsNonuniform.sgid;\n";
+    return "let sgsz: u32 = builtinsUniform.sgsz;\nlet sgid: u32 = builtinsNonuniform.sgid;";
   }
   enableSubgroupsIfAppropriate(args = {}) {
     // eslint-disable-next-line no-unused-vars
     const env = { ...this.env, ...args }; // properties in args overwrite this.env
-    return "enable subgroups;\n";
+    return "enable subgroups;";
   }
   subgroupEmulation(args = {}) {
     // eslint-disable-next-line no-unused-vars
