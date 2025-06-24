@@ -398,9 +398,11 @@ async function main(navigator) {
       }
       if (validations.done > 0) {
         console.info(
-          `${validations.done} validations complete${
-            validations?.tested ? ` (${validations.tested})` : ""
-          }, ${validations.errors} error${validations.errors != 1 ? "s" : ""}.`
+          `${validations.done} validation${
+            validations.done === 1 ? "" : "s"
+          } complete${validations?.tested ? ` (${validations.tested})` : ""}, ${
+            validations.errors
+          } error${validations.errors === 1 ? "" : "s"}.`
         );
       }
     }
