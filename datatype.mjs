@@ -25,8 +25,8 @@ fn keyFromU32(u: u32) -> ${this.datatype} { return u; }`;
         this.max = "0xffffffff";
         break;
       case "u64":
-        this.keyUintConversions = /* wgsl */ `fn keyToU32(u: ${this.wgslDatatype}) -> vec2u { return u; }
-fn keyFromU32(u: vec2u) -> ${this.wgslDatatype} { return u; }`;
+        this.keyUintConversions = /* wgsl */ `fn keyToU32(u2: ${this.wgslDatatype}) -> vec2u { return u2; }
+fn keyFromU32(u2: vec2u) -> ${this.wgslDatatype} { return u2; }`;
         this.max = "0xffffffff";
         break;
       case "i32":
