@@ -278,7 +278,7 @@ export class OneSweepSort extends BaseSort {
 
     const KEYS_PER_THREAD = ${this.KEYS_PER_THREAD}u;
     const PART_SIZE = KEYS_PER_THREAD * BLOCK_DIM;
-    const PART_SIZE_32B = PART_SIZE * ${this.keyDatatype.bitsPerElement} / 32;
+    const PART_SIZE_32B = PART_SIZE * ${this.keyDatatype.wordsPerElement};
 
     const REDUCE_BLOCK_DIM = ${this.REDUCE_BLOCK_DIM}u;
     const REDUCE_KEYS_PER_THREAD = ${this.REDUCE_KEYS_PER_THREAD}u;
@@ -677,7 +677,7 @@ export class OneSweepSort extends BaseSort {
       {
         /* blocking the load like this---subgroup-blocked?---enables us
          * to minimize the size of scan up the warp histograms. */
-        let dev_offset = partid * PART_SIZE_32B;
+        let dev_offset = partid * PART_SIZE;
         let s_offset = sid * sgsz * KEYS_PER_THREAD;
         var i = builtinsNonuniform.sgid + s_offset + dev_offset;
         if (partid < builtinsUniform.nwg.x - 1) {
@@ -701,7 +701,7 @@ export class OneSweepSort extends BaseSort {
             keys[k] = select(${
               this.keyDatatype.is64Bit
                 ? "vec2u(0xffffffff, 0xffffffff)"
-                : 0xffffffff
+                : "0xffffffff"
             },
                              keyToU32(keysIn[i]),
                              i < arrayLength(&keysIn));
@@ -710,8 +710,7 @@ export class OneSweepSort extends BaseSort {
         }
       }
 
-      /** In many places we need a shift value from sortParameters.shift
-       * We use shift in this kernel in two ways:
+      /** We use sortParameters.shift in this kernel in two ways:
        * - Pass ID ("which pass am I on"), sortParameters.shift >> 3
        *   - This is unchanged
        * - Grab the correct digit from a key. If the key is a u32, this looks like
@@ -719,7 +718,8 @@ export class OneSweepSort extends BaseSort {
        *   For keys larger than 32b, we must index into a key vector, not a u32 key.
        *   So we compute "shift" and "keyidx" and then select the digit as
        *     (key[keyidx] >> shift) & RADIX_MASK
-       *   and use the variables shift and keyidx for 64b keys
+       *     - if shift <  32, (key, shift) = (keys[k][0], shift)
+       *     - if shift >= 32, (key, shift) = (keys[k][1], shift - 32)
        */
 
       var shift: u32 = sortParameters.shift;
@@ -740,11 +740,8 @@ export class OneSweepSort extends BaseSort {
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
           /* offsets[k] reflects the number of digits seen by this subgroup
            * to date that match MY digit */
-          /** 64b keys change the first two arguments, which are keys[k] and shift
-           * if shift <  32, (key, shift) = (keys[k][0], shift)
-           * if shift >= 32, (key, shift) = (keys[k][1], shift - 32)
-           * - keys[k] => pick either keys[k][1] or keys[k][0] depending on shift value
-           * - shift => if shift >= 32, subtract 32 from it
+          /** 64b keys change the first argument, key, by picking the correct
+           * part of the word. keyidx and shift are computed above.
            */
           offsets[k] = WLMS(
             ${
@@ -871,14 +868,14 @@ export class OneSweepSort extends BaseSort {
       /** Warp histograms are no longer needed; let's now use warpHist
        * to store keys instead. Scatter keys into warpHist.
        *
-       * 64b: Each key spans two entries in wg_warpHist, so
-       *  wg_warpHist[2k:2k+1] <- keys[k][0:1]
+       * 64b: Each key spans two entries in wg_warpHist, so for offset o,
+       *  wg_warpHist[2o:2o+1] <- keys[k][0:1]
        **/
       for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) {
         ${
           this.keyDatatype.is64Bit
-            ? /* 64b key */ /* WGSL */ `atomicStore(&wg_warpHist[offsets[k*2]], keys[k][0]);
-        atomicStore(&wg_warpHist[offsets[k*2+1]], keys[k][1]);`
+            ? /* 64b key */ /* WGSL */ `atomicStore(&wg_warpHist[offsets[k]*2], keys[k][0]);
+        atomicStore(&wg_warpHist[offsets[k]*2+1], keys[k][1]);`
             : /* 32b key */ /* WGSL */ "atomicStore(&wg_warpHist[offsets[k]], keys[k]);"
         }
       }
@@ -947,8 +944,8 @@ export class OneSweepSort extends BaseSort {
             workgroupBarrier();
             /* now let's build a local histogram of this tile in wg_fallback */
             /* fallbackStart and fallbackEnd bound the region of interest in keysIn[] */
-            var fallbackStart = PART_SIZE_32B * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u) - 1);
-            var fallbackEnd = PART_SIZE_32B * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u));
+            var fallbackStart = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u) - 1);
+            var fallbackEnd = PART_SIZE * ((lookbackIndex >> RADIX_LOG) - builtinsUniform.nwg.x * (sortParameters.shift >> 3u));
             for (var i = builtinsNonuniform.lidx + fallbackStart; i < fallbackEnd; i += BLOCK_DIM) {
               ${
                 this.keyDatatype.is64Bit
@@ -1066,12 +1063,11 @@ export class OneSweepSort extends BaseSort {
         ${
           /* now do the rest of the work for keyvalue */
           this.type === "keyvalue"
-            ? /* WGSL */ `
-        workgroupBarrier();
+            ? /* WGSL */ `workgroupBarrier();
         {
           /* this code exactly tracks how we loaded from keysIn[] */
           /* this is necessary to make sure the offsets are consistent */
-          let dev_offset = partid * PART_SIZE_32B;
+          let dev_offset = partid * PART_SIZE;
           let s_offset = sid * sgsz * KEYS_PER_THREAD;
           var i = builtinsNonuniform.sgid + s_offset + dev_offset;
           for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* load payloads */
@@ -1098,7 +1094,7 @@ export class OneSweepSort extends BaseSort {
       }
 
       if (partid == builtinsUniform.nwg.x - 1u) { /* last workgroup */
-        let final_size = arrayLength(&keysIn) - partid * PART_SIZE_32B;
+        let final_size = arrayLength(&keysIn) - partid * PART_SIZE;
         var i = builtinsNonuniform.lidx; /* WGSL doesn't let me put this in for initializer */
         for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* scatter keys */
           if (i < final_size) {
@@ -1121,12 +1117,11 @@ export class OneSweepSort extends BaseSort {
         ${
           /* now do the rest of the work for keyvalue */
           this.type === "keyvalue"
-            ? /* WGSL */ `
-        workgroupBarrier();
+            ? /* WGSL */ `workgroupBarrier();
         {
           /* this code exactly tracks how we loaded from keysIn[] */
           /* this is necessary to make sure the offsets are consistent */
-          let dev_offset = partid * PART_SIZE_32B;
+          let dev_offset = partid * PART_SIZE;
           let s_offset = sid * sgsz * KEYS_PER_THREAD;
           var i = builtinsNonuniform.sgid + s_offset + dev_offset;
           for (var k = 0u; k < KEYS_PER_THREAD; k += 1u) { /* load payloads */
@@ -1183,8 +1178,7 @@ export class OneSweepSort extends BaseSort {
         `Warning: Sort key bitlength of ${this.keyDatatype.bitsPerElement} must be divisible by 32.`
       );
     }
-    this.PART_SIZE_32B =
-      (this.PART_SIZE * this.keyDatatype.bitsPerElement) / 32;
+    this.PART_SIZE_32B = this.PART_SIZE * this.keyDatatype.wordsPerElement;
     this.REDUCE_BLOCK_DIM = this.REDUCE_BLOCK_DIM ?? 128;
     this.REDUCE_KEYS_PER_THREAD = this.REDUCE_KEYS_PER_THREAD ?? 30;
     this.REDUCE_PART_SIZE = this.REDUCE_KEYS_PER_THREAD * this.REDUCE_BLOCK_DIM;
@@ -1293,7 +1287,7 @@ export class OneSweepSort extends BaseSort {
         bufferTypes,
         bindings: [bindings0Even, [sortParameterBinding[0]]],
         label: `OneSweep sort (${this.type}, ${this.direction}) global_hist [subgroups: ${this.useSubgroups}]`,
-        logKernelCodeToConsole: true,
+        logKernelCodeToConsole: false,
         getDispatchGeometry: () => {
           return [this.reduceWorkgroupCount];
         },
@@ -1322,7 +1316,7 @@ export class OneSweepSort extends BaseSort {
           ],
           label: `OneSweep sort (${this.type}, ${this.direction}) onesweep_pass shift ${pass} [subgroups: ${this.useSubgroups}]`,
           logKernelCodeToConsole: pass === 0 ? false : false,
-          logLaunchParameters: pass === 0 ? false : false,
+          logLaunchParameters: pass === 0 ? true : false,
           getDispatchGeometry: () => {
             return [this.passWorkgroupCount];
           },
@@ -1598,7 +1592,11 @@ export class OneSweepSort extends BaseSort {
         this.getBuffer("debug2Buffer") ? "\ndebug2Buffer" : "",
         this.getBuffer("debug2Buffer")
           ? this.getBuffer("debug2Buffer").cpuBuffer
-          : ""
+          : "",
+        this.getBuffer("hist") ? "\nhist" : "",
+        this.getBuffer("hist") ? this.getBuffer("hist").cpuBuffer : "",
+        this.getBuffer("passHist") ? "passHist" : "",
+        this.getBuffer("passHist") ? this.getBuffer("passHist").cpuBuffer : ""
       );
     }
     return returnString;
@@ -1667,7 +1665,7 @@ const SortOneSweepFunctionalParams = {
   // inputLength: [2048, 4096],
   // inputLength: range(10, 27).map((i) => 2 ** i),
   // datatype: ["u64" /*"u32", "i32", "f32" */ /*, "u64"*/],
-  datatype: ["u32", "i32", "f32"],
+  datatype: ["u32", "i32", "f32", "u64"],
   type: ["keysonly" /* "keyvalue", */],
   direction: ["ascending"],
   disableSubgroups: [false],
