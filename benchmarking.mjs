@@ -58,7 +58,7 @@ import {
   DLDFSingletonWithTimingSuite,
   DLDFPerfSuite,
 } from "./scandldf.mjs";
-import { StoneberryScanMiniSuite } from "./stoneberry-scan.mjs";
+// import { StoneberryScanMiniSuite } from "./stoneberry-scan.mjs";
 import { subgroupAccuracyRegressionSuites } from "./subgroupRegression.mjs";
 import {
   SortOneSweepRegressionSuite,
