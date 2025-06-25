@@ -43,11 +43,18 @@ export class TimingHelper {
     this.#passNumber = 0;
     this.#numKernels = numKernels;
     if (this.#canTimestamp) {
+      /* do explicit destroys if we know we're done */
+      if (this.#querySet) {
+        this.#querySet.destroy();
+      }
       this.#querySet = this.#device.createQuerySet({
         type: "timestamp",
         label: `TimingHelper query set buffer of count ${numKernels * 2}`,
         count: numKernels * 2,
       });
+      if (this.#resolveBuffer) {
+        this.#resolveBuffer.destroy();
+      }
       this.#resolveBuffer = this.#device.createBuffer({
         size: this.#querySet.count * 8,
         label: `TimingHelper resolve buffer of count ${this.#querySet.count}`,
