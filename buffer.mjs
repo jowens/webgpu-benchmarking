@@ -74,7 +74,7 @@ export class Buffer {
                   /* [-1024, 1024], ints only */
                   val = Math.floor(Math.random() * 2049.0 - 1024);
                   break;
-                case "fisheryates":
+                case "fisher-yates":
                 default:
                   /* roughly, range of 32b significand */
                   val = i & (2 ** 22 - 1);
@@ -100,7 +100,7 @@ export class Buffer {
                 case "bitreverse":
                   val = bitreverse(i);
                   break;
-                case "fisheryates":
+                case "fisher-yates":
                 default:
                   if (is64Bit) {
                     val = BigInt(i);
