@@ -933,6 +933,10 @@ export class OneSweepSort extends BaseSort {
 
           /* At least one thread saw FLAG_NOT_READY. Must fallback. */
           if (mustFallback != 0) {
+            // if we want to count fallbacks, here's a nice place to do it
+            // if (builtinsNonuniform.lidx == 0) {
+            //   atomicAdd(&debugBuffer[sortParameters.shift >> 3u], 1u);
+            // }
             /* clear wg_fallback array ... */
             if (builtinsNonuniform.lidx < RADIX) {
               atomicStore(&wg_fallback[builtinsNonuniform.lidx], 0);
@@ -1316,7 +1320,7 @@ export class OneSweepSort extends BaseSort {
           ],
           label: `OneSweep sort (${this.type}, ${this.direction}) onesweep_pass shift ${pass} [subgroups: ${this.useSubgroups}]`,
           logKernelCodeToConsole: pass === 0 ? false : false,
-          logLaunchParameters: pass === 0 ? true : false,
+          logLaunchParameters: pass === 0 ? false : false,
           getDispatchGeometry: () => {
             return [this.passWorkgroupCount];
           },
@@ -1643,6 +1647,22 @@ export class OneSweepSort extends BaseSort {
             );
         }*/
 
+const OneSweep64v32BW = {
+  x: { field: "inputBytes", label: "Input array size (B)" },
+  y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+  stroke: { field: "datatype" },
+  test_br: "gpuinfo.description",
+  fy: { field: "timing" },
+};
+
+const OneSweep64v32Runtime = {
+  x: { field: "inputBytes", label: "Input array size (B)" },
+  y: { field: "time", label: "Runtime (ns)" },
+  stroke: { field: "datatype" },
+  test_br: "gpuinfo.description",
+  fy: { field: "timing" },
+};
+
 const SortOneSweepSizeParams = {
   inputLength: range(10, 25).map((i) => 2 ** i),
   datatype: ["u32"],
@@ -1666,6 +1686,22 @@ const SortOneSweepFunctionalParams = {
   // inputLength: range(10, 27).map((i) => 2 ** i),
   // datatype: ["u64" /*"u32", "i32", "f32" */ /*, "u64"*/],
   datatype: ["u32", "i32", "f32", "u64"],
+  type: ["keysonly" /* "keyvalue", */],
+  direction: ["ascending"],
+  disableSubgroups: [false],
+};
+
+const Sort64v32Params = {
+  inputLength: range(18, 25).map((i) => 2 ** i),
+  datatype: ["u64", "u32"],
+  type: ["keysonly" /* "keyvalue", */],
+  direction: ["ascending"],
+  disableSubgroups: [false],
+};
+
+const Sort64v321MParams = {
+  inputLength: [2 ** 20],
+  datatype: ["u64"],
   type: ["keysonly" /* "keyvalue", */],
   direction: ["ascending"],
   disableSubgroups: [false],
@@ -1734,5 +1770,24 @@ export const SortOneSweepFunctionalRegressionSuite = new BaseTestSuite({
   initializeCPUBuffer: "fisher-yates",
   trials: 2,
   params: SortOneSweepFunctionalParams,
+  primitive: OneSweepSort,
+});
+
+export const SortOneSweep64v32Suite = new BaseTestSuite({
+  category: "sort",
+  testSuite: "onesweep",
+  initializeCPUBuffer: "randomBytes",
+  trials: 1,
+  params: Sort64v32Params,
+  primitive: OneSweepSort,
+  plots: [OneSweep64v32BW, OneSweep64v32Runtime],
+});
+
+export const SortOneSweep64v321MNoPlotSuite = new BaseTestSuite({
+  category: "sort",
+  testSuite: "onesweep",
+  initializeCPUBuffer: "randomBytes",
+  trials: 1,
+  params: Sort64v321MParams,
   primitive: OneSweepSort,
 });
