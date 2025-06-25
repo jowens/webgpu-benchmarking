@@ -513,7 +513,13 @@ export class BasePrimitive {
             }
           }
 
-          // build up bindGroupLayouts and pipelineLayout
+          /** Build up bindGroupLayouts and pipelineLayout
+           * Note: While it appears that bindGroupLayouts and pipelineLayouts
+           * are independent of devices, they are not. Brandon Jones:
+           * "WebGPU treats these as dependent on the device. Any WebGPU objects
+           * created from a GPUDevice instance can only be used with the device
+           * that created it and other resources created from the same device."
+           */
           const pipelineLayoutCacheKey = generateCacheKey(action.bufferTypes);
           let pipelineLayout = webGPUObjectCache.pipelineLayouts.get(
             pipelineLayoutCacheKey
