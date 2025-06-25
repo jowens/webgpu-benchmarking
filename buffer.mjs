@@ -100,6 +100,19 @@ export class Buffer {
                 case "bitreverse":
                   val = bitreverse(i);
                   break;
+                case "randomBytes": {
+                  let temp = BigInt(0);
+                  for (let j = 0; j < (is64Bit ? 8 : 4); j++) {
+                    const randByte = BigInt(Math.floor(Math.random() * 256.0));
+                    temp = (temp << 8n) | randByte;
+                  }
+                  if (is64Bit) {
+                    val = temp;
+                  } else {
+                    val = Number(temp);
+                  }
+                  break;
+                }
                 case "fisher-yates":
                 default:
                   if (is64Bit) {
