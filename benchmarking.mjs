@@ -63,6 +63,8 @@ import { subgroupAccuracyRegressionSuites } from "./subgroupRegression.mjs";
 import {
   SortOneSweepRegressionSuite,
   SortOneSweepFunctionalRegressionSuite,
+  SortOneSweep64v32Suite,
+  SortOneSweep64v321MNoPlotSuite,
 } from "./onesweep.mjs";
 import { BasePrimitive } from "./primitive.mjs";
 
@@ -73,8 +75,8 @@ async function main(navigator) {
   const hasTimestampQuery = adapter.features.has("timestamp-query");
   const device = await adapter?.requestDevice({
     requiredLimits: {
-      maxBufferSize: 2147483648,
-      maxStorageBufferBindingSize: 2147483644,
+      maxBufferSize: 2147483648 / 2,
+      maxStorageBufferBindingSize: 2147483644 / 2,
       maxComputeWorkgroupStorageSize: 32768,
     },
     requiredFeatures: [
@@ -140,7 +142,9 @@ async function main(navigator) {
   // let testSuites = [DLDFSingletonWithTimingSuite];
   // let testSuites = [DLDFFailureSuite];
   // let testSuites = [StoneberryScanMiniSuite];
-  let testSuites = [SortOneSweepFunctionalRegressionSuite];
+  // let testSuites = [SortOneSweepFunctionalRegressionSuite];
+  // let testSuites = [SortOneSweep64v32Suite];
+  let testSuites = [SortOneSweep64v321MNoPlotSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
   let primitiveCacheStats;
@@ -551,15 +555,20 @@ function processAndRecordResults(
   if (primitive.gflops) {
     result.gflops = primitive.gflops(result.gputime);
   }
+  if (primitive.getBuffer("debugBuffer")) {
+    result.debug = primitive.getBuffer("debugBuffer").cpuBuffer.slice(0, 8);
+  }
   expts.push({
     ...result,
     timing: "GPU",
+    time: result.gputime,
     bandwidth: result.bandwidthGPU,
     inputItemsPerSecondE9: result.inputItemsPerSecondE9GPU,
   });
   expts.push({
     ...result,
     timing: "CPU",
+    time: result.cputime,
     bandwidth: result.bandwidthCPU,
     inputItemsPerSecondE9: result.inputItemsPerSecondE9CPU,
   });
