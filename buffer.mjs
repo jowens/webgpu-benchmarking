@@ -13,12 +13,9 @@ import { bitreverse, datatypeToTypedArray, datatypeToBytes } from "./util.mjs";
  * In general with buffers we try to use:
  * - _size_ to indicate a byte count
  * - _length_ to indicate an element count
- *
- * TODO remove next line when fixed
- * size: number of elements (not number of bytes)
- *
- * TODO: initialize call could take different strings to
- *   do different initalizations (all 1s, random, distribution, etc.)
+ * Complication is that GPU buffers prefer size and CPU buffers
+ *   prefer length, so there's getter code that converts between
+ *   the two.
  */
 
 export class Buffer {
@@ -27,181 +24,53 @@ export class Buffer {
   #cpuBuffer;
   #cpuBufferBackup; /* if we overwrite #cpuBuffer */
   #cpuBufferIsDirty; /* compared to cpuBufferBackup */
+  #size;
+  #length;
+  #device;
   constructor(args) {
     this.args = { ...args };
     /* generally expect args to contain datatype and size or length */
 
+    if (args.size !== undefined && args.length !== undefined) {
+      console.error("Buffer: Do not specify both length and size, pick one");
+    }
+
     this.label =
       args.label ?? `Buffer (datatype: ${this.datatype}; size: ${this.size})`;
 
-    if (args.datatype) {
-      this.datatype = args.datatype;
+    /* copy known arguments into Buffer class for use in init calls */
+    const knownArgs = ["datatype", "size", "length", "device"];
+
+    for (const knownArg of knownArgs) {
+      if (args[knownArg]) {
+        switch (knownArg) {
+          case "size":
+            this.#size = args[knownArg];
+            break;
+          case "length":
+            this.#length = args[knownArg];
+            break;
+          case "device":
+            this.#device = args[knownArg];
+            break;
+          default:
+            this[knownArg] = args[knownArg];
+            break;
+        }
+      }
     }
 
     /* we can optionally create (and optionally initialize) a CPUBuffer too */
     /* we do this first in case we need to initialize the GPUBuffer */
+    /* we have made these allocations separate function calls in case we
+     * need to make them outside of the constructor, so we copy whatever
+     * we need from args into the buffer instance */
     if (this.args.createCPUBuffer) {
-      if (!("size" in args) && !("length" in args)) {
-        console.error(
-          "Buffer: if createCPUBuffer is true, must also specify size or length"
-        );
-      }
-      if ("size" in args && "length" in args) {
-        console.error(
-          "Buffer: please only specify one of size (bytes) or length (elements)"
-        );
-      }
-      if (!("datatype" in args)) {
-        console.error(
-          `Buffer: if createCPUBuffer is true, must also specify datatype`
-        );
-      }
-      this.#cpuBuffer = new (datatypeToTypedArray(this.datatype))(this.length);
-      const is64Bit = this.datatype === "u64";
-      this.#cpuBufferIsDirty = true;
-      if (this.args.initializeCPUBuffer) {
-        for (let i = 0; i < this.length; i++) {
-          let val;
-          switch (this.datatype) {
-            case "f32":
-              switch (this.args.initializeCPUBuffer) {
-                case "randomizeMinusOneToOne":
-                  /* [-1, 1] */
-                  val = Math.random() * 2.0 - 1.0;
-                  break;
-                case "randomizeAbsUnder1024":
-                  // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random#getting_a_random_integer_between_two_values
-                  /* [-1024, 1024], ints only */
-                  val = Math.floor(Math.random() * 2049.0 - 1024);
-                  break;
-                case "fisher-yates":
-                default:
-                  /* roughly, range of 32b significand */
-                  val = i & (2 ** 22 - 1);
-                  break;
-              }
-              this.#cpuBuffer[i] = val;
-              break;
-            case "u32":
-            case "i32":
-            case "u64":
-              switch (this.args.initializeCPUBuffer) {
-                case "xor-beef":
-                  val = i ^ 0xbeef;
-                  break;
-                case "randomizeAbsUnder1024":
-                  // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random#getting_a_random_integer_between_two_values
-                  /* [-1024, 1024], ints only */
-                  val = Math.floor(Math.random() * 2049.0 - 1024);
-                  break;
-                case "constant":
-                  val = 42;
-                  break;
-                case "bitreverse":
-                  val = bitreverse(i);
-                  break;
-                case "randomBytes": {
-                  let temp = BigInt(0);
-                  for (let j = 0; j < (is64Bit ? 8 : 4); j++) {
-                    const randByte = BigInt(Math.floor(Math.random() * 256.0));
-                    temp = (temp << 8n) | randByte;
-                  }
-                  if (is64Bit) {
-                    val = temp;
-                  } else {
-                    val = Number(temp);
-                  }
-                  break;
-                }
-                case "fisher-yates":
-                default:
-                  if (is64Bit) {
-                    val = BigInt(i);
-                  } else {
-                    val = i == 0 ? 0 : this.#cpuBuffer[i - 1] + 1; // trying to get u32s
-                  }
-                  break;
-              }
-              break;
-          }
-          this.#cpuBuffer[i] = is64Bit ? BigInt(val) : val;
-        }
-        /* now post-process the array */
-        switch (this.args.initializeCPUBuffer) {
-          case "fisher-yates": {
-            const shuffleArray = function (array) {
-              for (let i = array.length - 1; i > 0; i--) {
-                // Generate a random index from 0 to i inclusive
-                const j = Math.floor(Math.random() * (i + 1));
-
-                // Swap elements at i and j
-                [array[i], array[j]] = [array[j], array[i]];
-              }
-            };
-            shuffleArray(this.#cpuBuffer);
-            break;
-          }
-          default:
-            break;
-        }
-        /* we have now populated #cpuBuffer */
-        if (args.storeCPUBackup) {
-          this.#cpuBufferBackup = this.#cpuBuffer.slice();
-        }
-        this.#cpuBufferIsDirty = false;
-      }
+      this.createCPUBuffer(this.args);
     }
 
     if (this.args.createGPUBuffer) {
-      if ("buffer" in this.args) {
-        console.error(
-          "Buffer: don't pass in a buffer AND specify createGPUBuffer"
-        );
-      }
-      if (!("device" in this.args)) {
-        console.error("Buffer: must specify device if createGPUBuffer is true");
-      }
-      if (!("size" in args) && !("length" in args)) {
-        console.error(
-          "Buffer: if createGPUBuffer is true, must also specify size or length"
-        );
-      }
-      if ("size" in args && "length" in args) {
-        console.error(
-          "Buffer: please only specify one of size (bytes) or length (elements)"
-        );
-      }
-      if (!("datatype" in this.args)) {
-        console.error(
-          `Buffer: if createGPUBuffer is true, must also specify datatype`
-        );
-      }
-      this.buffer = this.device.createBuffer({
-        label: this.label,
-        size: this.size,
-        /** Output-only buffers may not need COPY_DST but we might
-         * initialize them with a buffer copy, so be safe and set it
-         *
-         * This might be a performance issue if COPY_DST costs something
-         */
-        usage:
-          this.args.usage ??
-          GPUBufferUsage.STORAGE |
-            GPUBufferUsage.COPY_SRC |
-            GPUBufferUsage.COPY_DST,
-      });
-      if (this.args.initializeGPUBuffer) {
-        this.copyCPUToGPU();
-      }
-      if (this.args.createMappableGPUBuffer) {
-        this.#mappableGPUBuffer = this.device.createBuffer({
-          label: "mappable | " + this.label,
-          size: this.size,
-          usage:
-            this.args.mappableGPUBufferUsage ??
-            GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-        });
-      }
+      this.createGPUBuffer(this.args);
     } else {
       this.buffer = args.buffer;
     }
@@ -212,6 +81,160 @@ export class Buffer {
         "GPU buffer is undefined"
       );
     }
+  }
+
+  createCPUBuffer(args = {}) {
+    const length = args.length ?? this.length;
+    if (length === undefined) {
+      console.error("Buffer::allocateCPUBuffer: must specify length");
+    }
+    const datatype = args.datatype ?? this.datatype;
+    if (datatype === undefined) {
+      console.error("Buffer::allocateCPUBuffer: must specify datatype");
+    }
+    this.#cpuBuffer = new (datatypeToTypedArray(this.datatype))(this.length);
+    const is64Bit = datatype === "u64";
+    this.#cpuBufferIsDirty = true;
+    if (args.initializeCPUBuffer) {
+      for (let i = 0; i < length; i++) {
+        let val;
+        switch (datatype) {
+          case "f32":
+            switch (args.initializeCPUBuffer) {
+              case "randomizeMinusOneToOne":
+                /* [-1, 1] */
+                val = Math.random() * 2.0 - 1.0;
+                break;
+              case "randomizeAbsUnder1024":
+                // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random#getting_a_random_integer_between_two_values
+                /* [-1024, 1024], ints only */
+                val = Math.floor(Math.random() * 2049.0 - 1024);
+                break;
+              case "fisher-yates":
+              default:
+                /* roughly, range of 32b significand */
+                val = i & (2 ** 22 - 1);
+                break;
+            }
+            this.#cpuBuffer[i] = val;
+            break;
+          case "u32":
+          case "i32":
+          case "u64":
+            switch (args.initializeCPUBuffer) {
+              case "xor-beef":
+                val = i ^ 0xbeef;
+                break;
+              case "randomizeAbsUnder1024":
+                // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Math/random#getting_a_random_integer_between_two_values
+                /* [-1024, 1024], ints only */
+                val = Math.floor(Math.random() * 2049.0 - 1024);
+                break;
+              case "constant":
+                val = 42;
+                break;
+              case "bitreverse":
+                val = bitreverse(i);
+                break;
+              case "randomBytes": {
+                let temp = BigInt(0);
+                for (let j = 0; j < (is64Bit ? 8 : 4); j++) {
+                  const randByte = BigInt(Math.floor(Math.random() * 256.0));
+                  temp = (temp << 8n) | randByte;
+                }
+                if (is64Bit) {
+                  val = temp;
+                } else {
+                  val = Number(temp);
+                }
+                break;
+              }
+              case "fisher-yates":
+              default:
+                if (is64Bit) {
+                  val = BigInt(i);
+                } else {
+                  val = i == 0 ? 0 : this.#cpuBuffer[i - 1] + 1; // trying to get u32s
+                }
+                break;
+            }
+            break;
+        }
+        this.#cpuBuffer[i] = is64Bit ? BigInt(val) : val;
+      }
+      /* now post-process the array */
+      switch (args.initializeCPUBuffer) {
+        case "fisher-yates": {
+          const shuffleArray = function (array) {
+            for (let i = array.length - 1; i > 0; i--) {
+              // Generate a random index from 0 to i inclusive
+              const j = Math.floor(Math.random() * (i + 1));
+
+              // Swap elements at i and j
+              [array[i], array[j]] = [array[j], array[i]];
+            }
+          };
+          shuffleArray(this.#cpuBuffer);
+          break;
+        }
+        default:
+          break;
+      }
+      /* we have now populated #cpuBuffer */
+      if (args.storeCPUBackup) {
+        this.#cpuBufferBackup = this.#cpuBuffer.slice();
+      }
+      this.#cpuBufferIsDirty = false;
+    }
+  }
+
+  createGPUBuffer(args = {}) {
+    if ("buffer" in args) {
+      console.error(
+        "Buffer::allocateGPUBuffer: don't pass in a buffer AND specify createGPUBuffer"
+      );
+    }
+    const device = args.device ?? this.device;
+    if (device === undefined) {
+      console.error("Buffer::allocateGPUBuffer: must specify device");
+    }
+    const size = args.size ?? this.size;
+    if (size === undefined) {
+      console.error("Buffer::allocateGPUBuffer must specify size");
+    }
+    const datatype = args.datatype ?? this.datatype;
+    if (datatype === undefined) {
+      console.error("Buffer::allocateGPUBuffer must specify datatype");
+    }
+    const usage = args.usage ?? this.usage;
+    this.buffer = this.device.createBuffer({
+      label: this.label,
+      size: size,
+      /** Output-only buffers may not need COPY_DST but we might
+       * initialize them with a buffer copy, so be safe and set it
+       *
+       * This might be a performance issue if COPY_DST costs something
+       */
+      usage:
+        usage ??
+        GPUBufferUsage.STORAGE |
+          GPUBufferUsage.COPY_SRC |
+          GPUBufferUsage.COPY_DST,
+    });
+    if (args.initializeGPUBuffer) {
+      this.copyCPUToGPU();
+    }
+    if (args.createMappableGPUBuffer) {
+      this.createMappableGPUBuffer(size);
+    }
+  }
+
+  createMappableGPUBuffer(size) {
+    this.#mappableGPUBuffer = this.device.createBuffer({
+      label: "mappable | " + this.label,
+      size: size,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
   }
 
   copyCPUToGPU() {
@@ -230,6 +253,9 @@ export class Buffer {
     const copyEncoder = this.device.createCommandEncoder({
       label: `encoder: GPU buffer ${this.label} data -> mappable buffers`,
     });
+    if (this.#mappableGPUBuffer === undefined) {
+      this.createMappableGPUBuffer(this.size);
+    }
     copyEncoder.copyBufferToBuffer(
       this.buffer.buffer,
       this.buffer.offset ?? 0,
@@ -288,8 +314,8 @@ export class Buffer {
     return (
       this.#gpuBuffer?.size ??
       this.#gpuBuffer?.buffer?.size ??
-      this.args?.size ??
-      this.args?.length * datatypeToBytes(this.datatype)
+      this.#size ??
+      this.#length * datatypeToBytes(this.datatype)
     );
   }
   get length() {
@@ -297,10 +323,10 @@ export class Buffer {
     if (this.size) {
       return this.size / datatypeToBytes(this.datatype);
     } else {
-      return this.args.length;
+      return this.#length;
     }
   }
   get device() {
-    return this.args.device;
+    return this.#device;
   }
 }
