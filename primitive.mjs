@@ -229,6 +229,7 @@ export class BasePrimitive {
         this.__buffers[bufferObj] = new Buffer({
           label: bufferObj,
           buffer: this[bufferObj],
+          device: this.device,
           // this probably needs datatype: but I won't add that
           // until I know it's useful
         });
@@ -788,6 +789,8 @@ dispatchGeometry: ${dispatchGeometry}`);
             this.registerBuffer({
               label: action.label,
               buffer: allocatedBuffer,
+              device: this.device,
+              ...(action.datatype && { datatype: action.datatype }),
             });
           }
           /* todo: combine this with WriteGPUBuffer below */
