@@ -35,12 +35,11 @@ if (typeof process !== "undefined" && process.release.name === "node") {
   if (saveSVG === "false") {
     saveSVG = false;
   }
-}
-
-if (Window.crossOriginIsolated) {
-  console.info("IS cross-origin isolated");
-} else {
-  console.info("is NOT cross-origin isolated");
+  if (Window.crossOriginIsolated) {
+    console.info("IS cross-origin isolated");
+  } else {
+    console.info("is NOT cross-origin isolated");
+  }
 }
 
 // tests
@@ -143,8 +142,8 @@ async function main(navigator) {
   // let testSuites = [DLDFFailureSuite];
   // let testSuites = [StoneberryScanMiniSuite];
   // let testSuites = [SortOneSweepFunctionalRegressionSuite];
-  // let testSuites = [SortOneSweep64v32Suite];
-  let testSuites = [SortOneSweep64v321MNoPlotSuite];
+  let testSuites = [SortOneSweep64v32Suite];
+  // let testSuites = [SortOneSweep64v321MNoPlotSuite];
 
   const expts = new Array(); // push new rows (experiments) onto this
   let primitiveCacheStats;
@@ -325,6 +324,13 @@ async function main(navigator) {
           if (testDebugBuffer) {
             await testDebugBuffer.copyGPUToCPU();
           }
+          /** do we need to see another buffer we didn't initialize here,
+           * that might not have a CPU buffer inside it?
+           * here's how we do it:
+           *   const foo = primitive.getBuffer("foo");
+           *   foo.createCPUBuffer();
+           *   await foo.copyGPUToCPU();
+           */
           let validateArgs = {};
           if (
             testSuite.category === "sort" &&
