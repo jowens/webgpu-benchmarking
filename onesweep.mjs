@@ -19,8 +19,10 @@ export class OneSweepSort extends BaseSort {
       this.direction = "ascending";
     }
 
-    /* this.datatype is a generic datatype
-     * this.wgslDatatype is a WGSL realization of that datatype */
+    /** this.datatype is a generic datatype (e.g., u64)
+     * this.wgslDatatype is a WGSL realization of that datatype
+     *   (e.g., vec2u)
+     **/
 
     /** functions for converting between u32 and other key datatypes,
      * and also defining MAX (largest possible key value) */
@@ -48,7 +50,11 @@ export class OneSweepSort extends BaseSort {
     for (const knownBuffer of this.knownBuffers) {
       /* we passed an existing buffer into the constructor */
       if (knownBuffer in args) {
-        this.registerBuffer({ label: knownBuffer, buffer: args[knownBuffer] });
+        this.registerBuffer({
+          label: knownBuffer,
+          buffer: args[knownBuffer],
+          device: this.device,
+        });
         delete this[knownBuffer]; // let's make sure it's in one place only
       }
     }
@@ -321,7 +327,7 @@ export class OneSweepSort extends BaseSort {
 
     /**
      * Input: global keysIn[]
-     * Output: global hist[SORT_PASSES * RADIX = 1024]
+     * Output: global hist[SORT_PASSES * RADIX = {32b: 1024, 64b: 2048}]
      * Configuration:
      *   - REDUCE_BLOCK_DIM (128) threads per workgroup
      *   - Each thread handles REDUCE_KEYS_PER_THREAD (30)
@@ -329,7 +335,7 @@ export class OneSweepSort extends BaseSort {
      *     (basically, ceil(size of keysIn / (REDUCE_BLOCK_DIM * REDUCE_KEYS_PER_THREAD)))
      * Action: Construct local histogram(s) of global keysIn[] input, sum
      *   those histograms into global hist[] histogram
-     * Structure of wg_globalHist array:
+     * Structure of wg_globalHist array of u32s:
      * - Each group of 64 threads writes into a different segment
      * - Segment 0 (threads 0-63) histograms its inputs:
      *   - wg_globalHist[0, 256) has 256 buckets that count keysIn[7:0]
@@ -340,7 +346,7 @@ export class OneSweepSort extends BaseSort {
      * - Final step adds the two segments together and atomic-adds them to hist[]
      * - hist[0:1024] has the same structure as wg_globalHist[0:1024]
      * For 64b keys, with respect to the above:
-     * - wg_globalHist[] has 8 256-element buckets per segment
+     * - wg_globalHist[] has 8 256-element buckets per segment (2x as big as 32b)
      *   - Each thread does 2x as much work
      */
     @compute @workgroup_size(REDUCE_BLOCK_DIM, 1, 1)
@@ -444,13 +450,13 @@ export class OneSweepSort extends BaseSort {
     ${this.binop.wgslfn}
 
     /**
-     * Input: global hist[4*256]
+     * Input: global hist[4*256] of u32s
      *   - [0, 256) has 256 buckets that count keysIn[7:0], assigned to wkgp 0
      *   - [256, 512) ...                      keysIn[15:8], ...             1
      *   - [512, 768) ...                      keysIn[23:16] ...             2
      *   - [768, 1024) ...                     keysIn[31:24] ...             3
      *   - for 64b sorts, global hist is [8*256] and we launch 8 workgroups
-     * Output: global passHist[4*256, plus more that we're not worried about yet]
+     * Output: global passHist[4*256, plus more that we're not worried about yet] of u32s
      *   - see diagram of how passHist is laid out where it is allocated at top of file
      *   - passHist has 4 segments (bits = {7:0, 15:8, 23:16, 31:24}) corresponding
      *     to keysIn[bits]), each of which has:
@@ -1163,6 +1169,11 @@ export class OneSweepSort extends BaseSort {
      * marked as `this.FOO = this.FOO ?? val` uses 'val' as the default */
     const inputSize = this.getBuffer("keysInOut").size; // bytes
     this.inputLength = inputSize / this.keyDatatype.bytesPerElement;
+    if (this.inputLength > 2 ** 30) {
+      console.warn(
+        "OneSweep sort is limited to 2^30 elements; this is not easily fixed."
+      );
+    }
     this.RADIX = this.RADIX ?? 256;
     this.RADIX_LOG = Math.log2(this.RADIX);
     this.KEY_BITS = this.KEY_BITS ?? this.keyDatatype.bitsPerElement;
@@ -1217,17 +1228,16 @@ export class OneSweepSort extends BaseSort {
     for (var i = 0; i < this.SORT_PASSES + 2; i++) {
       const offset = i * this.uniformBufferOffsetLength;
       this.sortParameters[offset] = this.inputLength;
-      this.sortParameters[offset + 1] = Math.max(i - 2, 0) * this.RADIX_LOG;
+      this.sortParameters[offset + 1] = i <= 1 ? 0 : (i - 2) * this.RADIX_LOG;
       this.sortParameters[offset + 2] =
         i === 0 ? this.reduceWorkgroupCount : this.passWorkgroupCount;
       this.sortParameters[offset + 3] = 0;
       // set to 1 ONLY on last sort pass
       this.sortParameters[offset + 4] = i === this.SORT_PASSES + 1 ? 1 : 0;
     }
-
+    // these three all hold u32s no matter what the datatype is
     this.sortBumpSize = this.SORT_PASSES * 4; // 1 x u32 per pass
-    this.histSize =
-      this.SORT_PASSES * this.RADIX * this.keyDatatype.bytesPerElement; // (((SORT_PASSES * RADIX) as usize) * std::mem::size_of::<u32>())
+    this.histSize = this.SORT_PASSES * this.RADIX * 4; // (((SORT_PASSES * RADIX) as usize) * std::mem::size_of::<u32>())
     this.passHistSize = this.passWorkgroupCount * this.histSize; // ((pass_thread_blocks * (RADIX * SORT_PASSES) as usize) * std::mem::size_of::<u32>())
   }
   compute() {
@@ -1279,10 +1289,12 @@ export class OneSweepSort extends BaseSort {
       }),
       new AllocateBuffer({
         label: "hist",
+        datatype: "u32",
         size: this.histSize,
       }),
       new AllocateBuffer({
         label: "passHist",
+        datatype: "u32",
         size: this.passHistSize,
       }),
       new Kernel({
@@ -1777,7 +1789,7 @@ export const SortOneSweep64v32Suite = new BaseTestSuite({
   category: "sort",
   testSuite: "onesweep",
   initializeCPUBuffer: "randomBytes",
-  trials: 1,
+  trials: 2,
   params: Sort64v32Params,
   primitive: OneSweepSort,
   plots: [OneSweep64v32BW, OneSweep64v32Runtime],
