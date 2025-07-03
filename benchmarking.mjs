@@ -327,7 +327,7 @@ async function main(navigator) {
           /** do we need to see another buffer we didn't initialize here,
            * that might not have a CPU buffer inside it?
            * here's how we do it:
-           *   const foo = primitive.getBuffer("foo");
+           *   const foo = primitive.getBuffer ("foo");
            *   foo.createCPUBuffer();
            *   await foo.copyGPUToCPU();
            */
@@ -398,6 +398,7 @@ async function main(navigator) {
             adapter.info
           );
         } // end of TEST FOR PERFORMANCE
+        primitive.destroy();
       } // end of running all combinations for this testSuite
 
       /* record statistics every time through, overwriting any previous statistics */
