@@ -776,6 +776,10 @@ dispatchGeometry: ${dispatchGeometry}`);
           if (existingBuffer && existingBuffer.size === action.size) {
             /* just use the existing buffer */
           } else {
+            if (existingBuffer?.buffer) {
+              existingBuffer.buffer.destroy();
+            }
+            this.device.pushErrorScope("out-of-memory");
             const allocatedBuffer = this.device.createBuffer({
               label: action.label,
               size: action.size,
@@ -785,6 +789,15 @@ dispatchGeometry: ${dispatchGeometry}`);
                 GPUBufferUsage.STORAGE |
                   GPUBufferUsage.COPY_SRC |
                   GPUBufferUsage.COPY_DST,
+            });
+            this.device.popErrorScope().then((error) => {
+              if (error) {
+                // error is a GPUOutOfMemoryError object instance
+                this.buffer = null;
+                console.error(
+                  `Primitive::execute:AllocateBuffer: Out of memory, buffer too large. Error: ${error.message}`
+                );
+              }
             });
             this.registerBuffer({
               label: action.label,
@@ -838,6 +851,12 @@ dispatchGeometry: ${dispatchGeometry}`);
       : 0;
     const cpuTotalTimeNS = (this.cpuEndTime - this.cpuStartTime) * 1000000.0;
     return { gpuTotalTimeNS, cpuTotalTimeNS };
+  }
+  destroy() {
+    /* destroy every buffer */
+    for (const [name, buffer] of Object.entries(this.__buffers)) {
+      buffer.destroy();
+    }
   }
 }
 

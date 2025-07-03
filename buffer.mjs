@@ -207,6 +207,11 @@ export class Buffer {
       console.error("Buffer::allocateGPUBuffer must specify datatype");
     }
     const usage = args.usage ?? this.usage;
+    if (this.buffer) {
+      console.info("Buffer::createGPUBuffer: Destroying", this.buffer.label);
+      this.buffer.destroy();
+    }
+    this.device.pushErrorScope("out-of-memory");
     this.buffer = this.device.createBuffer({
       label: this.label,
       size: size,
@@ -221,6 +226,15 @@ export class Buffer {
           GPUBufferUsage.COPY_SRC |
           GPUBufferUsage.COPY_DST,
     });
+    this.device.popErrorScope().then((error) => {
+      if (error) {
+        // error is a GPUOutOfMemoryError object instance
+        this.buffer = null;
+        console.error(
+          `Buffer::createGPUBuffer: Out of memory, buffer too large. Error: ${error.message}`
+        );
+      }
+    });
     if (args.initializeGPUBuffer) {
       this.copyCPUToGPU();
     }
@@ -230,10 +244,23 @@ export class Buffer {
   }
 
   createMappableGPUBuffer(size) {
+    if (this.#mappableGPUBuffer) {
+      this.#mappableGPUBuffer.destroy();
+    }
+    this.device.pushErrorScope("out-of-memory");
     this.#mappableGPUBuffer = this.device.createBuffer({
       label: "mappable | " + this.label,
       size: size,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+    this.device.popErrorScope().then((error) => {
+      if (error) {
+        // error is a GPUOutOfMemoryError object instance
+        this.buffer = null;
+        console.error(
+          `Buffer::createMappableGPUBuffer: Out of memory, buffer too large. Error: ${error.message}`
+        );
+      }
     });
   }
 
@@ -287,6 +314,15 @@ export class Buffer {
     if (this.args.storeCPUBackup && this.#cpuBufferIsDirty) {
       this.#cpuBuffer = this.#cpuBufferBackup.slice();
       this.#cpuBufferIsDirty = false;
+    }
+  }
+
+  destroy() {
+    if (this.#gpuBuffer && this.#gpuBuffer.buffer) {
+      this.#gpuBuffer.buffer.destroy();
+    }
+    if (this.#mappableGPUBuffer) {
+      this.#mappableGPUBuffer.destroy();
     }
   }
 
