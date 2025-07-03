@@ -226,28 +226,38 @@ export class BasePrimitive {
   registerBuffer(bufferObj) {
     switch (typeof bufferObj) {
       case "string":
-        this.__buffers[bufferObj] = new Buffer({
-          label: bufferObj,
-          buffer: this[bufferObj],
-          device: this.device,
-          // this probably needs datatype: but I won't add that
-          // until I know it's useful
-        });
+        if (this.hasBuffer(bufferObj)) {
+          this.getBuffer(bufferObj).destroy();
+        }
+        this.setBuffer(
+          bufferObj,
+          new Buffer({
+            label: bufferObj,
+            buffer: this[bufferObj],
+            device: this.device,
+            // this probably needs datatype: but I won't add that
+            // until I know it's useful
+          })
+        );
         break;
       default:
+        /* is there already a buffer there? if so, destroy it */
+        if (this.hasBuffer(bufferObj.label)) {
+          this.getBuffer(bufferObj.label).destroy();
+        }
         switch (bufferObj.constructor.name) {
           case "Buffer":
             /* already created the buffer, don't remake it */
-            this.__buffers[bufferObj.label] = bufferObj;
+            this.setBuffer(bufferObj.label, bufferObj);
             break;
           default:
-            this.__buffers[bufferObj.label] = new Buffer(bufferObj);
+            this.setBuffer(bufferObj.label, new Buffer(bufferObj));
             if (
-              this.__buffers[bufferObj.label]?.datatype === undefined &&
+              this.getBuffer(bufferObj.label)?.datatype === undefined &&
               this?.datatype
             ) {
               /* assign a datatype from primitive if buffer doesn't have one */
-              this.__buffers[bufferObj.label].datatype = this.datatype;
+              this.getBuffer(bufferObj.label).datatype = this.datatype;
             }
             break;
         }
@@ -257,6 +267,14 @@ export class BasePrimitive {
 
   getBuffer(label) {
     return this.__buffers[label];
+  }
+
+  hasBuffer(label) {
+    return label in this.__buffers;
+  }
+
+  setBuffer(label, buffer) {
+    this.__buffers[label] = buffer;
   }
 
   getBufferResource(args) {
@@ -609,7 +627,7 @@ export class BasePrimitive {
           for (const bindingGroup of action.bindings) {
             for (const binding of bindingGroup) {
               if (
-                !(binding in this.__buffers || binding.buffer in this.__buffers)
+                !(this.hasBuffer(binding) || this.hasBuffer(binding.buffer))
               ) {
                 console.error(
                   `Primitive ${this.label} has no registered buffer ${binding}.`,
@@ -854,6 +872,7 @@ dispatchGeometry: ${dispatchGeometry}`);
   }
   destroy() {
     /* destroy every buffer */
+    // eslint-disable-next-line no-unused-vars
     for (const [name, buffer] of Object.entries(this.__buffers)) {
       buffer.destroy();
     }
