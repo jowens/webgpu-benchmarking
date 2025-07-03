@@ -1239,6 +1239,10 @@ export class OneSweepSort extends BaseSort {
     this.sortBumpSize = this.SORT_PASSES * 4; // 1 x u32 per pass
     this.histSize = this.SORT_PASSES * this.RADIX * 4; // (((SORT_PASSES * RADIX) as usize) * std::mem::size_of::<u32>())
     this.passHistSize = this.passWorkgroupCount * this.histSize; // ((pass_thread_blocks * (RADIX * SORT_PASSES) as usize) * std::mem::size_of::<u32>())
+    if (this.keyDatatype.is64Bit) {
+      this.passHistDelta = this.passHistDelta ?? 0;
+      this.passHistSize += this.passHistDelta;
+    }
   }
   compute() {
     this.finalizeRuntimeParameters();
@@ -1675,6 +1679,22 @@ const OneSweep64v32Runtime = {
   fy: { field: "timing" },
 };
 
+const OneSweep64PHDBW = {
+  x: { field: "inputBytes", label: "Input array size (B)" },
+  y: { field: "bandwidth", label: "Achieved bandwidth (GB/s)" },
+  stroke: { field: "passHistDelta" },
+  test_br: "gpuinfo.description",
+  fy: { field: "timing" },
+};
+
+const OneSweep64PHDRuntime = {
+  x: { field: "inputBytes", label: "Input array size (B)" },
+  y: { field: "time", label: "Runtime (ns)" },
+  stroke: { field: "passHistDelta" },
+  test_br: "gpuinfo.description",
+  fy: { field: "timing" },
+};
+
 const SortOneSweepSizeParams = {
   inputLength: range(10, 25).map((i) => 2 ** i),
   datatype: ["u32"],
@@ -1706,6 +1726,15 @@ const SortOneSweepFunctionalParams = {
 const Sort64v32Params = {
   inputLength: range(18, 25).map((i) => 2 ** i),
   datatype: ["u64", "u32"],
+  type: ["keysonly" /* "keyvalue", */],
+  direction: ["ascending"],
+  disableSubgroups: [false],
+};
+
+const Sort64PHDParams = {
+  inputLength: range(18, 25).map((i) => 2 ** i),
+  datatype: ["u64"],
+  passHistDelta: [/* 128,*/ 0 /*, 256, 512, 1024*/],
   type: ["keysonly" /* "keyvalue", */],
   direction: ["ascending"],
   disableSubgroups: [false],
@@ -1789,10 +1818,12 @@ export const SortOneSweep64v32Suite = new BaseTestSuite({
   category: "sort",
   testSuite: "onesweep",
   initializeCPUBuffer: "randomBytes",
-  trials: 2,
-  params: Sort64v32Params,
+  trials: 5,
+  params: Sort64PHDParams,
+  // params: Sort64v32Params,
   primitive: OneSweepSort,
-  plots: [OneSweep64v32BW, OneSweep64v32Runtime],
+  // plots: [OneSweep64v32BW, OneSweep64v32Runtime],
+  plots: [OneSweep64PHDBW, OneSweep64PHDRuntime],
 });
 
 export const SortOneSweep64v321MNoPlotSuite = new BaseTestSuite({
