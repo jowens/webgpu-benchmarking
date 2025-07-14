@@ -1,5 +1,4 @@
 import { BasePrimitive } from "./primitive.mjs";
-import { range } from "./util.mjs";
 import { Kernel, AllocateBuffer, WriteGPUBuffer } from "./primitive.mjs";
 import { BaseTestSuite } from "./testsuite.mjs";
 
@@ -22,7 +21,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
       "inputBuffer",
       "outputBuffer",
       "workQueue",
-      "workCount",
+      "workUnitsComplete",
     ];
 
     for (const knownBuffer of this.knownBuffers) {
@@ -52,27 +51,83 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
    * - workgroupCount (should fill the machine)
    */
 
-  /** Work queue encoding
-   * Size of matrix is mxm
-   * Size of baseCaseWidthHeight is bxb
-   * - So actually valid points are (x,y) = ([0 - m/b), [0 - m/b)]
-   * We have to encode x, y, size
-   * x and y each require log(m/b) bits
-   * size is always a power of 2 and thus requires log(log(m/b)) bits
-   * Let's say 13 bits for x and y, 6 bits for size
-   * [x13, y13, sz6] = 32 bits
-   *                          (for b = 1)
-   * x = x13 * b              (can represent up to 8192^2 = 67M elements)
-   * y = y13 * b
-   * sz = 2 ** (sz6 + log(b)) (can represent up to size of 2^63)
-   * Need to make sure that there is no valid piece of work that encodes to 0
+  /*
+   * This encoding scheme packs a region's position (x, y) and side-length (sz)
+   * into a single 32-bit integer. It uses a relative coordinate system where the
+   * fundamental unit is a "tile" of the minimum possible region size, 2^b.
+   *
+   * The bit allocation is 14 bits for the x-tile, 14 for the y-tile, and 4 for
+   * the relative size exponent. This 14/14/4 split is optimal because it
+   * maximizes the tile grid to 16,384 x 16,384 (2^14 x 2^14), which is the
+   * largest possible spatial resolution that fits within 32 bits. The final
+   * value is biased by +1 to reserve the zero value for special use cases.
+   *
+   * Bit Layout:
+   * | 4 bits: Relative Size | 14 bits: Y-Tile | 14 bits: X-Tile |
    */
 
-  workToU32({ x, y, sz }) {
-    const x13 = x / this.baseCaseWidthHeight;
-    const y13 = y / this.baseCaseWidthHeight;
-    const sz6 = 2 ** (Math.log2(sz) - Math.log2(this.baseCaseWidthHeight));
-    return (x13 << 19) | (y13 << 6) | sz6;
+  /**
+   * Encodes a region's position and side-length into a single 32-bit integer.
+   *
+   * @param {number} x The absolute x-coordinate of the region.
+   * @param {number} y The absolute y-coordinate of the region.
+   * @param {number} sz The side-length of the square region (must be a power of 2).
+   * @param {number} b The minimum size exponent (minimum region size is 2^b).
+   * @returns {number} The encoded 32-bit integer, or 0 if inputs are invalid.
+   */
+  regionToU32({ x, y, sz, b }) {
+    // --- Validate Inputs ---
+    const isPowerOfTwo = sz > 0 && (sz & (sz - 1)) === 0;
+    if (!isPowerOfTwo || x % sz !== 0 || y % sz !== 0) {
+      return 0; // Invalid side-length or alignment
+    }
+
+    const absoluteExp = Math.log2(sz); // The absolute exponent of the side-length
+    if (absoluteExp < b) {
+      return 0; // Region is smaller than the minimum allowed size
+    }
+
+    // --- Calculate Relative (Tile) Units ---
+    const relativeExp = absoluteExp - b;
+    const x_tile = x >> b; // x / 2^b
+    const y_tile = y >> b; // y / 2^b
+
+    // --- Validate Against the Fixed 14-bit Tile Grid ---
+    const TILE_GRID_MAX = 1 << 14;
+    if (x_tile >= TILE_GRID_MAX || y_tile >= TILE_GRID_MAX) {
+      return 0; // Coordinates are outside the maximum supported matrix size
+    }
+
+    // --- Pack and Bias ---
+    const packedValue = (relativeExp << 28) | (y_tile << 14) | x_tile;
+    return packedValue + 1;
+  }
+
+  /**
+   * Decodes a 32-bit integer back into a region's position and side-length.
+   *
+   * @param {number} encodedValue The 32-bit integer to decode.
+   * @param {number} b The minimum size exponent (minimum region size is 2^b).
+   * @returns {{x: number, y: number, sz: number}|null} An object with the region's
+   * properties, or null if the encoded value is the reserved value 0.
+   */
+  u32ToRegion(encodedValue, b) {
+    if (encodedValue === 0) {
+      return null; // 0 is the reserved "special value"
+    }
+
+    // --- Un-bias and Unpack ---
+    const packedValue = encodedValue - 1;
+    const relativeExp = packedValue >> 28;
+    const y_tile = (packedValue >> 14) & 0x3fff; // 0x3FFF is the mask for 14 bits
+    const x_tile = packedValue & 0x3fff;
+
+    // --- Convert from Tile Units back to Absolute Values ---
+    return {
+      x: x_tile << b,
+      y: y_tile << b,
+      sz: (1 << relativeExp) << b, // sz = 2^(relativeExp + b)
+    };
   }
 
   workQueueMatrixTransposeWGSL = () => {
@@ -84,10 +139,24 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     struct TransposeParameters {
       matrixWidthHeight: u32, /* width === height */
       baseCaseWidthHeight: u32,
-      workUnits: u32,
+      totalWorkUnits: u32,
     };
 
-    struct WorkUnit {
+    /*
+     * This encoding scheme packs a region's position (x, y) and side-length (sz)
+     * into a single 32-bit integer. It uses a relative coordinate system where the
+     * fundamental unit is a "tile" of the minimum possible region size, 2^b.
+     *
+     * The bit allocation is 14 bits for the x-tile, 14 for the y-tile, and 4 for
+     * the relative size exponent. This 14/14/4 split is optimal because it
+     * maximizes the tile grid to 16,384 x 16,384 (2^14 x 2^14), which is the
+     * largest possible spatial resolution that fits within 32 bits. The final
+     * value is biased by +1 to reserve the zero value for special use cases.
+     *
+     * Bit Layout:
+     * | 4 bits: Relative Size | 14 bits: Y-Tile | 14 bits: X-Tile |
+     */
+    struct Region {
       x: u32,
       y: u32,
       sz: u32
@@ -98,19 +167,66 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
       this.baseCaseWidthHeight
     )};
 
-    fn u32ToWork(in: u32) -> WorkUnit {
-      var work: WorkUnit;
-      work.x = (in >> 19) * BASE_CASE_WIDTH_HEIGHT;
-      work.y = ((in >> 6) & 0x1fff) * BASE_CASE_WIDTH_HEIGHT;
-      work.sz = (in & 0x3f);
-      return work;
+    /// Next two routines better be equivalent to the ones in JS in this file
+    ///
+    /// Encodes a region's position and side-length into a single 32-bit integer.
+    ///
+    /// @param x The absolute x-coordinate of the region.
+    /// @param y The absolute y-coordinate of the region.
+    /// @param sz The side-length of the square region (must be a power of 2).
+    /// @param b The minimum size exponent (minimum region size is 2^b).
+    /// @returns The encoded 32-bit integer, or 0u if inputs are invalid.
+    fn encodeRegion(x: u32, y: u32, sz: u32, b: u32) -> u32 {
+      // --- Validate Inputs ---
+      let isPowerOfTwo = (sz > 0u) && ((sz & (sz - 1u)) == 0u);
+      if (!isPowerOfTwo || (x % sz) != 0u || (y % sz) != 0u) {
+        return 0u; // Invalid side-length or alignment
+      }
+
+      let absoluteExp = countTrailingZeros(sz); // Efficiently finds log2(sz)
+      if (absoluteExp < b) {
+        return 0u; // Region is smaller than the minimum allowed size
+      }
+
+      // --- Calculate Relative (Tile) Units ---
+      let relativeExp = absoluteExp - b;
+      let x_tile = x >> b;
+      let y_tile = y >> b;
+
+      // --- Validate Against the Fixed 14-bit Tile Grid ---
+      let TILE_GRID_MAX = 1u << 14u;
+      if (x_tile >= TILE_GRID_MAX || y_tile >= TILE_GRID_MAX) {
+        return 0u; // Coordinates are outside the maximum supported matrix size
+      }
+
+      // --- Pack and Bias ---
+      let packedValue = (relativeExp << 28u) | (y_tile << 14u) | x_tile;
+      return packedValue + 1u;
     }
 
-    fn workToU32(work: WorkUnit) -> u32 {
-      let x13: u32 = work.x / BASE_CASE_WIDTH_HEIGHT;
-      let y13: u32 = work.y / BASE_CASE_WIDTH_HEIGHT;
-      let sz6: u32 = 1u << (u32(log2(f32(work.sz))) - BASE_CASE_WIDTH_HEIGHT_LOG2);
-      return (x13 << 19) | (y13 << 6) | sz6;
+    /// Decodes a 32-bit integer back into a region's position and side-length.
+    ///
+    /// @param encodedValue The 32-bit integer to decode.
+    /// @param b The minimum size exponent (minimum region size is 2^b).
+    /// @returns A DecodedRegion struct. If the input was the reserved value 0,
+    /// the returned struct will have a side-length 'sz' of 0.
+    fn decodeRegion(encodedValue: u32, b: u32) -> Region {
+      if (encodedValue == 0u) {
+        return Region(0u, 0u, 0u); // 0u is the reserved value
+      }
+
+      // --- Un-bias and Unpack ---
+      let packedValue = encodedValue - 1u;
+      let relativeExp = packedValue >> 28u;
+      let y_tile = (packedValue >> 14u) & 0x3FFFu; // 0x3FFF is the mask for 14 bits
+      let x_tile = packedValue & 0x3FFFu;
+
+      // --- Convert from Tile Units back to Absolute Values ---
+      let sz_val = (1u << relativeExp) << b; // sz = 2^(relativeExp + b)
+      let x_val = x_tile << b;
+      let y_val = y_tile << b;
+
+      return Region(x_val, y_val, sz_val);
     }
 
     @group(0) @binding(0)
@@ -124,7 +240,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     var<storage, read_write> workQueue: array<atomic<u32>>;
 
     @group(0) @binding(3)
-    var<storage, read_write> workCount: atomic<u32>;
+    var<storage, read_write> workUnitsComplete: atomic<u32>;
 
     @group(1) @binding(0)
     var<uniform> transposeParameters : TransposeParameters;
@@ -132,6 +248,9 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     var<workgroup> wg_matrix: array<u32, ${
       this.baseCaseWidthHeight * this.baseCaseWidthHeight
     }>;
+
+    var<workgroup> wg_broadcast_workUnit: u32;
+    var<workgroup> wg_broadcast_currentworkUnitsComplete: u32;
 
     fn performTranspose(workUnit: u32) {
       /* uses wg_matrix */
@@ -145,33 +264,103 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
         builtinsNonuniform: BuiltinsNonuniform) {
       var matrixWidthHeight = transposeParameters.matrixWidthHeight;
       var baseCaseWidthHeight = transposeParameters.baseCaseWidthHeight;
-      var workUnits = transposeParameters.workUnits;
+      let workQueueLength = arrayLength(&workQueue);
+      var totalWorkUnits = transposeParameters.totalWorkUnits;
+      let wgid = builtinsUniform.wgid.x;
+      var readSearchLocation = wgid;
+      var writeSearchLocation = wgid;
 
       for (var i = 0; i < 100000; i++) { /* so we don't go into an infinite loop */
       // loop { /* this is the loop we want when we're production-ready */
-        let currentWorkCount = atomicLoad(&workCount);
-        if (currentWorkCount == workUnits) {
-          /* we're done! */
-          return;
+        /* for now, invariant is we enter this loop with no work */
+
+        /* Consume (remove work)
+         * - Find a full slot (via atomic load)
+         * - Atomic weak compare-exchange work unit with that slot
+         * - Successful compare-exchange means you own that work unit
+         * - Failure: EITHER
+         *   - Loop over atomic exchanges
+         *   - Loop over find-a-full-slot (we are doing this one)
+         */
+        for (var j = 0u; j < workQueueLength; j++) {
+          /* are we done? return if we are */
+          if (builtinsNonuniform.lidx == 0) {
+            wg_broadcast_currentworkUnitsComplete = atomicLoad(&workUnitsComplete);
+          }
+          if (workgroupUniformLoad(&wg_broadcast_currentworkUnitsComplete) == totalWorkUnits) {
+            return;
+          }
+          /* still work to do. */
+          /* thread 0 does all the work */
+          if (builtinsNonuniform.lidx == 0) {
+            var tempWorkUnit = atomicLoad(&workQueue[readSearchLocation]);
+            if (tempWorkUnit != 0) {
+              /* there's work at readSearchLocation! */
+              var exchangeResult =
+                atomicCompareExchangeWeak(&workQueue[readSearchLocation], tempWorkUnit, 0);
+              if (exchangeResult.exchanged == true) {
+                wg_broadcast_workUnit = tempWorkUnit;
+              } else {
+                /* someone else got the work first */
+              }
+            }
+            readSearchLocation = (readSearchLocation + 1) % workQueueLength;
+          }
         }
+        workgroupBarrier();
+
         /* Insert (add work)
          * - Find an empty slot
          * - Atomic weak compare-exchange myWork with that slot
          * - Success means you get back a zero
          * - Failure: Start over
          */
-
-        /* Consume (remove work)
-         * - Find a full slot (via atomic load)
-         * - Atomic weak compare-exchange zero with that slot
-         * - Success means you get back a non-zero
-         * - Failure: EITHER
-         *   - Loop over atomic exchanges
-         *   - Loop over find-a-full-slot
-         */
-
+        let myWorkUnit = workgroupUniformLoad(&wg_broadcast_workUnit);
+        if (myWorkUnit != 0) {
+          /* not sure if there is a case where myWorkUnit == 0, but if we
+           * do see that, we can just skip the insert phase */
+          var myRegion = decodeRegion(myWorkUnit, baseCaseWidthHeight);
+          if (myRegion.sz == baseCaseWidthHeight) {
+            /* base case, actually transpose this region */
+            if (builtinsNonuniform.lidx == 0) {
+              /* do it in one thread for now */
+              for (var xx = myRegion.x; xx < myRegion.x + myRegion.sz; xx++) {
+                for (var yy = myRegion.y; yy < myRegion.y + myRegion.sz; yy++) {
+                  outputBuffer[xx * matrixWidthHeight + yy] =
+                    inputBuffer[yy * matrixWidthHeight + xx];
+                }
+              }
+            }
+          } else {
+            /* subdivide and place 4 pieces of work into the queue */
+            /* currently, do this serially in thread zero */
+            if (builtinsNonuniform.lidx == 0) {
+              for (var j = 0u; j < 4; ) {
+                var deltaX = select(0u, myRegion.sz / 2, (j & 0x1) != 0);
+                var deltaY = select(0u, myRegion.sz / 2, (j & 0x2) != 0);
+                var newWorkUnit = encodeRegion(myRegion.x + deltaX,
+                                               myRegion.y + deltaY,
+                                               myRegion.sz / 2,
+                                               baseCaseWidthHeight);
+                /* try to post only into an empty slot */
+                var tempWorkUnit = atomicLoad(&workQueue[writeSearchLocation]);
+                if (tempWorkUnit == 0) {
+                  /* there's an empty slot at writeSearchLocation! */
+                  var exchangeResult =
+                    atomicCompareExchangeWeak(&workQueue[readSearchLocation], 0, tempWorkUnit);
+                  if (exchangeResult.exchanged == true) {
+                    /* successfully posted work, move to next piece of work */
+                    j = j + 1;
+                  } else {
+                    /* someone else got the work first */
+                  }
+                }
+                writeSearchLocation = (writeSearchLocation + 1) % workQueueLength;
+              }
+            }
+          }
+        }
       }
-
     } /* end kernel workQueueMatrixTranspose */`;
     return kernel;
   };
@@ -189,19 +378,23 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     this.transposeParameters[2] =
       (this.matrixWidthHeight / this.baseCaseWidthHeight) ** 2;
 
+    console.log(this.transposeParameters);
+
     this.workQueue = new Uint32Array(
       this.workQueueSize / Uint32Array.BYTES_PER_ELEMENT
     );
-    this.workQueue[0] = this.workToU32({
+    this.workQueue[0] = this.regionToU32({
       x: 0,
       y: 0,
       sz: this.matrixWidthHeight,
+      b: this.baseCaseWidthHeight,
     }); /* the entire matrix */
     this.workQueue[1] = 0;
     this.workQueue[2] = this.matrixWidthHeight;
 
-    this.workCountLength = 1;
-    this.workCountSize = this.workCountLength * Uint32Array.BYTES_PER_ELEMENT;
+    this.workUnitsCompleteLength = 1;
+    this.workUnitsCompleteSize =
+      this.workUnitsCompleteLength * Uint32Array.BYTES_PER_ELEMENT;
   }
   compute() {
     this.finalizeRuntimeParameters();
@@ -210,7 +403,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
       ["uniform"],
     ];
     const bindings = [
-      ["outputBuffer", "inputBuffer", "workQueue", "workCount"],
+      ["outputBuffer", "inputBuffer", "workQueue", "workUnitsComplete"],
       ["transposeParameters"],
     ];
     return [
@@ -232,8 +425,8 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
         cpuSource: this.workQueue,
       }),
       new AllocateBuffer({
-        label: "workCount",
-        size: this.workCountSize,
+        label: "workUnitsComplete",
+        size: this.workUnitsCompleteSize,
       }),
       new Kernel({
         kernel: this.workQueueMatrixTransposeWGSL,
