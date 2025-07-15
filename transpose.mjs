@@ -20,6 +20,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     this.knownBuffers = [
       "inputBuffer",
       "outputBuffer",
+      "debugBuffer",
       "workQueue",
       "workUnitsComplete",
     ];
@@ -191,6 +192,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
       }
 
       // --- Calculate Relative (Tile) Units ---
+      /* +1 below ensures we don't have a 0 work unit */
       let relativeExp = absoluteExp - blog2 + 1;
       let x_tile = x >> blog2;
       let y_tile = y >> blog2;
@@ -243,6 +245,9 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     @group(0) @binding(3)
     var<storage, read_write> workUnitsComplete: atomic<u32>;
 
+    @group(0) @binding(4)
+    var<storage, read_write> debugBuffer: array<${this.datatype}>;
+
     @group(1) @binding(0)
     var<uniform> transposeParameters : TransposeParameters;
 
@@ -272,7 +277,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
       var readSearchLocation = wgid;
       var writeSearchLocation = wgid;
 
-      for (var i = 0; i < 1; i++) { /* so we don't go into an infinite loop */
+      for (var i = 0; i < 100; i++) { /* so we don't go into an infinite loop */
       // loop { /* this is the loop we want when we're production-ready */
         /* for now, invariant is we enter this loop with no work */
 
@@ -328,10 +333,6 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
           /* not sure if there is a case where myWorkUnit == 0, but if we
            * do see that, we can just skip the insert phase */
           var myRegion = u32ToRegion(myWorkUnit, BASE_CASE_WIDTH_HEIGHT_LOG2);
-                      if (builtinsNonuniform.lidx == 0) {
-                              outputBuffer[0] = myRegion.sz;
-                              outputBuffer[1] = baseCaseWidthHeight;
-                      }
           if (myRegion.sz == baseCaseWidthHeight) {
             /* base case, actually transpose this region */
             if (builtinsNonuniform.lidx == 0) {
@@ -344,7 +345,8 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
               }
             }
             if (builtinsNonuniform.lidx == 0) {
-              atomicAdd(&workUnitsComplete, 1u);
+              var wuc = atomicAdd(&workUnitsComplete, 1u);
+              debugBuffer[256u + wuc] = wuc;
             }
           } else {
             /* subdivide and place 4 pieces of work into the queue */
@@ -356,16 +358,21 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
                 var newWorkUnit = regionToU32(Region(myRegion.x + deltaX,
                                                      myRegion.y + deltaY,
                                                      myRegion.sz / 2),
-                                              baseCaseWidthHeight);
+                                              BASE_CASE_WIDTH_HEIGHT_LOG2);
+                debugBuffer[writeSearchLocation * 8] = myRegion.x + deltaX;
+                debugBuffer[writeSearchLocation * 8 + 1] = myRegion.y + deltaY;
+                debugBuffer[writeSearchLocation * 8 + 2] = myRegion.sz / 2;
+                debugBuffer[writeSearchLocation * 8 + 3] = writeSearchLocation;
+                debugBuffer[writeSearchLocation * 8 + 4] = newWorkUnit;
                 /* try to post only into an empty slot */
                 var tempWorkUnit = atomicLoad(&workQueue[writeSearchLocation]);
                 if (tempWorkUnit == 0) {
                   /* there's an empty slot at writeSearchLocation! */
                   var exchangeResult =
-                    atomicCompareExchangeWeak(&workQueue[readSearchLocation], 0, tempWorkUnit);
+                    atomicCompareExchangeWeak(&workQueue[writeSearchLocation], 0u, newWorkUnit);
                   if (exchangeResult.exchanged == true) {
                     /* successfully posted work, move to next piece of work */
-                    outputBuffer[j] = newWorkUnit;
+                    debugBuffer[writeSearchLocation * 8 + 5] = atomicLoad(&workQueue[j]);
                     j = j + 1;
                   } else {
                     /* someone else got the work first */
@@ -385,18 +392,21 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     this.workgroupCount = this.workgroupCount ?? 256;
     this.baseCaseWidthHeight = this.baseCaseWidthHeight ?? 16;
     this.baseCaseWidthHeight_log2 = Math.log2(this.baseCaseWidthHeight);
-    // this.workQueueSize = this.workQueueSize ?? 2 ** 18;
-    this.workQueueSize = 32;
 
     const inputLength = this.getBuffer("inputBuffer").length;
     this.matrixWidthHeight = Math.sqrt(inputLength);
     this.transposeParameters = new Uint32Array(3);
     this.transposeParameters[0] = this.matrixWidthHeight;
     this.transposeParameters[1] = this.baseCaseWidthHeight;
+    // total number of (leaf) work items
     this.transposeParameters[2] =
       (this.matrixWidthHeight / this.baseCaseWidthHeight) ** 2;
 
-    console.log(this.transposeParameters);
+    // make this big enough to store everything
+    this.workQueueSize =
+      this.workQueueSize ?? (4 * inputLength) / this.transposeParameters[2];
+
+    console.info("Transpose parameters", this.transposeParameters);
 
     this.workQueue = new Uint32Array(
       this.workQueueSize / Uint32Array.BYTES_PER_ELEMENT
@@ -419,11 +429,17 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
   compute() {
     this.finalizeRuntimeParameters();
     const bufferTypes = [
-      ["storage", "read-only-storage", "storage", "storage"],
+      ["storage", "read-only-storage", "storage", "storage", "storage"],
       ["uniform"],
     ];
     const bindings = [
-      ["outputBuffer", "inputBuffer", "workQueue", "workUnitsComplete"],
+      [
+        "outputBuffer",
+        "inputBuffer",
+        "workQueue",
+        "workUnitsComplete",
+        "debugBuffer",
+      ],
       ["transposeParameters"],
     ];
     return [
@@ -488,11 +504,17 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
       referenceOutput[y + x * this.matrixWidthHeight] = memsrc[i];
     }
     console.info(
+      "length, matrixWidthHeight",
       memsrc.length,
       this.matrixWidthHeight,
+      "input",
       memsrc,
+      "output",
       memdest,
-      referenceOutput
+      "reference",
+      referenceOutput,
+      "debug",
+      this.getBuffer("debugBuffer").cpuBuffer
     );
 
     /* arrow function to allow use of this.type within it */
@@ -556,7 +578,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
 }
 
 const TransposeParams = {
-  inputLength: [2 ** 8] /* sqrt(inputLength) == matrix side length */,
+  inputLength: [2 ** 14] /* sqrt(inputLength) == matrix side length */,
   datatype: ["u32"],
   disableSubgroups: [false],
   workgroupCount: [1],
