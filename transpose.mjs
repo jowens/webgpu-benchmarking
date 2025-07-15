@@ -252,6 +252,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
 
     var<workgroup> wg_broadcast_workUnit: u32;
     var<workgroup> wg_broadcast_currentworkUnitsComplete: u32;
+    var<workgroup> wg_broadcast_foundWork: u32;
 
     fn performTranspose(workUnit: u32) {
       /* uses wg_matrix */
@@ -287,6 +288,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
           /* are we done? return if we are */
           if (builtinsNonuniform.lidx == 0) {
             wg_broadcast_currentworkUnitsComplete = atomicLoad(&workUnitsComplete);
+            wg_broadcast_foundWork = 0;
           }
           if (workgroupUniformLoad(&wg_broadcast_currentworkUnitsComplete) == totalWorkUnits) {
             return;
@@ -300,15 +302,20 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
               var exchangeResult =
                 atomicCompareExchangeWeak(&workQueue[readSearchLocation], tempWorkUnit, 0);
               if (exchangeResult.exchanged == true) {
+                /* found a piece of work, break out of loop */
                 wg_broadcast_workUnit = tempWorkUnit;
+                wg_broadcast_foundWork = 1;
               } else {
                 /* someone else got the work first */
               }
             }
             readSearchLocation = (readSearchLocation + 1) % workQueueLength;
           }
-          workgroupBarrier();
+          if (workgroupUniformLoad(&wg_broadcast_foundWork) == 1) {
+            break;
+          }
         }
+        workgroupBarrier();
 
         /* Insert (add work)
          * - Find an empty slot
@@ -321,6 +328,10 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
           /* not sure if there is a case where myWorkUnit == 0, but if we
            * do see that, we can just skip the insert phase */
           var myRegion = u32ToRegion(myWorkUnit, BASE_CASE_WIDTH_HEIGHT_LOG2);
+                      if (builtinsNonuniform.lidx == 0) {
+                              outputBuffer[0] = myRegion.sz;
+                              outputBuffer[1] = baseCaseWidthHeight;
+                      }
           if (myRegion.sz == baseCaseWidthHeight) {
             /* base case, actually transpose this region */
             if (builtinsNonuniform.lidx == 0) {
@@ -354,6 +365,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
                     atomicCompareExchangeWeak(&workQueue[readSearchLocation], 0, tempWorkUnit);
                   if (exchangeResult.exchanged == true) {
                     /* successfully posted work, move to next piece of work */
+                    outputBuffer[j] = newWorkUnit;
                     j = j + 1;
                   } else {
                     /* someone else got the work first */
@@ -374,7 +386,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     this.baseCaseWidthHeight = this.baseCaseWidthHeight ?? 16;
     this.baseCaseWidthHeight_log2 = Math.log2(this.baseCaseWidthHeight);
     // this.workQueueSize = this.workQueueSize ?? 2 ** 18;
-    this.workQueueSize = 4;
+    this.workQueueSize = 32;
 
     const inputLength = this.getBuffer("inputBuffer").length;
     this.matrixWidthHeight = Math.sqrt(inputLength);
@@ -544,7 +556,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
 }
 
 const TransposeParams = {
-  inputLength: [2 ** 8],
+  inputLength: [2 ** 8] /* sqrt(inputLength) == matrix side length */,
   datatype: ["u32"],
   disableSubgroups: [false],
   workgroupCount: [1],
