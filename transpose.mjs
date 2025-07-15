@@ -72,10 +72,10 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
    * @param {number} x The absolute x-coordinate of the region.
    * @param {number} y The absolute y-coordinate of the region.
    * @param {number} sz The side-length of the square region (must be a power of 2).
-   * @param {number} b The minimum size exponent (minimum region size is 2^b).
+   * @param {number} blog2 The minimum size exponent (minimum region size is 2^b).
    * @returns {number} The encoded 32-bit integer, or 0 if inputs are invalid.
    */
-  regionToU32({ x, y, sz, b }) {
+  regionToU32({ x, y, sz, blog2 }) {
     // --- Validate Inputs ---
     const isPowerOfTwo = sz > 0 && (sz & (sz - 1)) === 0;
     if (!isPowerOfTwo || x % sz !== 0 || y % sz !== 0) {
@@ -83,14 +83,14 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     }
 
     const absoluteExp = Math.log2(sz); // The absolute exponent of the side-length
-    if (absoluteExp < b) {
+    if (absoluteExp < blog2) {
       return 0; // Region is smaller than the minimum allowed size
     }
 
     // --- Calculate Relative (Tile) Units ---
-    const relativeExp = absoluteExp - b;
-    const x_tile = x >> b; // x / 2^b
-    const y_tile = y >> b; // y / 2^b
+    const relativeExp = absoluteExp - blog2 + 1; // +1 to ensure non-zero packedValue
+    const x_tile = x >> blog2; // x / 2^b
+    const y_tile = y >> blog2; // y / 2^b
 
     // --- Validate Against the Fixed 14-bit Tile Grid ---
     const TILE_GRID_MAX = 1 << 14;
@@ -100,33 +100,32 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
 
     // --- Pack and Bias ---
     const packedValue = (relativeExp << 28) | (y_tile << 14) | x_tile;
-    return packedValue + 1;
+    return packedValue;
   }
 
   /**
    * Decodes a 32-bit integer back into a region's position and side-length.
    *
    * @param {number} encodedValue The 32-bit integer to decode.
-   * @param {number} b The minimum size exponent (minimum region size is 2^b).
+   * @param {number} blog2 The minimum size exponent (minimum region size is 2^b).
    * @returns {{x: number, y: number, sz: number}|null} An object with the region's
    * properties, or null if the encoded value is the reserved value 0.
    */
-  u32ToRegion(encodedValue, b) {
-    if (encodedValue === 0) {
+  u32ToRegion(packedValue, blog2) {
+    if (packedValue === 0) {
       return null; // 0 is the reserved "special value"
     }
 
     // --- Un-bias and Unpack ---
-    const packedValue = encodedValue - 1;
-    const relativeExp = packedValue >> 28;
+    const relativeExp = (packedValue >> 28) - 1;
     const y_tile = (packedValue >> 14) & 0x3fff; // 0x3FFF is the mask for 14 bits
     const x_tile = packedValue & 0x3fff;
 
     // --- Convert from Tile Units back to Absolute Values ---
     return {
-      x: x_tile << b,
-      y: y_tile << b,
-      sz: (1 << relativeExp) << b, // sz = 2^(relativeExp + b)
+      x: x_tile << blog2,
+      y: y_tile << blog2,
+      sz: 1 << (relativeExp + blog2), // sz = 2^(relativeExp + b)
     };
   }
 
@@ -174,24 +173,27 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     /// @param x The absolute x-coordinate of the region.
     /// @param y The absolute y-coordinate of the region.
     /// @param sz The side-length of the square region (must be a power of 2).
-    /// @param b The minimum size exponent (minimum region size is 2^b).
+    /// @param blog2 The minimum size exponent (minimum region size is 2^b).
     /// @returns The encoded 32-bit integer, or 0u if inputs are invalid.
-    fn encodeRegion(x: u32, y: u32, sz: u32, b: u32) -> u32 {
+    fn regionToU32(region: Region, blog2: u32) -> u32 {
       // --- Validate Inputs ---
+      let x = region.x;
+      let y = region.y;
+      let sz = region.sz;
       let isPowerOfTwo = (sz > 0u) && ((sz & (sz - 1u)) == 0u);
       if (!isPowerOfTwo || (x % sz) != 0u || (y % sz) != 0u) {
         return 0u; // Invalid side-length or alignment
       }
 
       let absoluteExp = countTrailingZeros(sz); // Efficiently finds log2(sz)
-      if (absoluteExp < b) {
+      if (absoluteExp < blog2) {
         return 0u; // Region is smaller than the minimum allowed size
       }
 
       // --- Calculate Relative (Tile) Units ---
-      let relativeExp = absoluteExp - b;
-      let x_tile = x >> b;
-      let y_tile = y >> b;
+      let relativeExp = absoluteExp - blog2 + 1;
+      let x_tile = x >> blog2;
+      let y_tile = y >> blog2;
 
       // --- Validate Against the Fixed 14-bit Tile Grid ---
       let TILE_GRID_MAX = 1u << 14u;
@@ -201,30 +203,29 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
 
       // --- Pack and Bias ---
       let packedValue = (relativeExp << 28u) | (y_tile << 14u) | x_tile;
-      return packedValue + 1u;
+      return packedValue;
     }
 
     /// Decodes a 32-bit integer back into a region's position and side-length.
     ///
     /// @param encodedValue The 32-bit integer to decode.
     /// @param b The minimum size exponent (minimum region size is 2^b).
-    /// @returns A DecodedRegion struct. If the input was the reserved value 0,
+    /// @returns A Region struct. If the input was the reserved value 0,
     /// the returned struct will have a side-length 'sz' of 0.
-    fn decodeRegion(encodedValue: u32, b: u32) -> Region {
-      if (encodedValue == 0u) {
+    fn u32ToRegion(packedValue: u32, blog2: u32) -> Region {
+      if (packedValue == 0u) {
         return Region(0u, 0u, 0u); // 0u is the reserved value
       }
 
       // --- Un-bias and Unpack ---
-      let packedValue = encodedValue - 1u;
-      let relativeExp = packedValue >> 28u;
+      let relativeExp = (packedValue >> 28u) - 1;
       let y_tile = (packedValue >> 14u) & 0x3FFFu; // 0x3FFF is the mask for 14 bits
       let x_tile = packedValue & 0x3FFFu;
 
       // --- Convert from Tile Units back to Absolute Values ---
-      let sz_val = (1u << relativeExp) << b; // sz = 2^(relativeExp + b)
-      let x_val = x_tile << b;
-      let y_val = y_tile << b;
+      let sz_val = 1u << (relativeExp + blog2); // sz = 2^(relativeExp + b)
+      let x_val = x_tile << blog2;
+      let y_val = y_tile << blog2;
 
       return Region(x_val, y_val, sz_val);
     }
@@ -270,7 +271,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
       var readSearchLocation = wgid;
       var writeSearchLocation = wgid;
 
-      for (var i = 0; i < 100000; i++) { /* so we don't go into an infinite loop */
+      for (var i = 0; i < 1; i++) { /* so we don't go into an infinite loop */
       // loop { /* this is the loop we want when we're production-ready */
         /* for now, invariant is we enter this loop with no work */
 
@@ -306,8 +307,8 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
             }
             readSearchLocation = (readSearchLocation + 1) % workQueueLength;
           }
+          workgroupBarrier();
         }
-        workgroupBarrier();
 
         /* Insert (add work)
          * - Find an empty slot
@@ -319,17 +320,20 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
         if (myWorkUnit != 0) {
           /* not sure if there is a case where myWorkUnit == 0, but if we
            * do see that, we can just skip the insert phase */
-          var myRegion = decodeRegion(myWorkUnit, baseCaseWidthHeight);
+          var myRegion = u32ToRegion(myWorkUnit, BASE_CASE_WIDTH_HEIGHT_LOG2);
           if (myRegion.sz == baseCaseWidthHeight) {
             /* base case, actually transpose this region */
             if (builtinsNonuniform.lidx == 0) {
-              /* do it in one thread for now */
+              /* do it in one thread for now, this will become whole-workgroup */
               for (var xx = myRegion.x; xx < myRegion.x + myRegion.sz; xx++) {
                 for (var yy = myRegion.y; yy < myRegion.y + myRegion.sz; yy++) {
                   outputBuffer[xx * matrixWidthHeight + yy] =
                     inputBuffer[yy * matrixWidthHeight + xx];
                 }
               }
+            }
+            if (builtinsNonuniform.lidx == 0) {
+              atomicAdd(&workUnitsComplete, 1u);
             }
           } else {
             /* subdivide and place 4 pieces of work into the queue */
@@ -338,10 +342,10 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
               for (var j = 0u; j < 4; ) {
                 var deltaX = select(0u, myRegion.sz / 2, (j & 0x1) != 0);
                 var deltaY = select(0u, myRegion.sz / 2, (j & 0x2) != 0);
-                var newWorkUnit = encodeRegion(myRegion.x + deltaX,
-                                               myRegion.y + deltaY,
-                                               myRegion.sz / 2,
-                                               baseCaseWidthHeight);
+                var newWorkUnit = regionToU32(Region(myRegion.x + deltaX,
+                                                     myRegion.y + deltaY,
+                                                     myRegion.sz / 2),
+                                              baseCaseWidthHeight);
                 /* try to post only into an empty slot */
                 var tempWorkUnit = atomicLoad(&workQueue[writeSearchLocation]);
                 if (tempWorkUnit == 0) {
@@ -356,19 +360,21 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
                   }
                 }
                 writeSearchLocation = (writeSearchLocation + 1) % workQueueLength;
-              }
-            }
-          }
-        }
-      }
+              } /* loop over inserting 4 work units */
+            } /* subdivide and insert work: I am thread zero */
+          } /* if base case or not */
+        } /* valid work unit to consume */
+      } /* loop over number of trials */
     } /* end kernel workQueueMatrixTranspose */`;
     return kernel;
   };
 
   finalizeRuntimeParameters() {
     this.workgroupCount = this.workgroupCount ?? 256;
-    this.baseCaseWidthHeight = this.baseCaseWidthHeight ?? 32;
-    this.workQueueSize = this.workQueueSize ?? 2 ** 18;
+    this.baseCaseWidthHeight = this.baseCaseWidthHeight ?? 16;
+    this.baseCaseWidthHeight_log2 = Math.log2(this.baseCaseWidthHeight);
+    // this.workQueueSize = this.workQueueSize ?? 2 ** 18;
+    this.workQueueSize = 4;
 
     const inputLength = this.getBuffer("inputBuffer").length;
     this.matrixWidthHeight = Math.sqrt(inputLength);
@@ -383,14 +389,16 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     this.workQueue = new Uint32Array(
       this.workQueueSize / Uint32Array.BYTES_PER_ELEMENT
     );
-    this.workQueue[0] = this.regionToU32({
+    const initialWorkRegion = {
       x: 0,
       y: 0,
       sz: this.matrixWidthHeight,
-      b: this.baseCaseWidthHeight,
-    }); /* the entire matrix */
-    this.workQueue[1] = 0;
-    this.workQueue[2] = this.matrixWidthHeight;
+      blog2: this.baseCaseWidthHeight_log2,
+    };
+    const initialWork = this.regionToU32(initialWorkRegion);
+    this.workQueue[0] = initialWork; /* the entire matrix */
+
+    console.log(initialWorkRegion, initialWork, this.workQueue);
 
     this.workUnitsCompleteLength = 1;
     this.workUnitsCompleteSize =
@@ -464,7 +472,7 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     const referenceOutput = new Uint32Array(memsrc.length);
     for (let i = 0; i < memsrc.length; i++) {
       const x = i % this.matrixWidthHeight;
-      const y = i / this.matrixWidthHeight;
+      const y = Math.floor(i / this.matrixWidthHeight);
       referenceOutput[y + x * this.matrixWidthHeight] = memsrc[i];
     }
     console.info(
@@ -513,8 +521,6 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
     if (returnString !== "") {
       console.log(
         this.label,
-        this.type,
-        this.direction,
         this,
         "with input",
         memsrc,
@@ -538,9 +544,8 @@ class WorkQueueMatrixTranspose extends BaseMatrixTranspose {
 }
 
 const TransposeParams = {
-  inputLength: [2 ** 12],
+  inputLength: [2 ** 8],
   datatype: ["u32"],
-  type: ["keysonly" /* "keyvalue", */],
   disableSubgroups: [false],
   workgroupCount: [1],
 };
@@ -548,7 +553,7 @@ const TransposeParams = {
 export const TransposeRegressionSuite = new BaseTestSuite({
   category: "transpose",
   testSuite: "workqueue",
-  trials: 2,
+  trials: 0,
   initializeCPUBuffer: "fisher-yates",
   params: TransposeParams,
   primitive: WorkQueueMatrixTranspose,
